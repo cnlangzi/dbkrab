@@ -1,0 +1,39 @@
+# dbkrab configuration
+
+# MSSQL connection settings
+mssql:
+  host: localhost
+  port: 1433
+  user: sa
+  password: your_password
+  database: your_database
+
+# Tables to monitor (format: schema.table)
+tables:
+  - dbo.orders
+  - dbo.order_items
+
+# Polling interval
+polling_interval: 500ms
+
+# LSN offset storage
+offset_file: ./data/offset.json
+
+# Plugin directory (WASM files, hot-reload enabled)
+# Leave empty to disable plugin watching
+plugin: ./plugins
+
+# API server port for plugin management
+# Endpoints:
+#   GET  /api/plugins        - List plugins
+#   POST /api/plugins        - Load plugin (body: {name, path, config})
+#   GET  /api/plugins/{name} - Get plugin info
+#   DELETE /api/plugins/{name} - Unload plugin
+#   POST /api/plugins/{name}/reload - Reload plugin
+#   GET  /health            - Health check
+api_port: 9020
+
+# Sink configuration
+sink:
+  type: sqlite
+  path: ./data/cdc.db
