@@ -66,8 +66,13 @@ func (s *Sink) Write(tx *core.Transaction) error {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
-		if err := sqlTx.Rollback(); err != nil && !strings.Contains(err.Error(), "transaction has already") {
-			// Log but don't fail - rollback is best effort
+		if err := sqlTx.Rollback(); err != nil {
+			// After commit, rollback returns "transaction has already been committed"
+			// This is expected, so we ignore it. Other errors are unexpected.
+			if !strings.Contains(err.Error(), "transaction has already") && !strings.Contains(err.Error(), "already been committed") {
+				// Unexpected rollback error - could log here if needed
+				_ = err // explicitly ignore for now
+			}
 		}
 	}()
 
