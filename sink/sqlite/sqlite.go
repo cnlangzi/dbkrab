@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,9 @@ func NewSink(path string) (*Sink, error) {
 
 	// Create tables
 	if err := createTables(db); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			log.Printf("db.Close error: %v", closeErr)
+		}
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
@@ -83,7 +86,11 @@ func (s *Sink) Write(tx *core.Transaction) error {
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			log.Printf("stmt.Close error: %v", err)
+		}
+	}()
 
 	for _, change := range tx.Changes {
 		dataJSON, err := json.Marshal(change.Data)
@@ -121,7 +128,11 @@ func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("rows.Close error: %v", err)
+		}
+	}()
 
 	var results []map[string]interface{}
 	for rows.Next() {

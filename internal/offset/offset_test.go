@@ -12,7 +12,11 @@ func TestStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	path := filepath.Join(tmpDir, "offset.json")
 	store := NewStore(path)
@@ -65,7 +69,11 @@ func TestStoreGetAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	store := NewStore(filepath.Join(tmpDir, "offset.json"))
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 )
@@ -72,7 +73,11 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 	if err != nil {
 		return nil, fmt.Errorf("query CDC: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("rows.Close error: %v", err)
+		}
+	}()
 
 	// Get column names
 	columns, err := rows.Columns()

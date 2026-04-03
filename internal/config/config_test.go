@@ -12,7 +12,11 @@ func TestLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	configContent := `
 mssql:
@@ -81,7 +85,11 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	// Minimal config
 	configContent := `
