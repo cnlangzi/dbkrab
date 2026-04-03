@@ -62,7 +62,7 @@ func (tb *TransactionBuffer) Add(change Change) {
 	pending.tables[change.Table] = true
 }
 
-// GetCompleteTransactions returns transactions that are ready for delivery (timed out)
+// GetCompleteTransactions returns transactions that are ready for delivery (timed out or marked complete)
 func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
@@ -72,8 +72,8 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	var toRemove []string
 
 	for txID, pending := range tb.pending {
-		// Check if transaction has timed out
-		if now.Sub(pending.firstSeen) > tb.maxWaitTime {
+		// Check if transaction has timed out or is marked complete
+		if now.Sub(pending.firstSeen) > tb.maxWaitTime || pending.complete {
 			// Force deliver incomplete transaction
 			tx := tb.buildTransaction(pending)
 			if tx != nil {
@@ -132,10 +132,25 @@ func (tb *TransactionBuffer) cleanupLoop() {
 	for {
 		select {
 		case <-tb.cleanupTicker.C:
-			tb.GetCompleteTransactions()
+			// Just check for timeouts, don't deliver
+			// Delivery happens when GetCompleteTransactions is called
+			tb.checkTimeouts()
 		case <-tb.stopCh:
 			tb.cleanupTicker.Stop()
 			return
+		}
+	}
+}
+
+// checkTimeouts marks timed-out transactions as complete (internal use)
+func (tb *TransactionBuffer) checkTimeouts() {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	for _, pending := range tb.pending {
+		if now.Sub(pending.firstSeen) > tb.maxWaitTime {
+			pending.complete = true
 		}
 	}
 }

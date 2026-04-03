@@ -106,8 +106,22 @@ func main() {
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
 
+	// Create metrics
+	var m *metrics.Metrics
+	if cfg.Metrics.Enabled {
+		m = metrics.New()
+		// Start metrics HTTP server
+		go func() {
+			http.Handle("/metrics", promhttp.Handler())
+			log.Printf("Metrics server starting on port %d", cfg.Metrics.Port)
+			if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Metrics.Port), nil); err != nil {
+				log.Printf("Metrics server error: %v", err)
+			}
+		}()
+	}
+
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, db, sink, offsetStore)
+	poller := core.NewPoller(cfg, db, sink, offsetStore, m)
 	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
 		return pluginManager.Handle(tx)
 	}))
