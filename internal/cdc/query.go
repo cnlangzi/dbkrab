@@ -3,6 +3,7 @@ package cdc
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"regexp"
@@ -100,7 +101,20 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 
 		// Extract CDC metadata (first 4 columns)
 		lsn, _ := values[0].([]byte)
-		txID := fmt.Sprintf("%x", values[1])
+		
+		// P0 fix: Properly parse transaction_id (uniqueidentifier type)
+		// MSSQL returns __$transaction_id as []byte (16-byte GUID)
+		var txID string
+		if txBytes, ok := values[1].([]byte); ok && len(txBytes) > 0 {
+			// Format as GUID string: 8-4-4-4-12 (standard MSSQL format)
+			// Note: MSSQL GUID storage order differs from display order
+			// We use hex encoding for consistent cross-table comparison
+			txID = formatMSSQLGUID(txBytes)
+		} else {
+			// Fallback for unexpected types
+			txID = fmt.Sprintf("%v", values[1])
+		}
+		
 		op, _ := values[2].(int32)
 		// updateMask is values[3], we skip it for now
 
@@ -157,4 +171,27 @@ func ParseTableName(fullName string) (schema, table string) {
 // CaptureInstanceName returns the CDC capture instance name
 func CaptureInstanceName(schema, table string) string {
 	return schema + "_" + table
+}
+
+// formatMSSQLGUID formats a 16-byte MSSQL GUID to standard string format
+// MSSQL uniqueidentifier is stored with mixed byte order:
+// - First 4 bytes: little-endian
+// - Next 2 bytes: little-endian
+// - Next 2 bytes: little-endian
+// - Last 8 bytes: big-endian
+// This function returns the canonical GUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+func formatMSSQLGUID(b []byte) string {
+	if len(b) != 16 {
+		// Not a valid GUID, return hex encoding
+		return hex.EncodeToString(b)
+	}
+	
+	// MSSQL GUID byte order: 3-2-1-0, 5-4, 7-6, 8-9-10-11-12-13-14-15
+	// (first 3 groups are little-endian, last group is big-endian)
+	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x%02x%02x",
+		b[3], b[2], b[1], b[0], // First 4 bytes (LE)
+		b[5], b[4],             // Next 2 bytes (LE)
+		b[7], b[6],             // Next 2 bytes (LE)
+		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15], // Last 8 bytes (BE)
+	)
 }
