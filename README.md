@@ -172,20 +172,74 @@ type Sink interface {
     Write(tx *Transaction) error
 }
 
-// Built-in sinks
-type KafkaSink struct {
-    Broker string
-    Topic  string
-}
-
-type FileSink struct {
-    Path string
-}
-
-type DBSink struct {
-    DSN string
+// Built-in sink: SQLite
+type SQLiteSink struct {
+    Path string  // e.g., ./data/cdc.db
 }
 ```
+
+## Plugin System (WASM Runtime)
+
+dbkrab supports custom business logic via **WASM plugins**. Plugins run in an isolated WebAssembly runtime, providing:
+
+- **Security**: Plugins cannot access host system directly
+- **Sandbox**: Each plugin runs in its own WASM instance
+- **Hot Reload**: Update plugin logic without restarting dbkrab
+
+### Plugin Interface
+
+```go
+// Plugin must export: Init, Handle, Close
+type Plugin interface {
+    Init(config string) error
+    Handle(tx *Transaction) error
+    Close() error
+}
+```
+
+### Usage
+
+```go
+dbkrab.New().
+    Tables([]string{"orders", "order_items"}).
+    DB(db).
+    Plugin("./plugins/my_handler.wasm").
+    Sink(dbkrab.SQLiteSink{Path: "./data/cdc.db"}).
+    Start()
+```
+
+### Writing a Plugin
+
+Plugins are compiled from Go to WASM:
+
+```go
+// plugins/my_handler/main.go
+package main
+
+import (
+    "github.com/cnlangzi/dbkrab/plugin"
+)
+
+//export Init
+func Init(config string) int {
+    return 0
+}
+
+//export Handle
+func Handle(ptr *byte, len int) int {
+    // Handle transaction data
+    return 0
+}
+
+//export Close
+func Close() int {
+    return 0
+}
+
+func main() {}
+```
+
+Build: `tinygo build -target wasi -o my_handler.wasm my_handler.go`
 
 ## MSSQL CDC Setup
 
