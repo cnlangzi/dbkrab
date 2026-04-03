@@ -1,0 +1,131 @@
+# dbkrab Makefile
+#
+# Usage:
+#   make build     - Build the binary
+#   make test      - Run tests
+#   make run       - Run with example config
+#   make clean     - Clean build artifacts
+#   make lint      - Run linters
+#   make coverage  - Generate test coverage report
+#   make install   - Install binary to /usr/local/bin
+
+BINARY_NAME := dbkrab
+BUILD_DIR := bin
+CMD_DIR := cmd/dbkrab
+GO := go
+GOFLAGS := -v
+
+# Version info
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+
+.PHONY: all build test run clean lint coverage install help
+
+all: build
+
+## build: Build the binary
+build:
+	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
+
+## test: Run all tests
+test:
+	@echo "Running tests..."
+	$(GO) test -v -race ./...
+
+## test-short: Run short tests
+test-short:
+	@echo "Running short tests..."
+	$(GO) test -v -short ./...
+
+## coverage: Generate test coverage report
+coverage:
+	@echo "Generating coverage report..."
+	$(GO) test -v -race -coverprofile=coverage.out ./...
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+## run: Run with example config
+run: build
+	@echo "Running $(BINARY_NAME)..."
+	./$(BUILD_DIR)/$(BINARY_NAME) -config config.yml
+
+## run-example: Run with example config
+run-example: build
+	@echo "Running with example config..."
+	./$(BUILD_DIR)/$(BINARY_NAME) -config config.example.yml
+
+## clean: Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	@rm -rf $(BUILD_DIR)
+	@rm -f coverage.out coverage.html
+	@rm -rf data/*.db data/*.json
+	$(GO) clean
+
+## lint: Run golangci-lint
+lint:
+	@echo "Running linters..."
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		$(GO) vet ./...; \
+	fi
+
+## vet: Run go vet
+vet:
+	@echo "Running go vet..."
+	$(GO) vet ./...
+
+## fmt: Format code
+fmt:
+	@echo "Formatting code..."
+	$(GO) fmt ./...
+
+## mod: Download and tidy dependencies
+mod:
+	@echo "Tidy modules..."
+	$(GO) mod tidy
+	$(GO) mod download
+
+## install: Install binary to /usr/local/bin
+install: build
+	@echo "Installing to /usr/local/bin..."
+	sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/
+	@echo "Installed: /usr/local/bin/$(BINARY_NAME)"
+
+## uninstall: Remove binary from /usr/local/bin
+uninstall:
+	@echo "Uninstalling..."
+	sudo rm -f /usr/local/bin/$(BINARY_NAME)
+	@echo "Uninstalled."
+
+## docker-build: Build Docker image
+docker-build:
+	@echo "Building Docker image..."
+	docker build -t dbkrab:$(VERSION) .
+
+## docker-run: Run Docker container
+docker-run:
+	@echo "Running Docker container..."
+	docker run -it --rm dbkrab:$(VERSION)
+
+## version: Show version
+version:
+	@echo "Version: $(VERSION)"
+	@echo "Build Time: $(BUILD_TIME)"
+
+## help: Show this help
+help:
+	@echo "dbkrab - Lightweight MSSQL CDC in Go"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@sed -n 's/^## //p' $(MAKEFILE_LIST) | column -t -s ':'
+
+.DEFAULT_GOAL := help
