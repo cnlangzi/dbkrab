@@ -47,6 +47,11 @@ metrics:
   enabled: true
   port: 9021  # Metrics endpoint: http://localhost:9021/metrics
 
+# Transaction buffer for cross-table integrity
+transaction_buffer:
+  enabled: false  # Set to true for multi-table transaction integrity
+  max_wait_time: 30s  # Max time to wait for incomplete transactions
+
 # CDC gap protection (prevents data loss from CDC cleanup)
 cdc_protection:
   enabled: true
