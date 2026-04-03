@@ -16,7 +16,7 @@ dbkrab is a pure Go implementation of MSSQL CDC (Change Data Capture). It reads 
 - **Transaction Boundary**: Changes within the same transaction are grouped together
 - **Batch + Stream (Initial Load + CDC)**: Full consistency via SNAPSHOT isolation
 - **Multi-table Monitoring**: Concurrent polling with cross-table transaction correlation
-- **Plugin Architecture**: Customizable Handler (business logic) and Sink (storage)
+- **Dynamic Plugin System**: Load/unload WASM plugins without restarting
 - **Minimal Dependencies**: Pure Go + MSSQL driver only
 
 ## Architecture
@@ -29,188 +29,53 @@ MSSQL CDC Tables
 │           dbkrab Core                   │
 │  • Minimum LSN Synchronization          │
 │  • Transaction Grouping                 │
-│  • Handler Callback                     │
+│  • Dynamic Plugin Handler               │
 └─────────────────────────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────────┐
-│      Handler (Business Layer)           │
-│  • Filter: Filter unwanted data         │
-│  • Transform: Data transformation       │
-│  • Enrich: Data enrichment              │
-│  • Custom business logic                │
+│     Plugin Manager (Hot-Reload)         │
+│  • Load/unload WASM plugins             │
+│  • Watch directory for new plugins      │
+│  • REST API for plugin management       │
 └─────────────────────────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────────┐
 │      Sink (Storage Layer)               │
-│  • KafkaSink → Kafka                    │
-│  • FileSink → File                      │
-│  • DBSink → Target Database             │
-│  • ElasticSearchSink                   │
-│  • Custom storage                       │
+│  • SQLite (built-in)                    │
 └─────────────────────────────────────────┘
 ```
 
-## Core Concepts
+## Dynamic Plugin System
 
-### 1. LSN (Log Sequence Number)
+Plugins can be **loaded, unloaded, and reloaded at runtime** without restarting dbkrab.
 
-MSSQL CDC uses LSN to track change positions. Each change record has a `__$start_lsn` field that uniquely identifies its position in the transaction log.
+### Plugin Management API
 
-### 2. Minimum LSN Synchronization
+```bash
+# List loaded plugins
+curl http://localhost:9020/api/plugins
 
-To ensure cross-table transactions are captured in the same batch:
+# Load a new plugin
+curl -X POST http://localhost:9020/api/plugins \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-plugin", "path": "./plugins/my-handler.wasm", "config": ""}'
 
-1. Query all monitored tables to get their current max LSN
-2. Use the **minimum** LSN as the batch anchor
-3. Poll all tables up to this minimum LSN
-4. Group by `__$transaction_id` for delivery
+# Reload a plugin (hot-reload)
+curl -X POST http://localhost:9020/api/plugins/my-plugin/reload
 
-This ensures all tables have data up to the same point.
-
-### 3. Transaction Boundary
-
-Same transaction across multiple tables shares the same `__$transaction_id`:
-
-```sql
--- Transaction 12345:
---   INSERT into orders
---   INSERT into order_items
---
--- CDC tables record:
---   cdc.dbo_orders_CT:      __$transaction_id = 12345
---   cdc.dbo_order_items_CT: __$transaction_id = 12345
+# Unload a plugin
+curl -X DELETE http://localhost:9020/api/plugins/my-plugin
 ```
 
-dbkrab groups changes by `__$transaction_id` and delivers them together.
+### Auto-Load from Directory
 
-### 4. Batch + Stream (Initial Load + CDC)
-
-**Initial Load** (full snapshot):
-```sql
--- 1. Get current LSN
-DECLARE @fromLSN binary(10) = sys.fn_cdc_get_min_lsn('dbo_orders');
-
--- 2. Read in SNAPSHOT transaction (consistent view)
-SET TRANSACTION ISOLATION LEVEL SNAPSHOT;
-BEGIN TRANSACTION;
-SELECT * FROM orders;
-COMMIT;
-
--- 3. CDC continues from this LSN
-```
-
-**CDC Stream**: Poll CDC tables from the LSN where initial load ended.
-
-## Usage
-
-### Quick Start
-
-```go
-package main
-
-import (
-    "database/sql"
-    _ "github.com/denisenkom/go-mssqldb"
-    "github.com/cnlangzi/dbkrab"
-)
-
-func main() {
-    db, _ := sql.Open("mssql", "server=localhost;user id=cdc_user;password=pwd;database=mydb")
-
-    dbkrab.New().
-        Tables([]string{"orders", "order_items"}).
-        DB(db).
-        Handler(MyHandler{}).
-        Sink(dbkrab.KafkaSink{Broker: "localhost:9092", Topic: "cdc-events"}).
-        Start()
-}
-
-type MyHandler struct{}
-
-func (h *MyHandler) Handle(tx *dbkrab.Transaction) error {
-    // Process transaction
-    return nil
-}
-```
-
-### Configuration
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| Tables | []string | required | Tables to monitor |
-| DB | *sql.DB | required | MSSQL connection |
-| Interval | time.Duration | 500ms | Polling interval |
-| Handler | Handler | nil | Business logic handler |
-| Sink | Sink | nil | Storage sink |
-| OffsetFile | string | ./data/offset.json | LSN persistence path |
-
-## Handler Interface
-
-```go
-type Handler interface {
-    Handle(tx *Transaction) error
-}
-
-type Transaction struct {
-    TransactionID string
-    Changes       []Change
-}
-
-type Change struct {
-    Table   string
-    Op      Operation // 1=DELETE, 2=INSERT, 3=UPDATE(before), 4=UPDATE(after)
-    Data    map[string]interface{}
-}
-```
-
-## Sink Interface
-
-```go
-type Sink interface {
-    Write(tx *Transaction) error
-}
-
-// Built-in sink: SQLite
-type SQLiteSink struct {
-    Path string  // e.g., ./data/cdc.db
-}
-```
-
-## Plugin System (WASM Runtime)
-
-dbkrab supports custom business logic via **WASM plugins**. Plugins run in an isolated WebAssembly runtime, providing:
-
-- **Security**: Plugins cannot access host system directly
-- **Sandbox**: Each plugin runs in its own WASM instance
-- **Hot Reload**: Update plugin logic without restarting dbkrab
-
-### Plugin Interface
-
-```go
-// Plugin must export: Init, Handle, Close
-type Plugin interface {
-    Init(config string) error
-    Handle(tx *Transaction) error
-    Close() error
-}
-```
-
-### Usage
-
-```go
-dbkrab.New().
-    Tables([]string{"orders", "order_items"}).
-    DB(db).
-    Plugin("./plugins/my_handler.wasm").
-    Sink(dbkrab.SQLiteSink{Path: "./data/cdc.db"}).
-    Start()
-```
+Configure `plugin: ./plugins` in `config.yml`. dbkrab will:
+1. Scan the directory on startup and load all `.wasm` files
+2. Watch for new/modified `.wasm` files and auto-load/reload
 
 ### Writing a Plugin
-
-Plugins are compiled from Go to WASM:
 
 ```go
 // plugins/my_handler/main.go
@@ -241,6 +106,50 @@ func main() {}
 
 Build: `tinygo build -target wasi -o my_handler.wasm my_handler.go`
 
+## Usage
+
+### Quick Start
+
+```bash
+# Copy example config
+cp config.example.yml config.yml
+
+# Edit config with your MSSQL credentials
+vim config.yml
+
+# Run
+go run ./cmd/dbkrab
+```
+
+### Configuration
+
+```yaml
+# config.yml
+mssql:
+  host: localhost
+  port: 1433
+  user: sa
+  password: your_password
+  database: your_database
+
+tables:
+  - dbo.orders
+  - dbo.order_items
+
+polling_interval: 500ms
+offset_file: ./data/offset.json
+
+# Plugin directory (hot-reload enabled)
+plugin: ./plugins
+
+# API server for plugin management
+api_port: 9020
+
+sink:
+  type: sqlite
+  path: ./data/cdc.db
+```
+
 ## MSSQL CDC Setup
 
 ```sql
@@ -253,36 +162,16 @@ EXEC sp_cdc_enable_table
     @source_schema = 'dbo',
     @source_name   = 'your_table',
     @role_name     = NULL;
-
--- Verify CDC is enabled
-SELECT name, is_cdc_enabled FROM sys.tables;
 ```
 
 ## Change Operations
 
-| __$operation | Meaning | Description |
-|---------------|---------|--------------|
-| 1 | DELETE | Record deleted |
-| 2 | INSERT | Record inserted |
-| 3 | UPDATE (before) | Record before update |
-| 4 | UPDATE (after) | Record after update |
-
-## Performance
-
-- **CDC Query Overhead**: Low - reads from CDC tables, not main tables
-- **Polling Interval**: 500ms default (configurable)
-- **Multi-table**: Concurrent polling with transaction correlation
-- **LSN Persistence**: File-based, survives restarts
-
-## Comparison
-
-| Feature | dbkrab | Debezium Server | Debezium Connect |
-|---------|--------|-----------------|------------------|
-| Dependencies | None | Java | Java + Kafka |
-| API Control | No | No | Yes |
-| Latency | ~500ms | Real-time | Real-time |
-| Transaction Grouping | ✅ | ✅ | ✅ |
-| Weight | Light | Medium | Heavy |
+| __$operation | Meaning |
+|---------------|---------|
+| 1 | DELETE |
+| 2 | INSERT |
+| 3 | UPDATE (before) |
+| 4 | UPDATE (after) |
 
 ## License
 

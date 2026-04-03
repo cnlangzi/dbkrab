@@ -10,15 +10,18 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
 var (
 	configPath = flag.String("config", "config.yml", "Path to config file")
-	version    = "dev"
+	apiPort    = flag.Int("api-port", 9020, "API server port")
+	version    = "1.0.0"
 )
 
 func main() {
@@ -65,8 +68,14 @@ func main() {
 		log.Fatalf("Unknown sink type: %s", cfg.Sink.Type)
 	}
 
-	// Create poller
+	// Create plugin manager
+	pluginManager := plugin.NewManager()
+
+	// Create poller with dynamic plugin support
 	poller := core.NewPoller(cfg, db, sink)
+	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
+		return pluginManager.Handle(tx)
+	}))
 
 	// Handle shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,11 +84,30 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Start API server
+	apiServer := api.NewServer(pluginManager, *apiPort)
+	go func() {
+		log.Printf("API server starting on port %d", *apiPort)
+		if err := apiServer.Start(); err != nil {
+			log.Printf("API server stopped: %v", err)
+		}
+	}()
+
+	// Watch plugin directory if configured
+	if cfg.Plugin != "" {
+		go func() {
+			if err := pluginManager.Watch(ctx, cfg.Plugin); err != nil {
+				log.Printf("Plugin watch error: %v", err)
+			}
+		}()
+	}
+
 	go func() {
 		<-sigCh
 		log.Println("Shutting down...")
 		cancel()
 		poller.Stop()
+		apiServer.Stop()
 	}()
 
 	// Start polling
