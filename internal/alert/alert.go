@@ -203,6 +203,10 @@ func (m *AlertManager) sendFeishu(url string, alert Alert) error {
 		}
 	}()
 
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("feishu webhook returned status %d", resp.StatusCode)
+	}
+
 	return nil
 }
 

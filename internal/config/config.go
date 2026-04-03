@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/alert"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,33 +34,19 @@ type SinkConfig struct {
 
 // CDCProtectionConfig contains CDC gap protection settings
 type CDCProtectionConfig struct {
-	Enabled           bool          `yaml:"enabled"`
-	CheckInterval     string        `yaml:"check_interval"`
-	WarningLagBytes   int64         `yaml:"warning_lag_bytes"`
-	CriticalLagBytes  int64         `yaml:"critical_lag_bytes"`
-	WarningLagDuration string       `yaml:"warning_lag_duration"`
-	CriticalLagDuration string      `yaml:"critical_lag_duration"`
-	Recovery          RecoveryConfig `yaml:"recovery"`
-	Alert             AlertConfig   `yaml:"alert"`
+	Enabled           bool                 `yaml:"enabled"`
+	CheckInterval     string               `yaml:"check_interval"`
+	WarningLagBytes   int64                `yaml:"warning_lag_bytes"`
+	CriticalLagBytes  int64                `yaml:"critical_lag_bytes"`
+	WarningLagDuration string              `yaml:"warning_lag_duration"`
+	CriticalLagDuration string             `yaml:"critical_lag_duration"`
+	Recovery          RecoveryConfig       `yaml:"recovery"`
+	Alert             alert.AlertConfig    `yaml:"alert"`
 }
 
 // RecoveryConfig contains recovery strategy settings
 type RecoveryConfig struct {
 	Strategy string `yaml:"strategy"` // snapshot | timestamp | manual
-}
-
-// AlertConfig contains alert notification settings
-type AlertConfig struct {
-	Enabled  bool            `yaml:"enabled"`
-	WebhookURL string        `yaml:"webhook_url,omitempty"`
-	Channels []AlertChannel `yaml:"channels"`
-}
-
-// AlertChannel represents a notification channel
-type AlertChannel struct {
-	Type       string   `yaml:"type"` // webhook, feishu, email
-	URL        string   `yaml:"url,omitempty"`
-	Recipients []string `yaml:"recipients,omitempty"`
 }
 
 func Load(path string) (*Config, error) {

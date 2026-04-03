@@ -156,31 +156,25 @@ func CompareLSN(a, b []byte) int {
 	return 0
 }
 
-// LSNBytesDiff calculates the approximate byte difference between two LSNs
-// This is a rough estimate based on LSN structure
+// LSNBytesDiff calculates the approximate byte difference between two LSNs.
+// CDC LSNs are 10 bytes; we interpret them as a single big-endian integer and
+// return the absolute difference between those integer values.
 func LSNBytesDiff(a, b []byte) int64 {
-	if len(a) == 0 || len(b) == 0 {
+	const lsnLen = 10
+
+	// Require full 10-byte LSNs; anything else is treated as "no information".
+	if len(a) != lsnLen || len(b) != lsnLen {
 		return 0
 	}
 
-	// LSN in SQL Server CDC is structured as:
-	// - VLF sequence number (4 bytes)
-	// - Log block offset (4 bytes)
-	// - Slot number (2 bytes)
-	// For estimation, we treat it as a big-endian integer
 	diff := int64(0)
 	multiplier := int64(1)
 
-	// Compare from right to left
-	for i := len(a) - 1; i >= 0 && i >= len(b)-10; i-- {
-		ai := int64(0)
-		bi := int64(0)
-		if i >= 0 && i < len(a) {
-			ai = int64(a[i])
-		}
-		if i >= 0 && i < len(b) {
-			bi = int64(b[i])
-		}
+	// Walk from least-significant byte (right) to most-significant (left)
+	// using a fixed 10-byte, big-endian layout.
+	for i := lsnLen - 1; i >= 0; i-- {
+		ai := int64(a[i])
+		bi := int64(b[i])
 		diff += (ai - bi) * multiplier
 		multiplier *= 256
 	}

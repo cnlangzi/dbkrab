@@ -28,6 +28,8 @@ type Poller struct {
 	stopOnce      sync.Once
 	paused        bool
 	pausedMu      sync.RWMutex
+	lastGapCheck  time.Time
+	gapCheckMu    sync.RWMutex
 }
 
 // Sink interface for storing changes
@@ -71,22 +73,7 @@ func NewPoller(cfg *config.Config, db *sql.DB, sink Sink) *Poller {
 	// Initialize gap detector if CDC protection is enabled
 	if cfg.CDCProtection.Enabled {
 		poller.gapDetector = cdc.NewGapDetector(db)
-		
-		// Convert config.AlertChannel to alert.AlertChannel
-		alertChannels := make([]alert.AlertChannel, len(cfg.CDCProtection.Alert.Channels))
-		for i, ch := range cfg.CDCProtection.Alert.Channels {
-			alertChannels[i] = alert.AlertChannel{
-				Type:       ch.Type,
-				URL:        ch.URL,
-				Recipients: ch.Recipients,
-			}
-		}
-		
-		poller.alertManager = alert.NewAlertManager(alert.AlertConfig{
-			Enabled:    cfg.CDCProtection.Alert.Enabled,
-			WebhookURL: cfg.CDCProtection.Alert.WebhookURL,
-			Channels:   alertChannels,
-		})
+		poller.alertManager = alert.NewAlertManager(cfg.CDCProtection.Alert)
 		log.Println("CDC gap protection enabled")
 	}
 
@@ -153,11 +140,13 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// CDC gap detection (before polling)
-	if p.gapDetector != nil {
+	// Respect check_interval configuration
+	if p.gapDetector != nil && p.shouldCheckGaps() {
 		if err := p.checkGaps(ctx); err != nil {
 			log.Printf("Gap detection error: %v", err)
 			// Gap detection errors don't block polling, but are logged
 		}
+		p.recordGapCheck()
 	}
 
 	// Poll all tables and collect results (without updating offsets)
@@ -345,8 +334,18 @@ func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 func (p *Poller) checkGaps(ctx context.Context) error {
 	warningLagBytes := p.cfg.CDCProtection.WarningLagBytes
 	criticalLagBytes := p.cfg.CDCProtection.CriticalLagBytes
-	warningLagDuration, _ := p.cfg.WarningLagDuration()
-	criticalLagDuration, _ := p.cfg.CriticalLagDuration()
+	
+	// Parse duration thresholds with explicit error handling
+	warningLagDuration, err := p.cfg.WarningLagDuration()
+	if err != nil {
+		log.Printf("Warning: invalid warning_lag_duration config, using default 1h: %v", err)
+		warningLagDuration = 1 * time.Hour
+	}
+	criticalLagDuration, err := p.cfg.CriticalLagDuration()
+	if err != nil {
+		log.Printf("Warning: invalid critical_lag_duration config, using default 6h: %v", err)
+		criticalLagDuration = 6 * time.Hour
+	}
 
 	for _, table := range p.cfg.Tables {
 		schema, tableName := cdc.ParseTableName(table)
@@ -410,4 +409,35 @@ func (p *Poller) isPaused() bool {
 	p.pausedMu.RLock()
 	defer p.pausedMu.RUnlock()
 	return p.paused
+}
+
+// shouldCheckGaps returns true if enough time has passed since last gap check
+func (p *Poller) shouldCheckGaps() bool {
+	interval, err := p.cfg.CDCCheckInterval()
+	if err != nil {
+		// Invalid config, check immediately
+		return true
+	}
+	if interval <= 0 {
+		// Disabled or invalid, check immediately
+		return true
+	}
+
+	p.gapCheckMu.RLock()
+	lastCheck := p.lastGapCheck
+	p.gapCheckMu.RUnlock()
+
+	return time.Since(lastCheck) >= interval
+}
+
+// recordGapCheck records the current time as the last gap check time
+func (p *Poller) recordGapCheck() {
+	p.gapCheckMu.Lock()
+	p.lastGapCheck = time.Now()
+	p.gapCheckMu.Unlock()
+}
+
+// CDCCheckInterval returns the CDC gap check interval from config
+func (p *Poller) CDCCheckInterval() (time.Duration, error) {
+	return p.cfg.CDCCheckInterval()
 }
