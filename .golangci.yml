@@ -1,8 +1,4 @@
-run:
-  timeout: 5m
-
 linters:
-  disable-all: false
   enable:
     - errcheck
     - gosimple
@@ -11,8 +7,6 @@ linters:
     - staticcheck
     - unused
 
-linters-settings:
-  staticcheck:
-    checks:
-      - all
-      - "-SA4010"  # Disable SA4010 check
+issues:
+  exclude:
+    - 'SA4010: this result of append is never used'
