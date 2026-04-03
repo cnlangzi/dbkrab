@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/alert"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/offset"
@@ -15,14 +16,18 @@ import (
 
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
-	cfg      *config.Config
-	db       *sql.DB
-	querier  *cdc.Querier
-	offsets  *offset.Store
-	sink     Sink
-	handler  Handler
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	cfg           *config.Config
+	db            *sql.DB
+	querier       *cdc.Querier
+	gapDetector   *cdc.GapDetector
+	alertManager  *alert.AlertManager
+	offsets       *offset.Store
+	sink          Sink
+	handler       Handler
+	stopCh        chan struct{}
+	stopOnce      sync.Once
+	paused        bool
+	pausedMu      sync.RWMutex
 }
 
 // Sink interface for storing changes
@@ -54,14 +59,38 @@ type tablePollResult struct {
 
 // NewPoller creates a new poller
 func NewPoller(cfg *config.Config, db *sql.DB, sink Sink) *Poller {
-	return &Poller{
-		cfg:     cfg,
-		db:      db,
-		querier: cdc.NewQuerier(db),
-		offsets: offset.NewStore(cfg.Offset),
-		sink:    sink,
-		stopCh:  make(chan struct{}),
+	poller := &Poller{
+		cfg:      cfg,
+		db:       db,
+		querier:  cdc.NewQuerier(db),
+		offsets:  offset.NewStore(cfg.Offset),
+		sink:     sink,
+		stopCh:   make(chan struct{}),
 	}
+
+	// Initialize gap detector if CDC protection is enabled
+	if cfg.CDCProtection.Enabled {
+		poller.gapDetector = cdc.NewGapDetector(db)
+		
+		// Convert config.AlertChannel to alert.AlertChannel
+		alertChannels := make([]alert.AlertChannel, len(cfg.CDCProtection.Alert.Channels))
+		for i, ch := range cfg.CDCProtection.Alert.Channels {
+			alertChannels[i] = alert.AlertChannel{
+				Type:       ch.Type,
+				URL:        ch.URL,
+				Recipients: ch.Recipients,
+			}
+		}
+		
+		poller.alertManager = alert.NewAlertManager(alert.AlertConfig{
+			Enabled:    cfg.CDCProtection.Alert.Enabled,
+			WebhookURL: cfg.CDCProtection.Alert.WebhookURL,
+			Channels:   alertChannels,
+		})
+		log.Println("CDC gap protection enabled")
+	}
+
+	return poller
 }
 
 // SetHandler sets a custom handler
@@ -111,10 +140,24 @@ func (p *Poller) Stop() {
 // P0 fix: offset is only updated after sink successfully writes
 // P0 fix: multi-table sync via min LSN checkpoint
 func (p *Poller) poll(ctx context.Context) error {
+	// Check if paused due to gap detection
+	if p.isPaused() {
+		log.Println("Poller is paused due to CDC gap detection")
+		return nil
+	}
+
 	// Get max LSN from MSSQL
 	maxLSN, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
 		return fmt.Errorf("get max LSN: %w", err)
+	}
+
+	// CDC gap detection (before polling)
+	if p.gapDetector != nil {
+		if err := p.checkGaps(ctx); err != nil {
+			log.Printf("Gap detection error: %v", err)
+			// Gap detection errors don't block polling, but are logged
+		}
 	}
 
 	// Poll all tables and collect results (without updating offsets)
@@ -296,4 +339,83 @@ func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 	}
 
 	return result
+}
+
+// checkGaps checks for CDC gaps across all monitored tables
+func (p *Poller) checkGaps(ctx context.Context) error {
+	warningLagBytes := p.cfg.CDCProtection.WarningLagBytes
+	criticalLagBytes := p.cfg.CDCProtection.CriticalLagBytes
+	warningLagDuration, _ := p.cfg.WarningLagDuration()
+	criticalLagDuration, _ := p.cfg.CriticalLagDuration()
+
+	for _, table := range p.cfg.Tables {
+		schema, tableName := cdc.ParseTableName(table)
+		captureInstance := cdc.CaptureInstanceName(schema, tableName)
+
+		// Get current LSN from offset
+		currentLSN := []byte{}
+		if stored, ok := p.offsets.Get(table); ok {
+			parsed, err := ParseLSN(stored.LSN)
+			if err == nil && len(parsed) > 0 {
+				currentLSN = []byte(parsed)
+			}
+		}
+
+		// Check for gaps
+		gap, err := p.gapDetector.CheckGap(ctx, captureInstance, currentLSN)
+		if err != nil {
+			log.Printf("Gap check error for %s: %v", table, err)
+			continue
+		}
+
+		// Handle gap based on severity
+		if gap.HasGap {
+			// Data loss detected - emergency
+			log.Printf("[EMERGENCY] CDC data loss detected for %s: missing LSN %X to %X",
+				table, gap.MissingLSNRange.Start, gap.MissingLSNRange.End)
+			p.alertManager.SendEmergency("CDC Data Loss Detected", gap)
+			p.pause()
+			return fmt.Errorf("CDC data loss for %s", table)
+		}
+
+		if gap.IsGapCritical(criticalLagBytes, criticalLagDuration) {
+			// Critical lag
+			log.Printf("[CRITICAL] CDC lag critical for %s: %d bytes, %v",
+				table, gap.LagBytes, gap.LagDuration)
+			p.alertManager.SendCritical("CDC Lag Critical", gap)
+			// Continue polling but alert
+		}
+
+		if gap.IsGapWarning(warningLagBytes, warningLagDuration) {
+			// Warning lag
+			log.Printf("[WARNING] CDC lag warning for %s: %d bytes, %v",
+				table, gap.LagBytes, gap.LagDuration)
+			p.alertManager.SendWarning("CDC Lag Warning", gap)
+		}
+	}
+
+	return nil
+}
+
+// pause pauses the poller
+func (p *Poller) pause() {
+	p.pausedMu.Lock()
+	defer p.pausedMu.Unlock()
+	p.paused = true
+	log.Println("Poller paused")
+}
+
+// resume resumes the poller
+func (p *Poller) resume() {
+	p.pausedMu.Lock()
+	defer p.pausedMu.Unlock()
+	p.paused = false
+	log.Println("Poller resumed")
+}
+
+// isPaused returns true if the poller is paused
+func (p *Poller) isPaused() bool {
+	p.pausedMu.RLock()
+	defer p.pausedMu.RUnlock()
+	return p.paused
 }
