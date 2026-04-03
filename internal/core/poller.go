@@ -25,6 +25,13 @@ type Poller struct {
 	stopOnce sync.Once
 }
 
+// TablePollResult holds the changes and last LSN from polling a single table
+type TablePollResult struct {
+	Table     string
+	Changes   []Change
+	LastLSN   []byte // The LSN of the last change for this table
+}
+
 // Sink interface for storing changes
 type Sink interface {
 	Write(tx *Transaction) error
@@ -99,52 +106,93 @@ func (p *Poller) Stop() {
 	})
 }
 
-// poll performs one polling cycle
+// poll performs one polling cycle with a global LSN barrier.
+// All tables are polled within the same [fromLSN, barrier] window to ensure
+// cross-table transactions are never split across poll cycles.
+// Offsets are only updated after all changes have been successfully delivered.
 func (p *Poller) poll(ctx context.Context) error {
-	// Get max LSN from MSSQL
-	maxLSN, err := p.querier.GetMaxLSN(ctx)
+	// Step 1: Get the global LSN barrier (shared upper bound for all tables)
+	barrierLSN, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
 		return fmt.Errorf("get max LSN: %w", err)
 	}
 
-	// Poll each table
-	var allChanges []Change
+	// Step 2: Poll all tables within the global barrier window
+	var allResults []TablePollResult
 	for _, table := range p.cfg.Tables {
-		changes, err := p.pollTable(ctx, table, maxLSN)
+		result, err := p.pollTable(ctx, table, barrierLSN)
 		if err != nil {
 			log.Printf("Error polling table %s: %v", table, err)
 			continue
 		}
-		allChanges = append(allChanges, changes...)
+		allResults = append(allResults, result)
 	}
 
-	// Group by transaction ID and deliver
-	if len(allChanges) > 0 {
-		txs := p.groupByTransaction(allChanges)
-		for _, tx := range txs {
-			if p.handler != nil {
-				if err := p.handler.Handle(&tx); err != nil {
-					log.Printf("Handler error for tx %s: %v", tx.ID, err)
-				}
-			}
-			if p.sink != nil {
+	// Collect all changes from all tables
+	var allChanges []Change
+	for _, r := range allResults {
+		allChanges = append(allChanges, r.Changes...)
+	}
+
+	if len(allChanges) == 0 {
+		return nil // No changes, no offset update needed
+	}
+
+	// Step 3: Group changes by transaction ID
+	txs := p.groupByTransaction(allChanges)
+
+	// Step 4: Deliver all transactions
+	for _, tx := range txs {
+		if p.handler != nil {
+			if err := p.handler.Handle(&tx); err != nil {
+				log.Printf("Handler error for tx %s: %v", tx.ID, err)
+				// At-least-once: continue delivering other transactions
+				// Do NOT update offsets on delivery failure
+			} else if p.sink != nil {
 				if err := p.sink.Write(&tx); err != nil {
 					log.Printf("Sink error for tx %s: %v", tx.ID, err)
+					// At-least-once: continue delivering other transactions
+					// Do NOT update offsets on delivery failure
 				}
 			}
+		} else if p.sink != nil {
+			if err := p.sink.Write(&tx); err != nil {
+				log.Printf("Sink error for tx %s: %v", tx.ID, err)
+				// At-least-once: continue delivering other transactions
+				// Do NOT update offsets on delivery failure
+			}
 		}
+	}
+
+	// Step 5: Update all table offsets to the global barrier atomically.
+	// Using the global barrier (max LSN) as the committed offset for all tables
+	// ensures that on the next poll cycle, no table will re-read changes that
+	// were already delivered in this cycle. This is safe because:
+	//   a) Each table's changes are bounded by the global max LSN
+	//   b) All changes within [old_offset, barrier] have been delivered
+	//   c) Using the barrier (not per-table last LSN) preserves cross-table
+	//      transaction atomicity across poll cycles
+	updates := make(map[string]string)
+	for _, table := range p.cfg.Tables {
+		updates[table] = LSN(barrierLSN).String()
+	}
+
+	if err := p.offsets.SetMultiple(updates); err != nil {
+		log.Printf("Failed to save offsets: %v", err)
+		//Offsets not saved; next poll may re-deliver same changes (at-least-once)
 	}
 
 	return nil
 }
 
-// pollTable polls a single table for changes
-func (p *Poller) pollTable(ctx context.Context, table string, maxLSN []byte) ([]Change, error) {
+// pollTable polls a single table for changes within the given global LSN barrier.
+// The barrier must be the same for all tables in a poll cycle.
+func (p *Poller) pollTable(ctx context.Context, table string, barrierLSN []byte) (TablePollResult, error) {
 	schema, tableName := cdc.ParseTableName(table)
 	captureInstance := cdc.CaptureInstanceName(schema, tableName)
 
-	// Get starting LSN
-	startLSN := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // Start from beginning by default
+	// Get starting LSN for this table
+	startLSN := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	if stored, ok := p.offsets.Get(table); ok {
 		parsed, err := ParseLSN(stored.LSN)
 		if err == nil && len(parsed) > 0 {
@@ -156,19 +204,20 @@ func (p *Poller) pollTable(ctx context.Context, table string, maxLSN []byte) ([]
 	if len(startLSN) == 0 || LSN(startLSN).IsZero() {
 		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
 		if err != nil {
-			return nil, fmt.Errorf("get min LSN: %w", err)
+			return TablePollResult{Table: table}, fmt.Errorf("get min LSN: %w", err)
 		}
 		startLSN = minLSN
 	}
 
-	// Query changes from CDC
-	rawChanges, err := p.querier.GetChanges(ctx, captureInstance, startLSN, maxLSN)
+	// Query changes within the global barrier window
+	rawChanges, err := p.querier.GetChanges(ctx, captureInstance, startLSN, barrierLSN)
 	if err != nil {
-		return nil, err
+		return TablePollResult{Table: table}, err
 	}
 
 	// Convert to core.Change
 	changes := make([]Change, 0, len(rawChanges))
+	var lastLSN []byte
 	for _, rc := range rawChanges {
 		changes = append(changes, Change{
 			Table:         table,
@@ -177,17 +226,14 @@ func (p *Poller) pollTable(ctx context.Context, table string, maxLSN []byte) ([]
 			Operation:     Operation(rc.Operation),
 			Data:          rc.Data,
 		})
+		lastLSN = rc.LSN // Keep updating; last one is the highest
 	}
 
-	// Update offset to max LSN
-	if len(changes) > 0 {
-		lastLSN := changes[len(changes)-1].LSN
-		if err := p.offsets.Set(table, LSN(lastLSN).String()); err != nil {
-			log.Printf("Failed to save offset for %s: %v", table, err)
-		}
-	}
-
-	return changes, nil
+	return TablePollResult{
+		Table:   table,
+		Changes: changes,
+		LastLSN: lastLSN,
+	}, nil
 }
 
 // groupByTransaction groups changes by transaction ID

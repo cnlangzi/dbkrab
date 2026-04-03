@@ -77,7 +77,8 @@ func (s *Store) Get(table string) (Offset, bool) {
 	return offset, ok
 }
 
-// Set updates the LSN for a table
+// Set updates the LSN for a table and persists immediately.
+// For batch updates across multiple tables, use SetMultiple instead.
 func (s *Store) Set(table string, lsn string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,7 +88,24 @@ func (s *Store) Set(table string, lsn string) error {
 		UpdatedAt: time.Now(),
 	}
 
-	// Auto-save (caller already holds lock, use saveWithoutLock)
+	return s.saveWithoutLock()
+}
+
+// SetMultiple updates multiple table offsets in memory and persists once.
+// This is the correct way to update offsets for all tables after a poll cycle
+// with a global LSN barrier. All updates are atomic (all-or-nothing on disk).
+func (s *Store) SetMultiple(updates map[string]string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for table, lsn := range updates {
+		s.offsets[table] = Offset{
+			LSN:       lsn,
+			UpdatedAt: now,
+		}
+	}
+
 	return s.saveWithoutLock()
 }
 

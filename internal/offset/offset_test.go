@@ -116,3 +116,85 @@ func TestStoreGetAll(t *testing.T) {
 		t.Errorf("table2 LSN = %v, want 05060708 (should be unchanged)", offset2.LSN)
 	}
 }
+
+func TestStoreSetMultiple(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "dbkrab-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
+
+	path := filepath.Join(tmpDir, "offset.json")
+	store := NewStore(path)
+
+	// SetMultiple: update 3 tables at once with same barrier LSN
+	updates := map[string]string{
+		"dbo.orders":     "0a0b0c0d",
+		"dbo.order_items": "0a0b0c0d",
+		"dbo.customers":  "0a0b0c0d",
+	}
+	if err := store.SetMultiple(updates); err != nil {
+		t.Fatalf("SetMultiple() error = %v", err)
+	}
+
+	// Verify all persisted
+	for table, expectedLSN := range updates {
+		offset, ok := store.Get(table)
+		if !ok {
+			t.Errorf("Expected to find offset for %s", table)
+			continue
+		}
+		if offset.LSN != expectedLSN {
+			t.Errorf("%s LSN = %v, want %v", table, offset.LSN, expectedLSN)
+		}
+	}
+
+	// Verify file persistence: reload and check
+	store2 := NewStore(path)
+	if err := store2.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for table, expectedLSN := range updates {
+		offset, ok := store2.Get(table)
+		if !ok {
+			t.Errorf("After reload: offset for %s not found", table)
+			continue
+		}
+		if offset.LSN != expectedLSN {
+			t.Errorf("After reload: %s LSN = %v, want %v", table, offset.LSN, expectedLSN)
+		}
+	}
+
+	// Verify UpdatedAt is not zero after SetMultiple
+	for _, table := range []string{"dbo.orders", "dbo.order_items", "dbo.customers"} {
+		offset, _ := store.Get(table)
+		if offset.UpdatedAt.IsZero() {
+			t.Errorf("%s UpdatedAt is zero after SetMultiple", table)
+		}
+	}
+
+	// Verify SetMultiple only writes once (no partial state)
+	// Write 3 tables, then overwrite with 2 tables - all 5 should be in file
+	updates2 := map[string]string{
+		"dbo.orders":     "deadbeef",
+		"dbo.order_items": "deadbeef",
+	}
+	if err := store.SetMultiple(updates2); err != nil {
+		t.Fatalf("SetMultiple() second call error = %v", err)
+	}
+
+	// Verify first 3 tables still exist (not wiped by second SetMultiple)
+	store3 := NewStore(path)
+	store3.Load()
+	if _, ok := store3.Get("dbo.customers"); !ok {
+		t.Error("dbo.customers should still exist after partial SetMultiple update")
+	}
+	customersOffset, _ := store3.Get("dbo.customers")
+	if customersOffset.LSN != "0a0b0c0d" {
+		t.Error("dbo.customers LSN should be unchanged after partial update")
+	}
+}
