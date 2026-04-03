@@ -180,6 +180,18 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// All transactions successfully written - now update offsets
 	// P0 fix: Multi-table sync - use min LSN across all tables as global checkpoint
+	// P0 fix (review): Only advance offsets for tables that were successfully polled
+	// Failed poll tables keep their previous checkpoint to prevent data loss
+	
+	// Build set of successfully polled tables (including those with no changes)
+	// Tables with no changes still need their offset updated to avoid re-polling empty range
+	successfulTables := make(map[string]bool)
+	for _, r := range results {
+		if r.err == nil {
+			successfulTables[r.table] = true
+		}
+	}
+	
 	if len(validResults) > 0 {
 		// Find minimum lastLSN across all tables that had changes
 		minLSN := validResults[0].lastLSN
@@ -189,15 +201,25 @@ func (p *Poller) poll(ctx context.Context) error {
 			}
 		}
 
-		// All tables advance to min LSN (global checkpoint)
-		// This ensures cross-table transactions are fully processed before advancing
-		for _, table := range p.cfg.Tables {
+		// Only advance offsets for successfully polled tables
+		// Failed poll tables keep their previous checkpoint
+		for table := range successfulTables {
 			if err := p.offsets.Set(table, minLSN.String()); err != nil {
 				log.Printf("Failed to save offset for %s: %v", table, err)
 			}
 		}
 		
-		log.Printf("Advanced global checkpoint to LSN %s across %d tables", minLSN.String(), len(p.cfg.Tables))
+		log.Printf("Advanced global checkpoint to LSN %s across %d successfully polled tables", minLSN.String(), len(successfulTables))
+	} else if len(successfulTables) > 0 {
+		// No changes found, but some tables were successfully polled
+		// Advance their offsets to maxLSN to avoid re-polling empty range
+		maxLSNKey := LSN(maxLSN)
+		for table := range successfulTables {
+			if err := p.offsets.Set(table, maxLSNKey.String()); err != nil {
+				log.Printf("Failed to save offset for %s: %v", table, err)
+			}
+		}
+		log.Printf("Advanced offset to LSN %s for %d tables (no changes found)", maxLSNKey.String(), len(successfulTables))
 	}
 
 	return nil
