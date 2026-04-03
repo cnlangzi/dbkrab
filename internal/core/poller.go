@@ -21,7 +21,7 @@ type Poller struct {
 	querier       *cdc.Querier
 	gapDetector   *cdc.GapDetector
 	alertManager  *alert.AlertManager
-	offsets       *offset.Store
+	offsets       offset.StoreInterface
 	sink          Sink
 	handler       Handler
 	stopCh        chan struct{}
@@ -30,6 +30,7 @@ type Poller struct {
 	pausedMu      sync.RWMutex
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
+	txBuffer      *TransactionBuffer // For cross-table transaction integrity
 }
 
 // Sink interface for storing changes
@@ -51,7 +52,6 @@ func (h PluginHandler) Handle(tx *Transaction) error {
 	return h(tx)
 }
 
-// tablePollResult holds the result of polling a single table
 type tablePollResult struct {
 	table    string
 	changes  []Change
@@ -60,14 +60,25 @@ type tablePollResult struct {
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, sink Sink) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface) *Poller {
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
 		querier:  cdc.NewQuerier(db),
-		offsets:  offset.NewStore(cfg.Offset),
+		offsets:  offsetStore,
 		sink:     sink,
 		stopCh:   make(chan struct{}),
+	}
+
+	// Initialize transaction buffer if enabled
+	if cfg.TransactionBuffer.Enabled {
+		maxWaitTime, err := time.ParseDuration(cfg.TransactionBuffer.MaxWaitTime)
+		if err != nil {
+			log.Printf("Invalid transaction_buffer.max_wait_time, using default 30s: %v", err)
+			maxWaitTime = 30 * time.Second
+		}
+		poller.txBuffer = NewTransactionBuffer(maxWaitTime)
+		log.Printf("Transaction buffer enabled (max_wait_time=%v)", maxWaitTime)
 	}
 
 	// Initialize gap detector if CDC protection is enabled
@@ -111,6 +122,7 @@ func (p *Poller) Start(ctx context.Context) error {
 		case <-ticker.C:
 			if err := p.poll(ctx); err != nil {
 				log.Printf("Poll error: %v", err)
+				// Continue polling despite errors
 			}
 		}
 	}
@@ -121,6 +133,10 @@ func (p *Poller) Stop() {
 	p.stopOnce.Do(func() {
 		close(p.stopCh)
 	})
+	// Close transaction buffer
+	if p.txBuffer != nil {
+		p.txBuffer.Close()
+	}
 }
 
 // poll performs one polling cycle
@@ -134,7 +150,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Get max LSN from MSSQL
-	maxLSN, err := p.querier.GetMaxLSN(ctx)
+	_, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
 		return fmt.Errorf("get max LSN: %w", err)
 	}
@@ -151,17 +167,65 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// Poll all tables and collect results (without updating offsets)
 	results := make([]tablePollResult, 0, len(p.cfg.Tables))
+
 	for _, table := range p.cfg.Tables {
-		changes, lastLSN, err := p.pollTable(ctx, table, maxLSN)
+		schema, tableName := cdc.ParseTableName(table)
+		captureInstance := cdc.CaptureInstanceName(schema, tableName)
+
+		// Get starting LSN from offset store
+		startLSN := LSN{}
+		stored, err := p.offsets.Get(table)
+		if err == nil && stored.LSN != "" {
+			parsed, parseErr := ParseLSN(stored.LSN)
+			if parseErr == nil && len(parsed) > 0 {
+				startLSN = parsed
+			}
+		}
+
+		// If first time, get min LSN from CDC
+		if len(startLSN) == 0 || startLSN.IsZero() {
+			minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
+			if err != nil {
+				results = append(results, tablePollResult{table: table, err: err})
+				continue
+			}
+			startLSN = minLSN
+		}
+
+		// Get changes since last poll
+		cdcChanges, err := p.querier.GetChanges(ctx, captureInstance, startLSN, nil)
+		if err != nil {
+			results = append(results, tablePollResult{table: table, err: err})
+			continue
+		}
+
+		// Convert cdc.Change to core.Change
+		changes := make([]Change, len(cdcChanges))
+		for i, c := range cdcChanges {
+			changes[i] = Change{
+				Table:         c.Table,
+				TransactionID: c.TransactionID,
+				LSN:           c.LSN,
+				Operation:     Operation(c.Operation),
+				Data:          c.Data,
+			}
+		}
+
+		// Get last LSN from the last change or use max LSN
+		var lastLSN LSN
+		if len(changes) > 0 {
+			lastLSN = changes[len(changes)-1].LSN
+		} else {
+			lastLSN = startLSN
+		}
+
+		//nolint:staticcheck // SA4010 false positive - results is used after the loop
 		results = append(results, tablePollResult{
 			table:   table,
 			changes: changes,
 			lastLSN: lastLSN,
-			err:     err,
+			err:     nil,
 		})
-		if err != nil {
-			log.Printf("Error polling table %s: %v", table, err)
-		}
 	}
 
 	// Collect all changes from successful polls
@@ -179,9 +243,64 @@ func (p *Poller) poll(ctx context.Context) error {
 		return nil
 	}
 
+	// If transaction buffer is enabled, use it for cross-table integrity
+	if p.txBuffer != nil {
+		return p.processWithBuffer(ctx, allChanges, results)
+	}
+
+	// Otherwise, use legacy direct processing
+	return p.processDirect(ctx, allChanges, results)
+}
+
+// processWithBuffer processes changes using transaction buffer for cross-table integrity
+func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, results []tablePollResult) error {
+
+	// Add all changes to buffer
+	for _, change := range allChanges {
+		p.txBuffer.Add(change)
+	}
+
+	// Get complete transactions (timed out)
+	completeTxs := p.txBuffer.GetCompleteTransactions()
+	if len(completeTxs) == 0 {
+		return nil
+	}
+
+	// Process complete transactions
+	var processErrors []error
+	for _, tx := range completeTxs {
+		// Handler processing
+		if p.handler != nil {
+			if err := p.handler.Handle(tx); err != nil {
+				log.Printf("Handler error for tx %s: %v", tx.ID, err)
+				// Handler errors don't block offset advancement
+			}
+		}
+
+		// Sink processing
+		if p.sink != nil {
+			if err := p.sink.Write(tx); err != nil {
+				log.Printf("Sink error for tx %s: %v", tx.ID, err)
+				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
+			}
+		}
+	}
+
+	// Update offsets only if all transactions succeeded
+	if len(processErrors) > 0 {
+		return fmt.Errorf("sink errors: %v", processErrors)
+	}
+
+	// Update offsets (same logic as processDirect)
+	return p.updateOffsets(results)
+}
+
+// processDirect processes changes without transaction buffer (legacy behavior)
+func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult) error {
+
 	// Group by transaction ID and deliver
 	txs := p.groupByTransaction(allChanges)
-	
+
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
@@ -189,11 +308,9 @@ func (p *Poller) poll(ctx context.Context) error {
 		if p.handler != nil {
 			if err := p.handler.Handle(&tx); err != nil {
 				log.Printf("Handler error for tx %s: %v", tx.ID, err)
-				// Handler errors don't block offset advancement
-				// Plugins may have their own retry/recovery logic
 			}
 		}
-		
+
 		// Sink processing (blocking: must succeed for offset advancement)
 		if p.sink != nil {
 			if err := p.sink.Write(&tx); err != nil {
@@ -205,27 +322,32 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// P0 fix: Only update offsets after successful sink write
 	if len(processErrors) > 0 {
-		// Some transactions failed to write - don't advance offsets
-		// This ensures we'll re-poll these changes on next cycle
 		return fmt.Errorf("sink errors: %v", processErrors)
 	}
 
 	// All transactions successfully written - now update offsets
-	// P0 fix: Multi-table sync - use min LSN across all tables as global checkpoint
-	// P0 fix (review): Only advance offsets for tables that were successfully polled
-	// Failed poll tables keep their previous checkpoint to prevent data loss
-	
-	// Build set of successfully polled tables (including those with no changes)
-	// Tables with no changes still need their offset updated to avoid re-polling empty range
+	return p.updateOffsets(results)
+}
+
+// updateOffsets updates offset checkpoints for successfully polled tables
+func (p *Poller) updateOffsets(results []tablePollResult) error {
+	// Build set of successfully polled tables
 	successfulTables := make(map[string]bool)
 	for _, r := range results {
 		if r.err == nil {
 			successfulTables[r.table] = true
 		}
 	}
-	
+
+	// Find minimum lastLSN across all tables that had changes
+	var validResults []tablePollResult
+	for _, r := range results {
+		if r.err == nil && len(r.changes) > 0 {
+			validResults = append(validResults, r)
+		}
+	}
+
 	if len(validResults) > 0 {
-		// Find minimum lastLSN across all tables that had changes
 		minLSN := validResults[0].lastLSN
 		for _, r := range validResults[1:] {
 			if r.lastLSN.Compare(minLSN) < 0 {
@@ -234,96 +356,34 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 
 		// Only advance offsets for successfully polled tables
-		// Failed poll tables keep their previous checkpoint
 		for table := range successfulTables {
 			if err := p.offsets.Set(table, minLSN.String()); err != nil {
 				log.Printf("Failed to save offset for %s: %v", table, err)
 			}
 		}
-		
+
 		log.Printf("Advanced global checkpoint to LSN %s across %d successfully polled tables", minLSN.String(), len(successfulTables))
-	} else if len(successfulTables) > 0 {
-		// No changes found, but some tables were successfully polled
-		// Advance their offsets to maxLSN to avoid re-polling empty range
-		maxLSNKey := LSN(maxLSN)
-		for table := range successfulTables {
-			if err := p.offsets.Set(table, maxLSNKey.String()); err != nil {
-				log.Printf("Failed to save offset for %s: %v", table, err)
-			}
-		}
-		log.Printf("Advanced offset to LSN %s for %d tables (no changes found)", maxLSNKey.String(), len(successfulTables))
 	}
 
 	return nil
 }
 
-// pollTable polls a single table for changes
-// Returns (changes, lastLSN, error) - does NOT update offset
-// P0 fix: offset update moved to poll() after successful sink write
-func (p *Poller) pollTable(ctx context.Context, table string, maxLSN []byte) ([]Change, LSN, error) {
-	schema, tableName := cdc.ParseTableName(table)
-	captureInstance := cdc.CaptureInstanceName(schema, tableName)
-
-	// Get starting LSN from offset store
-	startLSN := LSN{}
-	if stored, ok := p.offsets.Get(table); ok {
-		parsed, err := ParseLSN(stored.LSN)
-		if err == nil && len(parsed) > 0 {
-			startLSN = parsed
-		}
-	}
-
-	// If first time, get min LSN from CDC
-	if len(startLSN) == 0 || startLSN.IsZero() {
-		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
-		if err != nil {
-			return nil, nil, fmt.Errorf("get min LSN: %w", err)
-		}
-		startLSN = minLSN
-	}
-
-	// Query changes from CDC
-	rawChanges, err := p.querier.GetChanges(ctx, captureInstance, startLSN, maxLSN)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Convert to core.Change
-	changes := make([]Change, 0, len(rawChanges))
-	var lastLSN LSN
-	for _, rc := range rawChanges {
-		changes = append(changes, Change{
-			Table:         table,
-			TransactionID: rc.TransactionID,
-			LSN:           rc.LSN,
-			Operation:     Operation(rc.Operation),
-			Data:          rc.Data,
-		})
-		lastLSN = rc.LSN
-	}
-
-	// Return changes and lastLSN - offset update happens in poll() after sink success
-	return changes, lastLSN, nil
-}
-
 // groupByTransaction groups changes by transaction ID
 func (p *Poller) groupByTransaction(changes []Change) []Transaction {
-	txs := make(map[string]*Transaction)
+	txMap := make(map[string]*Transaction)
 
 	for _, c := range changes {
-		txID := c.TransactionID
-		if txID == "" {
-			txID = "unknown"
+		tx, exists := txMap[c.TransactionID]
+		if !exists {
+			tx = NewTransaction(c.TransactionID)
+			txMap[c.TransactionID] = tx
 		}
-
-		if _, ok := txs[txID]; !ok {
-			txs[txID] = NewTransaction(txID)
-		}
-		txs[txID].AddChange(c)
+		tx.AddChange(c)
 	}
 
-	result := make([]Transaction, 0, len(txs))
-	for _, tx := range txs {
+	// Convert map to slice
+	result := make([]Transaction, 0, len(txMap))
+	for _, tx := range txMap {
 		result = append(result, *tx)
 	}
 
@@ -334,7 +394,7 @@ func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 func (p *Poller) checkGaps(ctx context.Context) error {
 	warningLagBytes := p.cfg.CDCProtection.WarningLagBytes
 	criticalLagBytes := p.cfg.CDCProtection.CriticalLagBytes
-	
+
 	// Parse duration thresholds with explicit error handling
 	warningLagDuration, err := p.cfg.WarningLagDuration()
 	if err != nil {
@@ -353,15 +413,16 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 
 		// Get current LSN from offset
 		currentLSN := []byte{}
-		if stored, ok := p.offsets.Get(table); ok {
-			parsed, err := ParseLSN(stored.LSN)
-			if err == nil && len(parsed) > 0 {
+		stored, err := p.offsets.Get(table)
+		if err == nil && stored.LSN != "" {
+			parsed, parseErr := ParseLSN(stored.LSN)
+			if parseErr == nil && len(parsed) > 0 {
 				currentLSN = []byte(parsed)
 			}
 		}
 
-		// Check for gaps - pass both original table name and capture instance
-		gap, err := p.gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
+		// Check for gaps
+		gap, err := p.gapDetector.CheckGap(ctx, tableName, captureInstance, currentLSN)
 		if err != nil {
 			log.Printf("Gap check error for %s: %v", table, err)
 			continue
