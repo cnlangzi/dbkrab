@@ -30,6 +30,7 @@ type Poller struct {
 	pausedMu      sync.RWMutex
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
+	txBuffer      *TransactionBuffer // For cross-table transaction integrity
 }
 
 // Sink interface for storing changes
@@ -68,6 +69,17 @@ func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.Sto
 		offsets:  offsetStore,
 		sink:     sink,
 		stopCh:   make(chan struct{}),
+	}
+
+	// Initialize transaction buffer if enabled
+	if cfg.TransactionBuffer.Enabled {
+		maxWaitTime, err := time.ParseDuration(cfg.TransactionBuffer.MaxWaitTime)
+		if err != nil {
+			log.Printf("Invalid transaction_buffer.max_wait_time, using default 30s: %v", err)
+			maxWaitTime = 30 * time.Second
+		}
+		poller.txBuffer = NewTransactionBuffer(maxWaitTime)
+		log.Printf("Transaction buffer enabled (max_wait_time=%v)", maxWaitTime)
 	}
 
 	// Initialize gap detector if CDC protection is enabled
@@ -121,6 +133,10 @@ func (p *Poller) Stop() {
 	p.stopOnce.Do(func() {
 		close(p.stopCh)
 	})
+	// Close transaction buffer
+	if p.txBuffer != nil {
+		p.txBuffer.Close()
+	}
 }
 
 // poll performs one polling cycle

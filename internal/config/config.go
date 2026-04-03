@@ -9,15 +9,16 @@ import (
 )
 
 type Config struct {
-	MSSQL         MSSQLConfig    `yaml:"mssql"`
-	Tables        []string       `yaml:"tables"`
-	Interval      string         `yaml:"polling_interval"`
-	Offset        OffsetConfig   `yaml:"offset"`
-	Plugin        string         `yaml:"plugin"`
-	APIPort       int            `yaml:"api_port"`
-	Sink          SinkConfig     `yaml:"sink"`
-	CDCProtection CDCProtectionConfig `yaml:"cdc_protection"`
-	Metrics       MetricsConfig  `yaml:"metrics"`
+	MSSQL              MSSQLConfig            `yaml:"mssql"`
+	Tables             []string               `yaml:"tables"`
+	Interval           string                 `yaml:"polling_interval"`
+	Offset             OffsetConfig           `yaml:"offset"`
+	Plugin             string                 `yaml:"plugin"`
+	APIPort            int                    `yaml:"api_port"`
+	Sink               SinkConfig             `yaml:"sink"`
+	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
+	Metrics            MetricsConfig          `yaml:"metrics"`
+	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
 type MSSQLConfig struct {
@@ -56,6 +57,12 @@ type CDCProtectionConfig struct {
 	CriticalLagDuration string             `yaml:"critical_lag_duration"`
 	Recovery          RecoveryConfig       `yaml:"recovery"`
 	Alert             alert.AlertConfig    `yaml:"alert"`
+}
+
+// TransactionBufferConfig contains transaction buffer settings
+type TransactionBufferConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	MaxWaitTime string `yaml:"max_wait_time"` // e.g., "30s"
 }
 
 // RecoveryConfig contains recovery strategy settings
