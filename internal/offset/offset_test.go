@@ -70,8 +70,12 @@ func TestStoreGetAll(t *testing.T) {
 	store := NewStore(filepath.Join(tmpDir, "offset.json"))
 
 	// Set multiple offsets
-	store.Set("table1", "01020304")
-	store.Set("table2", "05060708")
+	if err := store.Set("table1", "01020304"); err != nil {
+		t.Fatalf("Set table1 failed: %v", err)
+	}
+	if err := store.Set("table2", "05060708"); err != nil {
+		t.Fatalf("Set table2 failed: %v", err)
+	}
 
 	// GetAll
 	all := store.GetAll()

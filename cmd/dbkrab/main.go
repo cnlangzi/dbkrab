@@ -107,7 +107,9 @@ func main() {
 		log.Println("Shutting down...")
 		cancel()
 		poller.Stop()
-		apiServer.Stop()
+		if err := apiServer.Stop(); err != nil {
+			log.Printf("API server stop error: %v", err)
+		}
 	}()
 
 	// Start polling
