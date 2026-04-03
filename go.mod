@@ -1,6 +1,6 @@
 module github.com/cnlangzi/dbkrab
 
-go 1.24
+go 1.26
 
 require (
 	github.com/denisenkom/go-mssqldb v0.12.3
