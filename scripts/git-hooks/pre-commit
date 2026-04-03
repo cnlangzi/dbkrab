@@ -20,10 +20,37 @@ PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
+# Ensure golangci-lint is installed
+GOLANGCI_LINT="golangci-lint"
+if command -v golangci-lint &> /dev/null; then
+    echo "✅ golangci-lint found: $(golangci-lint --version | head -1)"
+else
+    # Try PATH that includes go/bin
+    if [ -x "$HOME/go/bin/golangci-lint" ]; then
+        export PATH="$PATH:$HOME/go/bin"
+        echo "✅ golangci-lint found in ~/go/bin"
+    elif [ -x "$(go env GOPATH)/bin/golangci-lint" ]; then
+        export PATH="$PATH:$(go env GOPATH)/bin"
+        echo "✅ golangci-lint found in GOPATH/bin"
+    else
+        echo "⚠️  golangci-lint not found, installing..."
+        GOPROXY=https://goproxy.cn,direct go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2
+        export PATH="$PATH:$(go env GOPATH)/bin"
+        echo "✅ golangci-lint installed: $(golangci-lint --version | head -1)"
+    fi
+fi
+
 # Run vet
 echo "📝 Running go vet..."
 if ! make vet; then
     echo "❌ go vet failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run linter
+echo "🔎 Running golangci-lint..."
+if ! golangci-lint run ./... --timeout=5m; then
+    echo "❌ Lint failed. Fix issues or run: golangci-lint run --fix"
     exit 1
 fi
 
@@ -32,18 +59,6 @@ echo "🧪 Running tests..."
 if ! make test-short; then
     echo "❌ Tests failed. Please fix the issues before committing."
     exit 1
-fi
-
-# Run linter (if available, skip if not installed)
-echo "🔎 Checking for linter..."
-if command -v golangci-lint &> /dev/null; then
-    echo "Running golangci-lint..."
-    if ! make lint 2>/dev/null; then
-        echo "⚠️  Lint failed. Fix issues or run: golangci-lint run --fix"
-        exit 1
-    fi
-else
-    echo "⏭️  golangci-lint not installed, skipping lint check"
 fi
 
 echo "✅ All pre-commit checks passed!"

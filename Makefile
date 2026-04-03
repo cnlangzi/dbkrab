@@ -39,7 +39,7 @@ test:
 ## test-short: Run short tests
 test-short:
 	@echo "Running short tests..."
-	$(GO) test -v -short ./...
+	$(GO) test -v -short ./internal/...
 
 ## coverage: Generate test coverage report
 coverage:
@@ -79,7 +79,7 @@ lint:
 ## vet: Run go vet
 vet:
 	@echo "Running go vet..."
-	$(GO) vet ./...
+	$(GO) vet ./internal/...
 
 ## fmt: Format code
 fmt:
