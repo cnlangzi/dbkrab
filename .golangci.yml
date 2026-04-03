@@ -9,7 +9,8 @@ linters:
     - staticcheck
     - unused
 
-issues:
-  exclude:
-    - pattern: "SA4010: this result of append is never used"
-      linter: staticcheck
+linters-settings:
+  staticcheck:
+    checks:
+      - all
+      - "-SA4010"
