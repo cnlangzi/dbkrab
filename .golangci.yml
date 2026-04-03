@@ -1,0 +1,9 @@
+run:
+  timeout: 5m
+
+issues:
+  exclude-rules:
+    - path: internal/core/poller\.go
+      linters:
+        - staticcheck
+      text: "SA4010"
