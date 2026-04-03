@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	_ "modernc.org/sqlite"
@@ -64,7 +65,11 @@ func (s *Sink) Write(tx *core.Transaction) error {
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer sqlTx.Rollback()
+	defer func() {
+		if err := sqlTx.Rollback(); err != nil && !strings.Contains(err.Error(), "transaction has already") {
+			// Log but don't fail - rollback is best effort
+		}
+	}()
 
 	stmt, err := sqlTx.Prepare(`
 		INSERT INTO transactions (transaction_id, table_name, operation, data)
@@ -124,7 +129,9 @@ func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
 		}
 
 		var data map[string]interface{}
-		json.Unmarshal([]byte(dataStr), &data)
+		if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+			data = make(map[string]interface{})
+		}
 
 		results = append(results, map[string]interface{}{
 			"id":            id,

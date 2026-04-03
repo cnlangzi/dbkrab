@@ -134,11 +134,15 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 // handleHealth handles health check
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	if _, err := w.Write([]byte("OK")); err != nil {
+		http.Error(w, "write error", http.StatusInternalServerError)
+	}
 }
 
 // writeJSON writes JSON response
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }

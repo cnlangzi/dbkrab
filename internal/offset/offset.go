@@ -50,6 +50,11 @@ func (s *Store) Save() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	return s.saveWithoutLock()
+}
+
+// saveWithoutLock writes offsets to file without acquiring lock (caller must hold lock)
+func (s *Store) saveWithoutLock() error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
 		return err
@@ -82,8 +87,8 @@ func (s *Store) Set(table string, lsn string) error {
 		UpdatedAt: time.Now(),
 	}
 
-	// Auto-save
-	return s.Save()
+	// Auto-save (caller already holds lock, use saveWithoutLock)
+	return s.saveWithoutLock()
 }
 
 // GetAll returns all offsets
