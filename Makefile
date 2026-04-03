@@ -114,6 +114,24 @@ docker-run:
 	@echo "Running Docker container..."
 	docker run -it --rm dbkrab:$(VERSION)
 
+## hooks-install: Install git hooks
+hooks-install:
+	@echo "Installing git hooks..."
+	@mkdir -p .git/hooks
+	@cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "✅ Git hooks installed"
+
+## hooks-uninstall: Remove git hooks
+hooks-uninstall:
+	@echo "Removing git hooks..."
+	@rm -f .git/hooks/pre-commit
+	@echo "✅ Git hooks removed"
+
+## pre-commit: Run pre-commit checks (for manual testing)
+pre-commit: vet test-short
+	@echo "✅ Pre-commit checks passed"
+
 ## version: Show version
 version:
 	@echo "Version: $(VERSION)"
