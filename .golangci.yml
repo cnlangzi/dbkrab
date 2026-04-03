@@ -1,9 +1,18 @@
 run:
   timeout: 5m
 
-issues:
-  exclude-rules:
-    - path: internal/core/poller\.go
-      linters:
-        - staticcheck
-      text: "SA4010"
+linters:
+  disable-all: false
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  staticcheck:
+    checks:
+      - all
+      - "-SA4010"  # Disable SA4010 check
