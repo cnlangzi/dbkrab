@@ -16,7 +16,9 @@ func setupTestDLQ(t *testing.T) (*DLQ, func()) {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 
 	dlq, err := New(tmpPath)
 	if err != nil {
@@ -25,8 +27,8 @@ func setupTestDLQ(t *testing.T) (*DLQ, func()) {
 	}
 
 	cleanup := func() {
-		dlq.CloseAndDB()
-		os.Remove(tmpPath)
+		_ = dlq.CloseAndDB()
+		_ = os.Remove(tmpPath)
 	}
 
 	return dlq, cleanup
@@ -63,14 +65,16 @@ func TestDLQ_New(t *testing.T) {
 			t.Fatalf("Failed to create temp file: %v", err)
 		}
 		tmpPath := tmpFile.Name()
-		tmpFile.Close()
-		defer os.Remove(tmpPath)
+		if err := tmpFile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+		defer func() { _ = os.Remove(tmpPath) }()
 
 		dlq, err := New(tmpPath)
 		if err != nil {
 			t.Fatalf("Failed to create DLQ: %v", err)
 		}
-		defer dlq.CloseAndDB()
+		defer func() { _ = dlq.CloseAndDB() }()
 
 		if dlq == nil {
 			t.Fatal("Expected DLQ instance")
@@ -94,21 +98,23 @@ func TestDLQ_NewWithDB(t *testing.T) {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	db, err := New(tmpPath)
 	if err != nil {
 		t.Fatalf("Failed to create initial DLQ: %v", err)
 	}
-	defer db.CloseAndDB()
+	defer func() { _ = db.CloseAndDB() }()
 
 	// Create another DLQ with the same DB
 	dlq2, err := NewWithDB(db.db)
 	if err != nil {
 		t.Fatalf("Failed to create DLQ with existing DB: %v", err)
 	}
-	defer dlq2.Close()
+	defer func() { _ = dlq2.Close() }()
 
 	if dlq2 == nil {
 		t.Fatal("Expected DLQ instance")
@@ -138,7 +144,7 @@ func TestDLQ_Write(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
 
-		dlq.Close()
+		_ = dlq.Close()
 
 		entry := createTestEntry(t, "0x1A2B3C", "users", "INSERT")
 		err := dlq.Write(entry)
@@ -232,7 +238,7 @@ func TestDLQ_List(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		_, err := dlq.List("")
 		if err != ErrDLQClosed {
@@ -277,7 +283,7 @@ func TestDLQ_Get(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		_, err := dlq.Get(1)
 		if err != ErrDLQClosed {
@@ -366,7 +372,7 @@ func TestDLQ_Replay(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		handler := func(e *DLQEntry) error { return nil }
 		err := dlq.Replay(context.Background(), 1, handler)
@@ -416,7 +422,7 @@ func TestDLQ_Ignore(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		err := dlq.Ignore(1, "test note")
 		if err != ErrDLQClosed {
@@ -459,7 +465,7 @@ func TestDLQ_Delete(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		err := dlq.Delete(1)
 		if err != ErrDLQClosed {
@@ -519,7 +525,7 @@ func TestDLQ_Stats(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		_, err := dlq.Stats()
 		if err != ErrDLQClosed {
@@ -571,7 +577,7 @@ func TestDLQ_Count(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		_, err := dlq.Count(StatusPending)
 		if err != ErrDLQClosed {
@@ -617,7 +623,7 @@ func TestDLQ_CountAll(t *testing.T) {
 	t.Run("closed dlq", func(t *testing.T) {
 		dlq, cleanup := setupTestDLQ(t)
 		defer cleanup()
-		dlq.Close()
+		_ = dlq.Close()
 
 		_, err := dlq.CountAll()
 		if err != ErrDLQClosed {

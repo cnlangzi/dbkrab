@@ -291,7 +291,11 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 				"message": "Entry ignored",
 			})
 		} else {
-			http.Error(w, "unknown action", http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			s.writeJSON(w, map[string]interface{}{
+				"success": false,
+				"error":   "unknown action",
+			})
 		}
 
 	case "DELETE":

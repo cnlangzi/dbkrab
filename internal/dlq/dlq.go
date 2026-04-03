@@ -162,6 +162,20 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 		return nil, ErrDLQClosed
 	}
 
+	// Validate status if provided
+	if status != "" {
+		valid := false
+		for _, s := range []Status{StatusPending, StatusRetrying, StatusResolved, StatusIgnored} {
+			if string(s) == status {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, ErrInvalidStatus
+		}
+	}
+
 	var query string
 	var args []interface{}
 
@@ -281,12 +295,21 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 		return ErrDLQClosed
 	}
 
+	if handler == nil {
+		return ErrHandlerRequired
+	}
+
+	// Check context
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get the entry
 	entry := &DLQEntry{}
 	var resolvedBy, resolvedNote sql.NullString
 	var resolvedAt sql.NullTime
 
-	err := d.db.QueryRow(`
+	err := d.db.QueryRowContext(ctx, `
 		SELECT id, lsn, table_name, operation, change_data, error_message,
 			   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 		FROM dlq_entries
@@ -306,7 +329,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	}
 
 	// Update status to retrying
-	_, err = d.db.Exec(`
+	_, err = d.db.ExecContext(ctx, `
 		UPDATE dlq_entries SET status = ?, updated_at = ?, retry_count = retry_count + 1
 		WHERE id = ?
 	`, StatusRetrying, time.Now(), id)
