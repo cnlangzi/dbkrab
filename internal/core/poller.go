@@ -222,8 +222,7 @@ func (p *Poller) poll(ctx context.Context) error {
 			lastLSN = startLSN
 		}
 
-		//nolint:staticcheck // SA4010: results is used in the loop below
-		results = append(results, tablePollResult{
+		results = append(results, tablePollResult{ //nolint:staticcheck // SA4010
 			table:   table,
 			changes: changes,
 			lastLSN: lastLSN,
