@@ -16,7 +16,6 @@ import (
 type Manager struct {
 	plugins map[string]*Plugin
 	mu      sync.RWMutex
-	watchCh chan string
 }
 
 // Plugin represents a loaded WASM plugin
@@ -32,7 +31,6 @@ type Plugin struct {
 func NewManager() *Manager {
 	return &Manager{
 		plugins: make(map[string]*Plugin),
-		watchCh: make(chan string, 100),
 	}
 }
 
@@ -230,6 +228,23 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 	case "list":
 		return APIResponse{Success: true, Data: m.List()}
 
+	case "get":
+		name, _ := params["name"].(string)
+		if name == "" {
+			return APIResponse{Success: false, Error: "name required"}
+		}
+		m.mu.RLock()
+		plugin, ok := m.plugins[name]
+		m.mu.RUnlock()
+		if !ok {
+			return APIResponse{Success: false, Error: "plugin not found"}
+		}
+		return APIResponse{Success: true, Data: PluginInfo{
+			Name:     plugin.Name,
+			Path:     plugin.Path,
+			LoadedAt: plugin.LoadedAt,
+		}}
+
 	case "load":
 		name, _ := params["name"].(string)
 		path, _ := params["path"].(string)
@@ -240,7 +255,15 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 		if err := m.Load(name, path, config); err != nil {
 			return APIResponse{Success: false, Error: err.Error()}
 		}
-		return APIResponse{Success: true, Data: m.plugins[name]}
+		// Return plugin info after successful load (with lock)
+		m.mu.RLock()
+		plugin := m.plugins[name]
+		m.mu.RUnlock()
+		return APIResponse{Success: true, Data: PluginInfo{
+			Name:     plugin.Name,
+			Path:     plugin.Path,
+			LoadedAt: plugin.LoadedAt,
+		}}
 
 	case "unload":
 		name, _ := params["name"].(string)

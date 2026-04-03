@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// validCaptureInstance validates capture instance name to prevent SQL injection
+var validCaptureInstance = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // Change represents a single row change (raw from CDC)
 type Change struct {
@@ -28,6 +32,10 @@ func NewQuerier(db *sql.DB) *Querier {
 
 // GetMinLSN returns the minimum LSN for a capture instance
 func (q *Querier) GetMinLSN(ctx context.Context, captureInstance string) ([]byte, error) {
+	// Validate capture instance to prevent SQL injection
+	if !validCaptureInstance.MatchString(captureInstance) {
+		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
+	}
 	var lsn []byte
 	query := fmt.Sprintf("SELECT sys.fn_cdc_get_min_lsn('%s')", captureInstance)
 	err := q.db.QueryRowContext(ctx, query).Scan(&lsn)
@@ -43,6 +51,11 @@ func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 
 // GetChanges queries CDC changes for a table
 func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLSN, toLSN []byte) ([]Change, error) {
+	// Validate capture instance to prevent SQL injection
+	if !validCaptureInstance.MatchString(captureInstance) {
+		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
+	}
+
 	// Build the CDC function name
 	fnName := fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
 	

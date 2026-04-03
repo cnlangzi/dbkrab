@@ -86,4 +86,25 @@ func TestStoreGetAll(t *testing.T) {
 	if all["table1"].LSN != "01020304" {
 		t.Errorf("table1 LSN = %v, want 01020304", all["table1"].LSN)
 	}
+
+	// Verify GetAll returns a copy (mutating it doesn't affect internal state)
+	delete(all, "table1")
+	all["table2"] = Offset{LSN: "modified"}
+
+	// Verify internal state is unchanged
+	offset1, ok := store.Get("table1")
+	if !ok {
+		t.Error("table1 should still exist after deleting from GetAll result")
+	}
+	if offset1.LSN != "01020304" {
+		t.Errorf("table1 LSN = %v, want 01020304 (should be unchanged)", offset1.LSN)
+	}
+
+	offset2, ok := store.Get("table2")
+	if !ok {
+		t.Error("table2 should still exist")
+	}
+	if offset2.LSN != "05060708" {
+		t.Errorf("table2 LSN = %v, want 05060708 (should be unchanged)", offset2.LSN)
+	}
 }
