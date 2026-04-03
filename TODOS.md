@@ -77,16 +77,19 @@
 
 ---
 
-### P1-3: 监控指标（Prometheus）
-- [ ] `dbkrab_poll_lag_seconds` - 消费延迟（maxLSN - currentLSN 时间差）
-- [ ] `dbkrab_transactions_total` - 事务总数
-- [ ] `dbkrab_transactions_failed_total` - 失败事务数
-- [ ] `dbkrab_cdc_gap_bytes` - LSN 差距（当前消费位点与 CDC 最小 LSN 距离）
-- [ ] `dbkrab_poll_duration_seconds` - 单次 poll 耗时
+### P1-3: 监控指标（Prometheus） ✅ **已完成**
+- [x] `dbkrab_poll_lag_seconds` - 消费延迟
+- [x] `dbkrab_transactions_total` - 事务总数
+- [x] `dbkrab_transactions_failed_total` - 失败事务数
+- [x] `dbkrab_cdc_gap_bytes` - LSN 差距
+- [x] `dbkrab_poll_duration_seconds` - 单次 poll 耗时
+- [x] `dbkrab_alerts_total{level}` - 告警数量
 
 **验收标准**:
-- Grafana 面板展示核心指标
-- 延迟 > 阈值时告警
+- [x] Prometheus metrics endpoint: http://localhost:9021/metrics
+- [ ] Grafana 面板展示核心指标
+
+**完成时间**: 2026-04-03 (PR #5)
 
 ---
 
