@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,11 +13,9 @@ import (
 	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/metrics"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
@@ -72,19 +69,6 @@ func main() {
 	}
 	log.Printf("Offset store initialized: type=%s", cfg.Offset.Type)
 
-	// Create metrics
-	if cfg.Metrics.Enabled {
-		_ = metrics.New()
-		// Start metrics HTTP server
-		go func() {
-			http.Handle("/metrics", promhttp.Handler())
-			log.Printf("Metrics server starting on port %d", cfg.Metrics.Port)
-			if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Metrics.Port), nil); err != nil {
-				log.Printf("Metrics server error: %v", err)
-			}
-		}()
-	}
-
 	// Create sink
 	var sink core.Sink
 	switch cfg.Sink.Type {
@@ -106,22 +90,8 @@ func main() {
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
 
-	// Create metrics
-	var m *metrics.Metrics
-	if cfg.Metrics.Enabled {
-		m = metrics.New()
-		// Start metrics HTTP server
-		go func() {
-			http.Handle("/metrics", promhttp.Handler())
-			log.Printf("Metrics server starting on port %d", cfg.Metrics.Port)
-			if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Metrics.Port), nil); err != nil {
-				log.Printf("Metrics server error: %v", err)
-			}
-		}()
-	}
-
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, db, sink, offsetStore, m)
+	poller := core.NewPoller(cfg, db, sink, offsetStore)
 	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
 		return pluginManager.Handle(tx)
 	}))

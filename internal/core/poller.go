@@ -12,7 +12,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/offset"
-	"github.com/cnlangzi/dbkrab/internal/metrics"
 )
 
 // Poller polls MSSQL CDC tables for changes
@@ -32,7 +31,6 @@ type Poller struct {
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
 	txBuffer      *TransactionBuffer // For cross-table transaction integrity
-	metrics       *metrics.Metrics   // Prometheus metrics
 }
 
 // Sink interface for storing changes
@@ -62,7 +60,7 @@ type tablePollResult struct {
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface, m *metrics.Metrics) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface) *Poller {
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
@@ -70,7 +68,6 @@ func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.Sto
 		offsets:  offsetStore,
 		sink:     sink,
 		stopCh:   make(chan struct{}),
-		metrics:  m,
 	}
 
 	// Initialize transaction buffer if enabled
@@ -272,11 +269,6 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	// Process complete transactions
 	var processErrors []error
 	for _, tx := range completeTxs {
-		// Record transaction start
-		if p.metrics != nil {
-			p.metrics.RecordTransaction(false)
-		}
-
 		// Handler processing
 		if p.handler != nil {
 			if err := p.handler.Handle(tx); err != nil {
@@ -290,9 +282,6 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 			if err := p.sink.Write(tx); err != nil {
 				log.Printf("Sink error for tx %s: %v", tx.ID, err)
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
-				if p.metrics != nil {
-					p.metrics.RecordTransaction(true)
-				}
 			}
 		}
 	}
@@ -315,11 +304,6 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
-		// Record transaction
-		if p.metrics != nil {
-			p.metrics.RecordTransaction(false)
-		}
-
 		// Handler processing (non-blocking: continue even if handler fails)
 		if p.handler != nil {
 			if err := p.handler.Handle(&tx); err != nil {
@@ -332,9 +316,6 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			if err := p.sink.Write(&tx); err != nil {
 				log.Printf("Sink error for tx %s: %v", tx.ID, err)
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
-				if p.metrics != nil {
-					p.metrics.RecordTransaction(true)
-				}
 			}
 		}
 	}

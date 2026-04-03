@@ -17,7 +17,6 @@ type Config struct {
 	APIPort            int                    `yaml:"api_port"`
 	Sink               SinkConfig             `yaml:"sink"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
-	Metrics            MetricsConfig          `yaml:"metrics"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
@@ -39,12 +38,6 @@ type OffsetConfig struct {
 	Type       string `yaml:"type"`         // json or sqlite
 	JSONPath   string `yaml:"json_path"`    // path to JSON file (for json type)
 	SQLitePath string `yaml:"sqlite_path"`  // path to SQLite file (for sqlite type)
-}
-
-// MetricsConfig contains Prometheus metrics configuration
-type MetricsConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Port    int    `yaml:"port"` // Port for metrics endpoint
 }
 
 // CDCProtectionConfig contains CDC gap protection settings
@@ -102,9 +95,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.APIPort == 0 {
 		cfg.APIPort = 9020
-	}
-	if cfg.Metrics.Port == 0 {
-		cfg.Metrics.Port = 9021
 	}
 
 	// CDC protection defaults

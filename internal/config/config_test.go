@@ -124,15 +124,6 @@ tables:
 	if cfg.Sink.Type != "sqlite" {
 		t.Errorf("Sink.Type default = %v, want sqlite", cfg.Sink.Type)
 	}
-
-	// Check Metrics defaults
-	if cfg.Metrics.Port != 9021 {
-		t.Errorf("Metrics.Port default = %v, want 9021", cfg.Metrics.Port)
-	}
-	// Metrics.Enabled should default to false (explicit enable required)
-	if cfg.Metrics.Enabled {
-		t.Error("Metrics.Enabled should default to false")
-	}
 }
 
 func TestPollingInterval(t *testing.T) {
