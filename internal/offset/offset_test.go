@@ -184,7 +184,11 @@ func TestStoreInterface_NonExistentKey(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewSQLiteStore() error = %v", err)
 				}
-				return store, func() { store.Close() }
+				return store, func() {
+					if err := store.Close(); err != nil {
+						t.Logf("Close() error = %v", err)
+					}
+				}
 			},
 		},
 	}

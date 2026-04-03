@@ -483,14 +483,6 @@ func (p *Poller) pause() {
 	log.Println("Poller paused")
 }
 
-// resume resumes the poller
-func (p *Poller) resume() {
-	p.pausedMu.Lock()
-	defer p.pausedMu.Unlock()
-	p.paused = false
-	log.Println("Poller resumed")
-}
-
 // isPaused returns true if the poller is paused
 func (p *Poller) isPaused() bool {
 	p.pausedMu.RLock()

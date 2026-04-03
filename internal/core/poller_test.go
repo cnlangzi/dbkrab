@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -45,7 +46,7 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 		{table: "dbo.Test", changes: tx.Changes, lastLSN: LSN{1, 2, 3, 4}, err: nil},
 	}
 
-	err := poller.processDirect(nil, tx.Changes, results)
+	err := poller.processDirect(context.TODO(), tx.Changes, results)
 	if err == nil {
 		t.Fatal("Expected error from failing sink, got nil")
 	}
@@ -98,7 +99,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 		{table: "dbo.Test", changes: tx.Changes, lastLSN: LSN{1, 2, 3, 4}, err: nil},
 	}
 
-	err := poller.processDirect(nil, tx.Changes, results)
+	err := poller.processDirect(context.TODO(), tx.Changes, results)
 	if err != nil {
 		t.Fatalf("Expected no error (handler failures don't block), got: %v", err)
 	}
