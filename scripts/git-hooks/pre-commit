@@ -1,0 +1,39 @@
+#!/bin/bash
+# dbkrab pre-commit hook
+# Runs lint and tests before allowing commit
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Get the directory of this script
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+cd "$PROJECT_ROOT"
+
+# Run vet
+echo "📝 Running go vet..."
+if ! make vet; then
+    echo "❌ go vet failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run tests
+echo "🧪 Running tests..."
+if ! make test-short; then
+    echo "❌ Tests failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run linter (if available)
+echo "🔎 Running linter..."
+if command -v golangci-lint &> /dev/null; then
+    if ! make lint; then
+        echo "❌ Lint failed. Please fix the issues before committing."
+        exit 1
+    fi
+fi
+
+echo "✅ All pre-commit checks passed!"
+exit 0
