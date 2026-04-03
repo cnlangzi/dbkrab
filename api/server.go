@@ -109,8 +109,11 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		// Get plugin info - list and find
-		resp := s.manager.HandleAPI("list", nil)
+		// Get single plugin info
+		resp := s.manager.HandleAPI("get", params)
+		if !resp.Success {
+			w.WriteHeader(http.StatusNotFound)
+		}
 		s.writeJSON(w, resp)
 
 	case "DELETE":

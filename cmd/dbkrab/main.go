@@ -21,7 +21,10 @@ import (
 var (
 	configPath = flag.String("config", "config.yml", "Path to config file")
 	apiPort    = flag.Int("api-port", 9020, "API server port")
-	version    = "1.0.0"
+
+	// Version and BuildTime are set via ldflags during build
+	Version   = "dev"
+	BuildTime = "unknown"
 )
 
 func main() {
@@ -113,7 +116,7 @@ func main() {
 	}()
 
 	// Start polling
-	log.Printf("Starting dbkrab %s", version)
+	log.Printf("Starting dbkrab %s (built %s)", Version, BuildTime)
 	if err := poller.Start(ctx); err != nil && err != context.Canceled {
 		log.Fatalf("Poller error: %v", err)
 	}
