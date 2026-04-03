@@ -1,0 +1,28 @@
+# dbkrab configuration
+
+# MSSQL connection settings
+mssql:
+  host: localhost
+  port: 1433
+  user: sa
+  password: your_password
+  database: your_database
+
+# Tables to monitor (format: schema.table)
+tables:
+  - dbo.orders
+  - dbo.order_items
+
+# Polling interval
+polling_interval: 500ms
+
+# LSN offset storage
+offset_file: ./data/offset.json
+
+# WASM plugin path (optional, for future use)
+plugin: ""
+
+# Sink configuration
+sink:
+  type: sqlite
+  path: ./data/cdc.db
