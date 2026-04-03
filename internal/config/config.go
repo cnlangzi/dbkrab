@@ -9,14 +9,15 @@ import (
 )
 
 type Config struct {
-	MSSQL         MSSQLConfig    `yaml:"mssql"`
-	Tables        []string       `yaml:"tables"`
-	Interval      string         `yaml:"polling_interval"`
-	Offset        string         `yaml:"offset_file"`
-	Plugin        string         `yaml:"plugin"`
-	APIPort       int            `yaml:"api_port"`
-	Sink          SinkConfig     `yaml:"sink"`
-	CDCProtection CDCProtectionConfig `yaml:"cdc_protection"`
+	MSSQL              MSSQLConfig            `yaml:"mssql"`
+	Tables             []string               `yaml:"tables"`
+	Interval           string                 `yaml:"polling_interval"`
+	Offset             OffsetConfig           `yaml:"offset"`
+	Plugin             string                 `yaml:"plugin"`
+	APIPort            int                    `yaml:"api_port"`
+	Sink               SinkConfig             `yaml:"sink"`
+	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
+	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
 type MSSQLConfig struct {
@@ -32,6 +33,13 @@ type SinkConfig struct {
 	Path string `yaml:"path"`
 }
 
+// OffsetConfig contains offset storage configuration
+type OffsetConfig struct {
+	Type       string `yaml:"type"`         // json or sqlite
+	JSONPath   string `yaml:"json_path"`    // path to JSON file (for json type)
+	SQLitePath string `yaml:"sqlite_path"`  // path to SQLite file (for sqlite type)
+}
+
 // CDCProtectionConfig contains CDC gap protection settings
 type CDCProtectionConfig struct {
 	Enabled           bool                 `yaml:"enabled"`
@@ -42,6 +50,12 @@ type CDCProtectionConfig struct {
 	CriticalLagDuration string             `yaml:"critical_lag_duration"`
 	Recovery          RecoveryConfig       `yaml:"recovery"`
 	Alert             alert.AlertConfig    `yaml:"alert"`
+}
+
+// TransactionBufferConfig contains transaction buffer settings
+type TransactionBufferConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	MaxWaitTime string `yaml:"max_wait_time"` // e.g., "30s"
 }
 
 // RecoveryConfig contains recovery strategy settings
@@ -64,8 +78,14 @@ func Load(path string) (*Config, error) {
 	if cfg.Interval == "" {
 		cfg.Interval = "500ms"
 	}
-	if cfg.Offset == "" {
-		cfg.Offset = "./data/offset.json"
+	if cfg.Offset.Type == "" {
+		cfg.Offset.Type = "json"
+	}
+	if cfg.Offset.JSONPath == "" {
+		cfg.Offset.JSONPath = "./data/offset.json"
+	}
+	if cfg.Offset.SQLitePath == "" {
+		cfg.Offset.SQLitePath = "./data/offset.db"
 	}
 	if cfg.Sink.Type == "" {
 		cfg.Sink.Type = "sqlite"

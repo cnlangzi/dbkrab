@@ -16,8 +16,12 @@ tables:
 # Polling interval
 polling_interval: 500ms
 
-# LSN offset storage
-offset_file: ./data/offset.json
+# Offset storage configuration
+# Supports JSON file or SQLite backend
+offset:
+  type: json          # json or sqlite
+  json_path: ./data/offset.json
+  sqlite_path: ./data/offset.db
 
 # Plugin directory (WASM files, hot-reload enabled)
 # Leave empty to disable plugin watching
@@ -37,6 +41,11 @@ api_port: 9020
 sink:
   type: sqlite
   path: ./data/cdc.db
+
+# Transaction buffer for cross-table integrity
+transaction_buffer:
+  enabled: false  # Set to true for multi-table transaction integrity
+  max_wait_time: 30s  # Max time to wait for incomplete transactions
 
 # CDC gap protection (prevents data loss from CDC cleanup)
 cdc_protection:

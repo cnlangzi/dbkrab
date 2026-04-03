@@ -115,8 +115,11 @@ tables:
 	if cfg.Interval != "500ms" {
 		t.Errorf("Interval default = %v, want 500ms", cfg.Interval)
 	}
-	if cfg.Offset != "./data/offset.json" {
-		t.Errorf("Offset default = %v, want ./data/offset.json", cfg.Offset)
+	if cfg.Offset.Type != "json" {
+		t.Errorf("Offset.Type default = %v, want json", cfg.Offset.Type)
+	}
+	if cfg.Offset.JSONPath != "./data/offset.json" {
+		t.Errorf("Offset.JSONPath default = %v, want ./data/offset.json", cfg.Offset.JSONPath)
 	}
 	if cfg.Sink.Type != "sqlite" {
 		t.Errorf("Sink.Type default = %v, want sqlite", cfg.Sink.Type)
