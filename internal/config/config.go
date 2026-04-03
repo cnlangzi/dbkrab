@@ -13,6 +13,7 @@ type Config struct {
 	Interval string      `yaml:"polling_interval"`
 	Offset   string      `yaml:"offset_file"`
 	Plugin   string      `yaml:"plugin"`
+	APIPort  int         `yaml:"api_port"`
 	Sink     SinkConfig  `yaml:"sink"`
 }
 
@@ -52,6 +53,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Sink.Path == "" {
 		cfg.Sink.Path = "./data/cdc.db"
+	}
+	if cfg.APIPort == 0 {
+		cfg.APIPort = 9020
 	}
 
 	return &cfg, nil

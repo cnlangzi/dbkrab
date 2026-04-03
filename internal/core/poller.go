@@ -36,6 +36,14 @@ type Handler interface {
 	Handle(tx *Transaction) error
 }
 
+// PluginHandler is a function type for plugin-based handling
+type PluginHandler func(tx *Transaction) error
+
+// Handle implements Handler interface
+func (h PluginHandler) Handle(tx *Transaction) error {
+	return h(tx)
+}
+
 // NewPoller creates a new poller
 func NewPoller(cfg *config.Config, db *sql.DB, sink Sink) *Poller {
 	return &Poller{
