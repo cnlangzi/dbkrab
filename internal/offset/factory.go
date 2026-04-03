@@ -13,6 +13,8 @@ const (
 	StoreTypeJSON StoreType = "json"
 	// StoreTypeSQLite stores offsets in SQLite database
 	StoreTypeSQLite StoreType = "sqlite"
+	// StoreTypeUnknown represents an unknown store type
+	StoreTypeUnknown StoreType = "unknown"
 )
 
 // Config contains configuration for offset store
@@ -33,7 +35,7 @@ func DefaultConfig(path string) Config {
 // NewStore creates an offset store based on type and paths
 func NewStoreFromConfig(storeType, jsonPath, sqlitePath string) (StoreInterface, error) {
 	switch ParseStoreType(storeType) {
-	case StoreTypeJSON, "":
+	case StoreTypeJSON:
 		if jsonPath == "" {
 			return nil, fmt.Errorf("json_path is required for JSON store")
 		}
@@ -44,6 +46,16 @@ func NewStoreFromConfig(storeType, jsonPath, sqlitePath string) (StoreInterface,
 			return nil, fmt.Errorf("sqlite_path is required for SQLite store")
 		}
 		return NewSQLiteStore(sqlitePath)
+
+	case StoreTypeUnknown, "":
+		// Empty type defaults to JSON, but unknown types are errors
+		if storeType == "" {
+			if jsonPath == "" {
+				return nil, fmt.Errorf("json_path is required for default JSON store")
+			}
+			return NewStore(jsonPath), nil
+		}
+		return nil, fmt.Errorf("unknown store type: %s", storeType)
 
 	default:
 		return nil, fmt.Errorf("unknown store type: %s", storeType)
@@ -58,6 +70,6 @@ func ParseStoreType(s string) StoreType {
 	case "json", "file", "":
 		return StoreTypeJSON
 	default:
-		return StoreTypeJSON
+		return StoreTypeUnknown
 	}
 }

@@ -1,6 +1,7 @@
 package offset
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,5 +107,107 @@ func TestStoreGetAll(t *testing.T) {
 
 	if all["dbo_customers"].LSN != "02030405" {
 		t.Errorf("dbo_customers LSN = %v, want 02030405", all["dbo_customers"].LSN)
+	}
+}
+
+// TestJSONStore_CorruptedFile tests that corrupted JSON files are handled gracefully
+func TestJSONStore_CorruptedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "offsets.json")
+
+	// Write invalid JSON to the file
+	if err := os.WriteFile(path, []byte("{ not valid json "), 0o600); err != nil {
+		t.Fatalf("failed to write corrupt JSON file: %v", err)
+	}
+
+	store := NewStore(path)
+
+	// Load should fail with corrupted file
+	if err := store.Load(); err == nil {
+		t.Fatal("Load() on corrupted JSON store: expected error, got nil")
+	}
+}
+
+// TestSQLiteStore_ErrStoreClosed tests that operations after close return ErrStoreClosed
+func TestSQLiteStore_ErrStoreClosed(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "offsets.db")
+
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() error = %v", err)
+	}
+
+	// Close the store
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Get after Close
+	if _, err := store.Get("some-key"); !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("Get() after Close: expected ErrStoreClosed, got %v", err)
+	}
+
+	// GetAll after Close
+	if _, err := store.GetAll(); !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("GetAll() after Close: expected ErrStoreClosed, got %v", err)
+	}
+
+	// Set after Close
+	if err := store.Set("some-key", "01020304"); !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("Set() after Close: expected ErrStoreClosed, got %v", err)
+	}
+}
+
+// TestStoreInterface_NonExistentKey tests consistent behavior for non-existent keys across backends
+func TestStoreInterface_NonExistentKey(t *testing.T) {
+	type storeFactory struct {
+		name string
+		new  func(t *testing.T) (StoreInterface, func())
+	}
+
+	factories := []storeFactory{
+		{
+			name: "json",
+			new: func(t *testing.T) (StoreInterface, func()) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "offsets.json")
+				store := NewStore(path)
+				return store, func() {}
+			},
+		},
+		{
+			name: "sqlite",
+			new: func(t *testing.T) (StoreInterface, func()) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "offsets.db")
+				store, err := NewSQLiteStore(path)
+				if err != nil {
+					t.Fatalf("NewSQLiteStore() error = %v", err)
+				}
+				return store, func() { store.Close() }
+			},
+		},
+	}
+
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			store, cleanup := factory.new(t)
+			defer cleanup()
+
+			// Load for JSON store (SQLite doesn't need explicit load)
+			if err := store.Load(); err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			offset, err := store.Get("nonexistent")
+			if err != nil {
+				t.Fatalf("Get() unexpected error for non-existent key: %v", err)
+			}
+
+			// Expect zero Offset for non-existent keys
+			if offset.LSN != "" {
+				t.Fatalf("Get() for non-existent key: expected empty LSN, got %+v", offset)
+			}
+		})
 	}
 }
