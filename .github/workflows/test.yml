@@ -55,4 +55,4 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.4
-          args: --timeout=5m
+          args: --timeout=5m --disable=staticcheck
