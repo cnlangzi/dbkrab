@@ -436,8 +436,3 @@ func (p *Poller) recordGapCheck() {
 	p.lastGapCheck = time.Now()
 	p.gapCheckMu.Unlock()
 }
-
-// CDCCheckInterval returns the CDC gap check interval from config
-func (p *Poller) CDCCheckInterval() (time.Duration, error) {
-	return p.cfg.CDCCheckInterval()
-}

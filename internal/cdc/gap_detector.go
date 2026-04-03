@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -157,10 +158,14 @@ func CompareLSN(a, b []byte) int {
 }
 
 // LSNBytesDiff calculates the approximate byte difference between two LSNs.
-// CDC LSNs are 10 bytes; we interpret them as a single big-endian integer and
-// return the absolute difference between those integer values.
+// CDC LSNs are 10 bytes; we use only the lower 8 bytes to fit in int64.
+// This provides a reasonable approximation for lag detection while avoiding
+// overflow issues with full 10-byte values (which can exceed 2^63-1).
+// For typical CDC lag scenarios (hours to days of changes), 8 bytes provides
+// sufficient precision. If overflow is detected, returns math.MaxInt64.
 func LSNBytesDiff(a, b []byte) int64 {
 	const lsnLen = 10
+	const usableBytes = 8 // Use lower 8 bytes to fit in int64
 
 	// Require full 10-byte LSNs; anything else is treated as "no information".
 	if len(a) != lsnLen || len(b) != lsnLen {
@@ -169,14 +174,38 @@ func LSNBytesDiff(a, b []byte) int64 {
 
 	diff := int64(0)
 	multiplier := int64(1)
+	overflow := false
 
-	// Walk from least-significant byte (right) to most-significant (left)
-	// using a fixed 10-byte, big-endian layout.
-	for i := lsnLen - 1; i >= 0; i-- {
+	// Walk from least-significant byte to most-significant,
+	// but only use the lower 8 bytes to avoid int64 overflow.
+	for i := lsnLen - 1; i >= lsnLen-usableBytes; i-- {
 		ai := int64(a[i])
 		bi := int64(b[i])
-		diff += (ai - bi) * multiplier
+		delta := ai - bi
+
+		// Check for potential overflow before multiplying
+		if multiplier > math.MaxInt64/256 {
+			overflow = true
+			break
+		}
+
+		term := delta * multiplier
+		// Check for overflow on addition
+		if delta > 0 && diff > math.MaxInt64-term {
+			overflow = true
+			break
+		}
+		if delta < 0 && diff < math.MinInt64-term {
+			overflow = true
+			break
+		}
+
+		diff += term
 		multiplier *= 256
+	}
+
+	if overflow {
+		return math.MaxInt64
 	}
 
 	if diff < 0 {
