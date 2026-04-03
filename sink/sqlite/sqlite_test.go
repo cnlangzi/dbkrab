@@ -13,14 +13,22 @@ func TestNewSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	sink, err := NewSink(dbPath)
 	if err != nil {
 		t.Fatalf("NewSink() error = %v", err)
 	}
-	defer sink.Close()
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Logf("sink.Close error: %v", err)
+		}
+	}()
 
 	// Check file exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -33,13 +41,21 @@ func TestWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	sink, err := NewSink(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
 		t.Fatalf("NewSink() error = %v", err)
 	}
-	defer sink.Close()
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Logf("sink.Close error: %v", err)
+		}
+	}()
 
 	// Create a transaction
 	tx := core.NewTransaction("test-tx-123")
@@ -84,13 +100,21 @@ func TestWriteMultipleTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("os.RemoveAll error: %v", err)
+		}
+	}()
 
 	sink, err := NewSink(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
 		t.Fatalf("NewSink() error = %v", err)
 	}
-	defer sink.Close()
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Logf("sink.Close error: %v", err)
+		}
+	}()
 
 	// Write multiple transactions
 	for i := 1; i <= 3; i++ {

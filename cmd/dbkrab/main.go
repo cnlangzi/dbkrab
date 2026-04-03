@@ -49,7 +49,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to MSSQL: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("db.Close error: %v", err)
+		}
+	}()
 
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping MSSQL: %v", err)

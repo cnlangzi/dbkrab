@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -52,7 +53,9 @@ func (m *Manager) Load(name, path string, config string) error {
 
 	// Call Init
 	if err := instance.Init(config); err != nil {
-		instance.Close()
+		if closeErr := instance.Close(); closeErr != nil {
+			log.Printf("instance.Close error: %v", closeErr)
+		}
 		return fmt.Errorf("plugin init: %w", err)
 	}
 
