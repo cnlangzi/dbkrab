@@ -21,7 +21,7 @@ type Poller struct {
 	querier       *cdc.Querier
 	gapDetector   *cdc.GapDetector
 	alertManager  *alert.AlertManager
-	offsets       *offset.Store
+	offsets       offset.StoreInterface
 	sink          Sink
 	handler       Handler
 	stopCh        chan struct{}
@@ -60,12 +60,12 @@ type tablePollResult struct {
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, sink Sink) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface) *Poller {
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
 		querier:  cdc.NewQuerier(db),
-		offsets:  offset.NewStore(cfg.Offset),
+		offsets:  offsetStore,
 		sink:     sink,
 		stopCh:   make(chan struct{}),
 	}
@@ -266,7 +266,8 @@ func (p *Poller) pollTable(ctx context.Context, table string, maxLSN []byte) ([]
 
 	// Get starting LSN from offset store
 	startLSN := LSN{}
-	if stored, ok := p.offsets.Get(table); ok {
+	stored, err := p.offsets.Get(table)
+		if err == nil && stored.LSN != "" {
 		parsed, err := ParseLSN(stored.LSN)
 		if err == nil && len(parsed) > 0 {
 			startLSN = parsed
@@ -353,7 +354,8 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 
 		// Get current LSN from offset
 		currentLSN := []byte{}
-		if stored, ok := p.offsets.Get(table); ok {
+		stored, err := p.offsets.Get(table)
+		if err == nil && stored.LSN != "" {
 			parsed, err := ParseLSN(stored.LSN)
 			if err == nil && len(parsed) > 0 {
 				currentLSN = []byte(parsed)

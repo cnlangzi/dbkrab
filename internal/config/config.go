@@ -12,11 +12,12 @@ type Config struct {
 	MSSQL         MSSQLConfig    `yaml:"mssql"`
 	Tables        []string       `yaml:"tables"`
 	Interval      string         `yaml:"polling_interval"`
-	Offset        string         `yaml:"offset_file"`
+	Offset        OffsetConfig   `yaml:"offset"`
 	Plugin        string         `yaml:"plugin"`
 	APIPort       int            `yaml:"api_port"`
 	Sink          SinkConfig     `yaml:"sink"`
 	CDCProtection CDCProtectionConfig `yaml:"cdc_protection"`
+	Metrics       MetricsConfig  `yaml:"metrics"`
 }
 
 type MSSQLConfig struct {
@@ -30,6 +31,19 @@ type MSSQLConfig struct {
 type SinkConfig struct {
 	Type string `yaml:"type"`
 	Path string `yaml:"path"`
+}
+
+// OffsetConfig contains offset storage configuration
+type OffsetConfig struct {
+	Type       string `yaml:"type"`         // json or sqlite
+	JSONPath   string `yaml:"json_path"`    // path to JSON file (for json type)
+	SQLitePath string `yaml:"sqlite_path"`  // path to SQLite file (for sqlite type)
+}
+
+// MetricsConfig contains Prometheus metrics configuration
+type MetricsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Port    int    `yaml:"port"` // Port for metrics endpoint
 }
 
 // CDCProtectionConfig contains CDC gap protection settings
@@ -64,8 +78,14 @@ func Load(path string) (*Config, error) {
 	if cfg.Interval == "" {
 		cfg.Interval = "500ms"
 	}
-	if cfg.Offset == "" {
-		cfg.Offset = "./data/offset.json"
+	if cfg.Offset.Type == "" {
+		cfg.Offset.Type = "json"
+	}
+	if cfg.Offset.JSONPath == "" {
+		cfg.Offset.JSONPath = "./data/offset.json"
+	}
+	if cfg.Offset.SQLitePath == "" {
+		cfg.Offset.SQLitePath = "./data/offset.db"
 	}
 	if cfg.Sink.Type == "" {
 		cfg.Sink.Type = "sqlite"
@@ -75,6 +95,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.APIPort == 0 {
 		cfg.APIPort = 9020
+	}
+	if cfg.Metrics.Port == 0 {
+		cfg.Metrics.Port = 9021
 	}
 
 	// CDC protection defaults
