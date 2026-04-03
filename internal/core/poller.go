@@ -118,6 +118,8 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Step 2: Poll all tables within the global barrier window
+	// Track per-table LSNs: only advance offset for tables that were polled successfully.
+	tableLastLSNs := make(map[string][]byte) // table → last LSN actually read from this table
 	var allResults []TablePollResult
 	for _, table := range p.cfg.Tables {
 		result, err := p.pollTable(ctx, table, barrierLSN)
@@ -126,6 +128,7 @@ func (p *Poller) poll(ctx context.Context) error {
 			continue
 		}
 		allResults = append(allResults, result)
+		tableLastLSNs[table] = result.LastLSN
 	}
 
 	// Collect all changes from all tables
@@ -164,17 +167,21 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 	}
 
-	// Step 5: Update all table offsets to the global barrier atomically.
-	// Using the global barrier (max LSN) as the committed offset for all tables
-	// ensures that on the next poll cycle, no table will re-read changes that
-	// were already delivered in this cycle. This is safe because:
-	//   a) Each table's changes are bounded by the global max LSN
-	//   b) All changes within [old_offset, barrier] have been delivered
-	//   c) Using the barrier (not per-table last LSN) preserves cross-table
-	//      transaction atomicity across poll cycles
+	// Step 5: Update offsets for successfully-polled tables using their actual last LSN.
+	// This prevents data loss when a table's poll fails: its offset is NOT advanced,
+	// so the next poll cycle will re-read from the last successfully-read LSN.
+	//
+	// Using per-table last LSN (not the shared barrier) is safe because:
+	//   a) Each table's changes are bounded by [startLSN, barrier]
+	//   b) All successfully-read changes have been delivered
+	//   c) Cross-table transaction atomicity is preserved within this poll cycle
+	//      (all tables share the same barrier window, so they all see the same
+	//       set of cross-table TX changes before any offset moves forward)
 	updates := make(map[string]string)
-	for _, table := range p.cfg.Tables {
-		updates[table] = LSN(barrierLSN).String()
+	for table, lastLSN := range tableLastLSNs {
+		if len(lastLSN) > 0 {
+			updates[table] = LSN(lastLSN).String()
+		}
 	}
 
 	if err := p.offsets.SetMultiple(updates); err != nil {

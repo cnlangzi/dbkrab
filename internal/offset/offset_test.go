@@ -189,7 +189,9 @@ func TestStoreSetMultiple(t *testing.T) {
 
 	// Verify first 3 tables still exist (not wiped by second SetMultiple)
 	store3 := NewStore(path)
-	store3.Load()
+	if err := store3.Load(); err != nil {
+		t.Fatalf("store3.Load() error = %v", err)
+	}
 	if _, ok := store3.Get("dbo.customers"); !ok {
 		t.Error("dbo.customers should still exist after partial SetMultiple update")
 	}
