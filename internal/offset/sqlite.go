@@ -2,6 +2,7 @@ package offset
 
 import (
 	"database/sql"
+	"log"
 	"sync"
 	"time"
 
@@ -24,7 +25,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			// Log but don't mask the original error
+		}
 		return nil, err
 	}
 
@@ -36,7 +39,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			// Log but don't mask the original error
+		}
 		return nil, err
 	}
 
@@ -116,8 +121,9 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 		return nil, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil {
+		if closeErr := rows.Close(); closeErr != nil {
 			// Log but don't return error for Close
+			log.Printf("rows.Close error: %v", closeErr)
 		}
 	}()
 
