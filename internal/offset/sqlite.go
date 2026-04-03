@@ -26,7 +26,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			// Log but don't mask the original error
+			log.Printf("db.Close error after exec failure: %v", closeErr)
 		}
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		)
 	`); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			// Log but don't mask the original error
+			log.Printf("db.Close error after exec failure: %v", closeErr)
 		}
 		return nil, err
 	}
