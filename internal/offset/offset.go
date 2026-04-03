@@ -2,11 +2,15 @@ package offset
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
+
+// ErrStoreClosed is returned when operating on a closed store
+var ErrStoreClosed = errors.New("offset store is closed")
 
 // Offset stores the LSN position for each table
 type Offset struct {
@@ -14,14 +18,26 @@ type Offset struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Store manages LSN offsets for all tables
+// StoreInterface defines the interface for offset storage
+type StoreInterface interface {
+	Load() error
+	Save() error
+	Get(table string) (Offset, error)
+	Set(table string, lsn string) error
+	GetAll() (map[string]Offset, error)
+}
+
+// Store manages LSN offsets for all tables (JSON file backend)
 type Store struct {
 	path    string
 	offsets map[string]Offset
 	mu      sync.RWMutex
 }
 
-// NewStore creates a new offset store
+// Ensure Store implements StoreInterface
+var _ StoreInterface = (*Store)(nil)
+
+// NewStore creates a new JSON file offset store
 func NewStore(path string) *Store {
 	return &Store{
 		path:    path,
@@ -69,12 +85,15 @@ func (s *Store) saveWithoutLock() error {
 }
 
 // Get returns the LSN for a table
-func (s *Store) Get(table string) (Offset, bool) {
+func (s *Store) Get(table string) (Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	offset, ok := s.offsets[table]
-	return offset, ok
+	if !ok {
+		return Offset{}, nil
+	}
+	return offset, nil
 }
 
 // Set updates the LSN for a table
@@ -92,7 +111,7 @@ func (s *Store) Set(table string, lsn string) error {
 }
 
 // GetAll returns all offsets
-func (s *Store) GetAll() map[string]Offset {
+func (s *Store) GetAll() (map[string]Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -100,5 +119,5 @@ func (s *Store) GetAll() map[string]Offset {
 	for k, v := range s.offsets {
 		result[k] = v
 	}
-	return result
+	return result, nil
 }
