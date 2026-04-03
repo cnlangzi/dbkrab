@@ -69,7 +69,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to create SQLite sink: %v", err)
 		}
-		defer sink.Close()
+		defer func() {
+			if err := sink.Close(); err != nil {
+				log.Printf("sink.Close error: %v", err)
+			}
+		}()
 		log.Printf("SQLite sink initialized: %s", cfg.Sink.Path)
 	default:
 		log.Fatalf("Unknown sink type: %s", cfg.Sink.Type)
