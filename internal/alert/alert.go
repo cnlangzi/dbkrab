@@ -2,11 +2,11 @@ package alert
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/cdc"
@@ -50,13 +50,16 @@ type AlertChannel struct {
 type AlertManager struct {
 	config  AlertConfig
 	client  *http.Client
+	wg      sync.WaitGroup
+	sem     chan struct{} // Bounded concurrency for async alerts
 }
 
 // NewAlertManager creates a new alert manager
 func NewAlertManager(config AlertConfig) *AlertManager {
 	return &AlertManager{
 		config: config,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{Timeout: 5 * time.Second}, // Shorter timeout to avoid blocking
+		sem:    make(chan struct{}, 3),                 // Max 3 concurrent alert sends
 	}
 }
 
@@ -99,7 +102,8 @@ func (m *AlertManager) SendEmergency(title string, gap cdc.GapInfo) {
 	m.send(alert)
 }
 
-// send dispatches the alert to configured channels
+// send dispatches the alert to configured channels asynchronously
+// Uses bounded concurrency to avoid overwhelming the system
 func (m *AlertManager) send(alert Alert) {
 	if !m.config.Enabled {
 		log.Printf("[ALERT %s] %s - %s (alerts disabled)", alert.Level, alert.Title, alert.Message)
@@ -108,6 +112,31 @@ func (m *AlertManager) send(alert Alert) {
 
 	log.Printf("[ALERT %s] %s - %s", alert.Level, alert.Title, alert.Message)
 
+	// Acquire semaphore (non-blocking for emergency alerts)
+	if alert.Level == AlertLevelEmergency {
+		// Emergency alerts block until they can send
+		m.sem <- struct{}{}
+		go func() {
+			defer func() { <-m.sem }()
+			m.sendSync(alert)
+		}()
+	} else {
+		// Non-emergency: try to send, but don't block if too many in flight
+		select {
+		case m.sem <- struct{}{}:
+			m.wg.Add(1)
+			go func() {
+				defer func() { <-m.sem; m.wg.Done() }()
+				m.sendSync(alert)
+			}()
+		default:
+			log.Printf("[ALERT %s] Dropping alert due to high load: %s", alert.Level, alert.Title)
+		}
+	}
+}
+
+// sendSync sends alerts synchronously (called from goroutine)
+func (m *AlertManager) sendSync(alert Alert) {
 	// Send to webhook if configured
 	if m.config.WebhookURL != "" {
 		if err := m.sendWebhook(m.config.WebhookURL, alert); err != nil {
@@ -130,6 +159,11 @@ func (m *AlertManager) send(alert Alert) {
 			log.Printf("Unknown alert channel type: %s", channel.Type)
 		}
 	}
+}
+
+// Shutdown waits for all pending alerts to be sent
+func (m *AlertManager) Shutdown() {
+	m.wg.Wait()
 }
 
 // sendWebhook sends alert to a generic webhook
@@ -231,6 +265,3 @@ func formatLSN(lsn []byte) string {
 	}
 	return fmt.Sprintf("%X", lsn)
 }
-
-// Dummy context for unused parameter
-var _ context.Context

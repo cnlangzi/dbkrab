@@ -360,8 +360,8 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 			}
 		}
 
-		// Check for gaps
-		gap, err := p.gapDetector.CheckGap(ctx, captureInstance, currentLSN)
+		// Check for gaps - pass both original table name and capture instance
+		gap, err := p.gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
 		if err != nil {
 			log.Printf("Gap check error for %s: %v", table, err)
 			continue

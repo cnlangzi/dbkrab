@@ -10,7 +10,8 @@ import (
 
 // GapInfo contains information about CDC gap detection
 type GapInfo struct {
-	Table            string
+	Table            string      // Original table name (schema.table format)
+	CaptureInstance  string      // CDC capture instance name
 	CurrentLSN       []byte
 	MinLSN           []byte
 	MaxLSN           []byte
@@ -38,11 +39,14 @@ func NewGapDetector(db *sql.DB) *GapDetector {
 }
 
 // CheckGap checks for CDC gaps and lag for a specific table
-func (d *GapDetector) CheckGap(ctx context.Context, captureInstance string, currentLSN []byte) (GapInfo, error) {
+// tableName: original table name in schema.table format
+// captureInstance: CDC capture instance name
+func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance string, currentLSN []byte) (GapInfo, error) {
 	gap := GapInfo{
-		Table:      captureInstance,
-		CurrentLSN: currentLSN,
-		CheckedAt:  time.Now(),
+		Table:           tableName,
+		CaptureInstance: captureInstance,
+		CurrentLSN:      currentLSN,
+		CheckedAt:       time.Now(),
 	}
 
 	// Get CDC min LSN (cleanup boundary)
