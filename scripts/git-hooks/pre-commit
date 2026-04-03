@@ -1,0 +1,50 @@
+#!/bin/bash
+# dbkrab pre-commit hook
+# Runs lint and tests before allowing commit
+#
+# To skip: SKIP_PRE_COMMIT=1 git commit ...
+
+set -e
+
+# Allow skipping
+if [ "${SKIP_PRE_COMMIT:-0}" = "1" ]; then
+    echo "⏭️  Skipping pre-commit checks (SKIP_PRE_COMMIT=1)"
+    exit 0
+fi
+
+echo "🔍 Running pre-commit checks..."
+
+# Get the directory of this script
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+cd "$PROJECT_ROOT"
+
+# Run vet
+echo "📝 Running go vet..."
+if ! make vet; then
+    echo "❌ go vet failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run tests
+echo "🧪 Running tests..."
+if ! make test-short; then
+    echo "❌ Tests failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run linter (if available, skip if not installed)
+echo "🔎 Checking for linter..."
+if command -v golangci-lint &> /dev/null; then
+    echo "Running golangci-lint..."
+    if ! make lint 2>/dev/null; then
+        echo "⚠️  Lint failed. Fix issues or run: golangci-lint run --fix"
+        exit 1
+    fi
+else
+    echo "⏭️  golangci-lint not installed, skipping lint check"
+fi
+
+echo "✅ All pre-commit checks passed!"
+exit 0
