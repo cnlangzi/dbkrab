@@ -37,3 +37,35 @@ api_port: 9020
 sink:
   type: sqlite
   path: ./data/cdc.db
+
+# CDC gap protection (prevents data loss from CDC cleanup)
+cdc_protection:
+  enabled: true
+  
+  # How often to check for gaps
+  check_interval: 1m
+  
+  # Warning thresholds (triggers alert, continues polling)
+  warning_lag_bytes: 104857600      # 100MB
+  warning_lag_duration: 1h
+  
+  # Critical thresholds (triggers alert, continues polling)
+  critical_lag_bytes: 1073741824    # 1GB
+  critical_lag_duration: 6h
+  
+  # Recovery strategy when data loss is detected
+  # Options: manual (pause and wait), snapshot (auto full load), timestamp (time-based recovery)
+  recovery:
+    strategy: manual  # Recommended for production
+  
+  # Alert configuration
+  alert:
+    enabled: true
+    # Generic webhook
+    webhook_url: https://hooks.example.com/alert
+    # Multiple channels
+    channels:
+      - type: feishu
+        url: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+      - type: webhook
+        url: https://hooks.slack.com/services/xxx
