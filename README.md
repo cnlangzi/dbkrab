@@ -232,7 +232,7 @@ SELECT name, is_cdc_enabled FROM sys.tables;
 
 ## License
 
-MIT License - see LICENSE file.
+Apache License 2.0 - see [LICENSE](LICENSE)
 
 ---
 
