@@ -54,7 +54,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.0.2
+          version: v2.11.4
 
   pre-commit:
     name: Pre-commit Checks
