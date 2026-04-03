@@ -15,14 +15,14 @@ import (
 
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
-	cfg     *config.Config
-	db      *sql.DB
-	querier *cdc.Querier
-	offsets *offset.Store
-	sink    Sink
-	handler Handler
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	cfg      *config.Config
+	db       *sql.DB
+	querier  *cdc.Querier
+	offsets  *offset.Store
+	sink     Sink
+	handler  Handler
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // Sink interface for storing changes
@@ -94,8 +94,9 @@ func (p *Poller) Start(ctx context.Context) error {
 
 // Stop stops the poller
 func (p *Poller) Stop() {
-	close(p.stopCh)
-	p.wg.Wait()
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
 }
 
 // poll performs one polling cycle
