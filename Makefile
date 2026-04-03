@@ -70,7 +70,7 @@ clean:
 lint:
 	@echo "Running linters..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
+		golangci-lint run --timeout=5m ./internal/...; \
 	else \
 		echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
 		$(GO) vet ./...; \

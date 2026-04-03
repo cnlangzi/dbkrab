@@ -47,10 +47,10 @@ if ! make vet; then
     exit 1
 fi
 
-# Run linter
+# Run linter (only internal packages to avoid OOM with CGO deps)
 echo "🔎 Running golangci-lint..."
-if ! golangci-lint run ./... --timeout=5m; then
-    echo "❌ Lint failed. Fix issues or run: golangci-lint run --fix"
+if ! golangci-lint run --timeout=5m ./internal/...; then
+    echo "❌ Lint failed. Fix issues or run: golangci-lint run --fix ./internal/..."
     exit 1
 fi
 
