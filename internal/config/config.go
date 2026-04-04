@@ -183,26 +183,59 @@ func (c *Config) CriticalLagDuration() (time.Duration, error) {
 	return time.ParseDuration(c.CDCProtection.CriticalLagDuration)
 }
 
-// MaxDisconnectDuration returns the maximum disconnect duration before alerting
-func (c *Config) MaxDisconnectDuration() (time.Duration, error) {
+// MaxDisconnectDuration returns the maximum disconnect duration before alerting.
+// It handles misconfiguration by falling back to a safe default.
+func (c *Config) MaxDisconnectDuration() time.Duration {
+	const defaultMaxDisconnectDuration = 30 * time.Minute
+
 	if c.GracefulDegradation.MaxDisconnectDuration == "" {
-		return 30 * time.Minute, nil
+		return defaultMaxDisconnectDuration
 	}
-	return time.ParseDuration(c.GracefulDegradation.MaxDisconnectDuration)
+
+	d, err := time.ParseDuration(c.GracefulDegradation.MaxDisconnectDuration)
+	if err != nil || d <= 0 {
+		// Malformed or non-positive durations are treated as misconfiguration,
+		// so we fall back to the default instead of returning a zero duration.
+		return defaultMaxDisconnectDuration
+	}
+
+	return d
 }
 
-// ReconnectBaseDelay returns the base delay for reconnection attempts
-func (c *Config) ReconnectBaseDelay() (time.Duration, error) {
+// ReconnectBaseDelay returns the base delay for reconnection attempts.
+// It handles misconfiguration by falling back to a safe default.
+func (c *Config) ReconnectBaseDelay() time.Duration {
+	const defaultReconnectBaseDelay = 5 * time.Second
+
 	if c.GracefulDegradation.ReconnectBaseDelay == "" {
-		return 5 * time.Second, nil
+		return defaultReconnectBaseDelay
 	}
-	return time.ParseDuration(c.GracefulDegradation.ReconnectBaseDelay)
+
+	d, err := time.ParseDuration(c.GracefulDegradation.ReconnectBaseDelay)
+	if err != nil || d <= 0 {
+		// Malformed or non-positive durations are treated as misconfiguration,
+		// so we fall back to the default instead of returning a zero duration.
+		return defaultReconnectBaseDelay
+	}
+
+	return d
 }
 
-// ReconnectMaxDelay returns the maximum delay for reconnection attempts
-func (c *Config) ReconnectMaxDelay() (time.Duration, error) {
+// ReconnectMaxDelay returns the maximum delay for reconnection attempts.
+// It handles misconfiguration by falling back to a safe default.
+func (c *Config) ReconnectMaxDelay() time.Duration {
+	const defaultReconnectMaxDelay = 60 * time.Second
+
 	if c.GracefulDegradation.ReconnectMaxDelay == "" {
-		return 60 * time.Second, nil
+		return defaultReconnectMaxDelay
 	}
-	return time.ParseDuration(c.GracefulDegradation.ReconnectMaxDelay)
+
+	d, err := time.ParseDuration(c.GracefulDegradation.ReconnectMaxDelay)
+	if err != nil || d <= 0 {
+		// Malformed or non-positive durations are treated as misconfiguration,
+		// so we fall back to the default instead of returning a zero duration.
+		return defaultReconnectMaxDelay
+	}
+
+	return d
 }

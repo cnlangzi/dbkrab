@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,8 +134,7 @@ func (p *Poller) Start(ctx context.Context) error {
 	// Graceful degradation: track reconnection state
 	var reconnectDelay time.Duration
 	if p.cfg.GracefulDegradation.Enabled {
-		baseDelay, _ := p.cfg.ReconnectBaseDelay()
-		reconnectDelay = baseDelay
+		reconnectDelay = p.cfg.ReconnectBaseDelay()
 	}
 
 	for {
@@ -151,13 +151,11 @@ func (p *Poller) Start(ctx context.Context) error {
 				if p.cfg.GracefulDegradation.Enabled && p.isMSSQLDisconnectError(err) {
 					if handled := p.handleDisconnection(ctx, err, reconnectDelay); handled {
 						// Reset reconnect delay on success
-						baseDelay, _ := p.cfg.ReconnectBaseDelay()
-						reconnectDelay = baseDelay
+						reconnectDelay = p.cfg.ReconnectBaseDelay()
 						continue
 					}
 					// Exponential backoff for next retry
-					maxDelay, _ := p.cfg.ReconnectMaxDelay()
-					reconnectDelay = min(reconnectDelay*2, maxDelay)
+					reconnectDelay = min(reconnectDelay*2, p.cfg.ReconnectMaxDelay())
 				}
 
 				// Continue polling despite errors
@@ -438,33 +436,28 @@ func (p *Poller) isMSSQLDisconnectError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+
+	// Normalize error string for case-insensitive matching
+	errStr := strings.ToLower(err.Error())
+
 	// Common MSSQL disconnection errors
 	disconnectPatterns := []string{
 		"connection reset",
 		"connection closed",
 		"broken pipe",
-		"EOF",
+		"eof",
 		"i/o timeout",
 		"context deadline exceeded",
 		"no connection",
 		"network related",
 	}
-	for _, pattern := range disconnectPatterns {
-		if contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
 
-// contains is a helper to check if a string contains a substring
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+	for _, pattern := range disconnectPatterns {
+		if strings.Contains(errStr, pattern) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -480,10 +473,7 @@ func (p *Poller) handleDisconnection(ctx context.Context, err error, reconnectDe
 	p.disconnectMu.Unlock()
 
 	// Check if exceeded max disconnect duration
-	maxDuration, err := p.cfg.MaxDisconnectDuration()
-	if err != nil {
-		maxDuration = 30 * time.Minute
-	}
+	maxDuration := p.cfg.MaxDisconnectDuration()
 
 	p.disconnectMu.RLock()
 	disconnectDuration := time.Since(p.disconnectStart)
