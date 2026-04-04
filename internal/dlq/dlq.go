@@ -49,6 +49,7 @@ const (
 // DLQEntry represents a dead letter queue entry
 type DLQEntry struct {
 	ID           int64     `json:"id"`
+	TraceID      string    `json:"trace_id"` // Trace ID for log correlation
 	LSN          string    `json:"lsn"`
 	TableName    string    `json:"table_name"`
 	Operation    string    `json:"operation"`
