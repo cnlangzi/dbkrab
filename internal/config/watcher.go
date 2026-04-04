@@ -52,11 +52,22 @@ func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
 // Start begins watching for config changes
 func (w *Watcher) Start(onReload func(*Config)) {
 	go func() {
+		defer func() {
+			slog.Info("config watcher stopped", "path", w.path)
+		}()
+
+		eventsCh := w.watcher.Events
+		errorsCh := w.watcher.Errors
+
 		for {
 			select {
 			case <-w.done:
 				return
-			case event := <-w.watcher.Events:
+			case event, ok := <-eventsCh:
+				if !ok {
+					// Channel closed, exit gracefully
+					return
+				}
 				// Filter by filename to only handle events for the target config file
 				if filepath.Base(event.Name) != filepath.Base(w.path) {
 					continue
@@ -72,7 +83,11 @@ func (w *Watcher) Start(onReload func(*Config)) {
 					// Apply safe reloads
 					w.applySafeReload(newCfg, onReload)
 				}
-			case err := <-w.watcher.Errors:
+			case err, ok := <-errorsCh:
+				if !ok {
+					// Channel closed, exit gracefully
+					return
+				}
 				if err != nil {
 					slog.Warn("config watcher error", "error", err)
 				}
@@ -114,11 +129,14 @@ func (w *Watcher) applySafeReload(newCfg *Config, onReload func(*Config)) {
 	}
 }
 
-// Get returns the current config
+// Get returns a copy of the current config
+// Callers must not modify the returned config; use config file edits and hot reload instead.
 func (w *Watcher) Get() *Config {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return w.cfg
+	// Return a copy to prevent callers from mutating internal state
+	cfgCopy := *w.cfg
+	return &cfgCopy
 }
 
 // Stop stops the watcher
