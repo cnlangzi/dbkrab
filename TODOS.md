@@ -93,13 +93,12 @@
 
 ---
 
-### P1-4: 密码管理
-- [ ] 支持环境变量注入（`DBKRAB_DB_PASSWORD`）
-- [ ] config.yml 支持 `password_env` 字段
-- [ ] 文档：Kubernetes Secret / Vault 集成指南
+### P1-4: 密码管理 ❌ **不需要**
+- 支持环境变量注入（`DBKRAB_DB_PASSWORD`）
+- config.yml 支持 `password_env` 字段
+- 文档：Kubernetes Secret / Vault 集成指南
 
-**验收标准**:
-- config.yml 无需存储明文密码
+**决策**: 2026-04-03 - 不需要，用户要求跳过
 
 ---
 
