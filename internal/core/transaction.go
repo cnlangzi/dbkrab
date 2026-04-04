@@ -1,6 +1,11 @@
 package core
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Operation represents the type of change
 type Operation int
@@ -39,8 +44,9 @@ type Change struct {
 
 // Transaction represents a group of changes in the same transaction
 type Transaction struct {
-	ID        string    `json:"id"`
-	Changes   []Change  `json:"changes"`
+	TraceID  string      `json:"trace_id"` // Human-readable trace ID for log correlation
+	ID      string      `json:"id"`      // Internal transaction ID
+	Changes []Change   `json:"changes"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -49,11 +55,19 @@ func (t *Transaction) AddChange(c Change) {
 	t.Changes = append(t.Changes, c)
 }
 
-// NewTransaction creates a new transaction
+// NewTransaction creates a new transaction with a unique trace ID
 func NewTransaction(id string) *Transaction {
 	return &Transaction{
-		ID:        id,
-		Changes:   make([]Change, 0),
+		TraceID:  generateTraceID(),
+		ID:      id,
+		Changes: make([]Change, 0),
 		CreatedAt: time.Now(),
 	}
+}
+
+// generateTraceID creates a short, unique trace ID for log correlation
+// Format: {short-uuid}-{timestamp}
+func generateTraceID() string {
+	u := uuid.New()
+	return fmt.Sprintf("%s-%d", u.String()[:8], time.Now().UnixNano())
 }
