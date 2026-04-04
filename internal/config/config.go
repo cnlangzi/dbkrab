@@ -18,6 +18,7 @@ type Config struct {
 	Sink               SinkConfig             `yaml:"sink"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
+	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
 }
 
 type MSSQLConfig struct {
@@ -26,6 +27,14 @@ type MSSQLConfig struct {
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Database string `yaml:"database"`
+}
+
+// GracefulDegradationConfig contains graceful degradation settings for MSSQL disconnection
+type GracefulDegradationConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	MaxDisconnectDuration string `yaml:"max_disconnect_duration"` // e.g., "30m"
+	ReconnectBaseDelay  string `yaml:"reconnect_base_delay"`     // e.g., "5s"
+	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
 type SinkConfig struct {
@@ -130,6 +139,19 @@ func Load(path string) (*Config, error) {
 		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
 	}
 
+	// Graceful degradation defaults
+	if cfg.GracefulDegradation.Enabled {
+		if cfg.GracefulDegradation.MaxDisconnectDuration == "" {
+			cfg.GracefulDegradation.MaxDisconnectDuration = "30m"
+		}
+		if cfg.GracefulDegradation.ReconnectBaseDelay == "" {
+			cfg.GracefulDegradation.ReconnectBaseDelay = "5s"
+		}
+		if cfg.GracefulDegradation.ReconnectMaxDelay == "" {
+			cfg.GracefulDegradation.ReconnectMaxDelay = "60s"
+		}
+	}
+
 	return &cfg, nil
 }
 
@@ -159,4 +181,28 @@ func (c *Config) CriticalLagDuration() (time.Duration, error) {
 		return 6 * time.Hour, nil
 	}
 	return time.ParseDuration(c.CDCProtection.CriticalLagDuration)
+}
+
+// MaxDisconnectDuration returns the maximum disconnect duration before alerting
+func (c *Config) MaxDisconnectDuration() (time.Duration, error) {
+	if c.GracefulDegradation.MaxDisconnectDuration == "" {
+		return 30 * time.Minute, nil
+	}
+	return time.ParseDuration(c.GracefulDegradation.MaxDisconnectDuration)
+}
+
+// ReconnectBaseDelay returns the base delay for reconnection attempts
+func (c *Config) ReconnectBaseDelay() (time.Duration, error) {
+	if c.GracefulDegradation.ReconnectBaseDelay == "" {
+		return 5 * time.Second, nil
+	}
+	return time.ParseDuration(c.GracefulDegradation.ReconnectBaseDelay)
+}
+
+// ReconnectMaxDelay returns the maximum delay for reconnection attempts
+func (c *Config) ReconnectMaxDelay() (time.Duration, error) {
+	if c.GracefulDegradation.ReconnectMaxDelay == "" {
+		return 60 * time.Second, nil
+	}
+	return time.ParseDuration(c.GracefulDegradation.ReconnectMaxDelay)
 }

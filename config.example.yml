@@ -80,3 +80,11 @@ cdc_protection:
         url: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
       - type: webhook
         url: https://hooks.slack.com/services/xxx
+
+# Graceful degradation for MSSQL disconnection
+# When enabled, dbkrab will retry connection instead of exiting on MSSQL disconnection
+graceful_degradation:
+  enabled: true
+  max_disconnect_duration: 30m  # Max time to wait before alerting
+  reconnect_base_delay: 5s      # Initial delay between reconnection attempts
+  reconnect_max_delay: 60s      # Maximum delay (exponential backoff caps at this)
