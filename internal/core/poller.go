@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -11,7 +13,9 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/alert"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/config"
+	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
 // Poller polls MSSQL CDC tables for changes
@@ -24,6 +28,7 @@ type Poller struct {
 	offsets       offset.StoreInterface
 	sink          Sink
 	handler       Handler
+	dlq           *dlq.DLQ
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	paused        bool
@@ -60,13 +65,14 @@ type tablePollResult struct {
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
 		querier:  cdc.NewQuerier(db),
 		offsets:  offsetStore,
 		sink:     sink,
+		dlq:      dlqStore,
 		stopCh:   make(chan struct{}),
 	}
 
@@ -269,18 +275,26 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	// Process complete transactions
 	var processErrors []error
 	for _, tx := range completeTxs {
-		// Handler processing
+		// Handler processing with retry
 		if p.handler != nil {
-			if err := p.handler.Handle(tx); err != nil {
-				log.Printf("Handler error for tx %s: %v", tx.ID, err)
-				// Handler errors don't block offset advancement
+			err := retry.DoWithName(ctx, func() error {
+				return p.handler.Handle(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
+			if err != nil {
+				log.Printf("Handler error for tx %s after retries: %v", tx.ID, err)
+				// Handler errors don't block offset advancement, but write to DLQ
+				p.writeToDLQ(tx, err, "handler")
 			}
 		}
 
-		// Sink processing
+		// Sink processing with retry
 		if p.sink != nil {
-			if err := p.sink.Write(tx); err != nil {
-				log.Printf("Sink error for tx %s: %v", tx.ID, err)
+			err := retry.DoWithName(ctx, func() error {
+				return p.sink.Write(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
+			if err != nil {
+				log.Printf("Sink error for tx %s after retries: %v", tx.ID, err)
+				p.writeToDLQ(tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
 			}
 		}
@@ -304,17 +318,26 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
-		// Handler processing (non-blocking: continue even if handler fails)
+		// Handler processing with retry (non-blocking: continue even if handler fails)
 		if p.handler != nil {
-			if err := p.handler.Handle(&tx); err != nil {
-				log.Printf("Handler error for tx %s: %v", tx.ID, err)
+			err := retry.DoWithName(ctx, func() error {
+				return p.handler.Handle(&tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
+			if err != nil {
+				log.Printf("Handler error for tx %s after retries: %v", tx.ID, err)
+				// Handler errors don't block offset advancement, but write to DLQ
+				p.writeToDLQ(&tx, err, "handler")
 			}
 		}
 
-		// Sink processing (blocking: must succeed for offset advancement)
+		// Sink processing with retry (blocking: must succeed for offset advancement)
 		if p.sink != nil {
-			if err := p.sink.Write(&tx); err != nil {
-				log.Printf("Sink error for tx %s: %v", tx.ID, err)
+			err := retry.DoWithName(ctx, func() error {
+				return p.sink.Write(&tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
+			if err != nil {
+				log.Printf("Sink error for tx %s after retries: %v", tx.ID, err)
+				p.writeToDLQ(&tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
 			}
 		}
@@ -496,4 +519,75 @@ func (p *Poller) recordGapCheck() {
 	p.gapCheckMu.Lock()
 	p.lastGapCheck = time.Now()
 	p.gapCheckMu.Unlock()
+}
+
+// writeToDLQ writes a failed transaction to the dead letter queue
+func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
+	if p.dlq == nil {
+		log.Printf("[DLQ] Cannot write entry: DLQ not initialized")
+		return
+	}
+
+	// Determine retry count from error if it's a RetryError
+	retryCount := 0
+	var retryErr *retry.RetryError
+	if errors.As(err, &retryErr) {
+		retryCount = retryErr.RetryCount
+	}
+
+	// Get the first change to extract table name and operation
+	var tableName, operation string
+	if len(tx.Changes) > 0 {
+		tableName = tx.Changes[0].Table
+		operation = tx.Changes[0].Operation.String()
+	}
+
+	// Encode transaction data as JSON
+	txData := map[string]interface{}{
+		"transaction_id": tx.ID,
+		"changes":        tx.Changes,
+	}
+	changeJSON, encodeErr := json.Marshal(txData)
+	if encodeErr != nil {
+		log.Printf("[DLQ] Failed to encode transaction data: %v", encodeErr)
+		changeJSON = []byte("{}")
+	}
+
+	// Get LSN from first change
+	var lsn string
+	if len(tx.Changes) > 0 {
+		lsn = fmt.Sprintf("%v", tx.Changes[0].LSN)
+	}
+
+	entry := &dlq.DLQEntry{
+		LSN:          lsn,
+		TableName:    tableName,
+		Operation:    operation,
+		ChangeData:   string(changeJSON),
+		ErrorMessage: fmt.Sprintf("%s error: %v", source, err),
+		RetryCount:   retryCount,
+		Status:       dlq.StatusPending,
+	}
+
+	if writeErr := p.dlq.Write(entry); writeErr != nil {
+		log.Printf("[DLQ] Failed to write entry: %v", writeErr)
+		return
+	}
+
+	// Send alert
+	if p.alertManager != nil {
+		gapInfo := cdc.GapInfo{
+			Table:       tableName,
+			LagBytes:    0,
+			LagDuration: 0,
+			CheckedAt:   time.Now(),
+		}
+		p.alertManager.SendWarning(
+			fmt.Sprintf("Transaction %s written to DLQ", tx.ID),
+			gapInfo,
+		)
+	}
+
+	log.Printf("[DLQ] Transaction %s written to DLQ (table=%s, operation=%s, retries=%d)",
+		tx.ID, tableName, operation, retryCount)
 }
