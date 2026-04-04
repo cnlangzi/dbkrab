@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 	"embed"
-	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -194,30 +192,6 @@ func (s *Server) handleDLQReplay(c *xun.Context) error {
 	return c.View(map[string]any{"success": true, "message": "Entry replayed"})
 }
 
-// handleDLQIgnore handles POST /api/dlq/:id/ignore
-func (s *Server) handleDLQIgnore(c *xun.Context) error {
-	if s.dlq == nil {
-		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
-	}
-
-	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
-	if err != nil {
-		c.WriteStatus(http.StatusBadRequest)
-		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
-	}
-
-	body, _ := io.ReadAll(c.Request.Body)
-	var params struct{ Note string }
-	json.Unmarshal(body, &params)
-
-	err = s.dlq.Ignore(id, params.Note)
-	if err != nil {
-		return c.View(map[string]any{"success": false, "error": err.Error()})
-	}
-
-	return c.View(map[string]any{"success": true, "message": "Entry ignored"})
-}
-
 // handleDLQDelete handles DELETE /api/dlq/:id
 func (s *Server) handleDLQDelete(c *xun.Context) error {
 	if s.dlq == nil {
@@ -262,4 +236,29 @@ func (s *Server) getDLQStats() (map[string]int, error) {
 		stats[string(status)] = count
 	}
 	return stats, nil
+}
+// handleDLQIgnore handles POST /api/dlq/:id/ignore
+func (s *Server) handleDLQIgnore(c *xun.Context) error {
+	if s.dlq == nil {
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
+	}
+
+	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
+	if err != nil {
+		c.WriteStatus(http.StatusBadRequest)
+		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
+	}
+
+	// Read note from form data
+	if err := c.Request.ParseForm(); err != nil {
+		return c.View(map[string]any{"success": false, "error": "failed to parse form"})
+	}
+	note := c.Request.FormValue("note")
+
+	err = s.dlq.Ignore(id, note)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "message": "Entry ignored"})
 }
