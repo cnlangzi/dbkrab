@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +35,7 @@ func NewSink(path string) (*Sink, error) {
 	// Create tables
 	if err := createTables(db); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("db.Close error: %v", closeErr)
+			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
@@ -88,7 +88,7 @@ func (s *Sink) Write(tx *core.Transaction) error {
 	}
 	defer func() {
 		if err := stmt.Close(); err != nil {
-			log.Printf("stmt.Close error: %v", err)
+			slog.Warn("stmt.Close error", "error", err)
 		}
 	}()
 
@@ -130,7 +130,7 @@ func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("rows.Close error: %v", err)
+			slog.Warn("rows.Close error", "error", err)
 		}
 	}()
 

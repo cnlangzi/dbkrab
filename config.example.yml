@@ -42,10 +42,12 @@ sink:
   type: sqlite
   path: ./data/cdc.db
 
-# Transaction buffer for cross-table integrity
+# Transaction buffer for cross-table integrity and batch processing
 transaction_buffer:
   enabled: false  # Set to true for multi-table transaction integrity
   max_wait_time: 30s  # Max time to wait for incomplete transactions
+  max_transactions_per_batch: 1000  # Max transactions per batch before delivery
+  max_batch_bytes: 10485760  # 10MB max batch size before delivery
 
 # CDC gap protection (prevents data loss from CDC cleanup)
 cdc_protection:

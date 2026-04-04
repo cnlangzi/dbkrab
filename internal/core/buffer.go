@@ -1,6 +1,7 @@
 package core
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -10,6 +11,9 @@ type TransactionBuffer struct {
 	mu            sync.RWMutex
 	pending       map[string]*pendingTransaction
 	maxWaitTime   time.Duration
+	maxTxCount    int              // maximum transactions per batch
+	maxBatchBytes int              // maximum estimated bytes per batch
+	estimatedBytes int              // current estimated batch size in bytes
 	onComplete    func(*Transaction)
 	onTimeout     func(*Transaction)
 	cleanupTicker *time.Ticker
@@ -20,21 +24,29 @@ type pendingTransaction struct {
 	transactionID string
 	changes       []Change
 	firstSeen     time.Time
-	tables        map[string]bool // Track which tables have changes for this transaction
+	tables        map[string]bool    // Track which tables have changes for this transaction
 	complete      bool
+	estimatedSize int                // Estimated size of this transaction in bytes
 }
 
 // NewTransactionBuffer creates a new transaction buffer
-func NewTransactionBuffer(maxWaitTime time.Duration) *TransactionBuffer {
+func NewTransactionBuffer(maxWaitTime time.Duration, maxTxCount int, maxBatchBytes int) *TransactionBuffer {
 	tb := &TransactionBuffer{
-		pending:     make(map[string]*pendingTransaction),
-		maxWaitTime: maxWaitTime,
-		stopCh:      make(chan struct{}),
+		pending:        make(map[string]*pendingTransaction),
+		maxWaitTime:    maxWaitTime,
+		maxTxCount:    maxTxCount,
+		maxBatchBytes: maxBatchBytes,
+		stopCh:         make(chan struct{}),
 	}
 
 	// Start cleanup ticker
 	tb.cleanupTicker = time.NewTicker(maxWaitTime / 2)
 	go tb.cleanupLoop()
+
+	slog.Info("transaction buffer initialized",
+		"max_wait_time", maxWaitTime,
+		"max_transactions_per_batch", maxTxCount,
+		"max_batch_bytes", maxBatchBytes)
 
 	return tb
 }
@@ -57,12 +69,28 @@ func (tb *TransactionBuffer) Add(change Change) {
 		tb.pending[txID] = pending
 	}
 
+	// Estimate change size
+	changeSize := estimateChangeSize(change)
+	pending.estimatedSize += changeSize
+	tb.estimatedBytes += changeSize
+
 	// Add change
 	pending.changes = append(pending.changes, change)
 	pending.tables[change.Table] = true
 }
 
-// GetCompleteTransactions returns transactions that are ready for delivery (timed out or marked complete)
+// estimateChangeSize estimates the memory size of a change in bytes
+func estimateChangeSize(change Change) int {
+	// Rough estimation: table name + operation + basic overhead
+	size := len(change.Table) + len(change.TransactionID) + 64 // base overhead
+	// Add data map size (rough approximation)
+	for k := range change.Data {
+		size += len(k) + 64 // key + estimated value size
+	}
+	return size
+}
+
+// GetCompleteTransactions returns transactions that are ready for delivery (timed out, batch full, or marked complete)
 func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
@@ -72,9 +100,16 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	var toRemove []string
 
 	for txID, pending := range tb.pending {
-		// Check if transaction has timed out or is marked complete
-		if now.Sub(pending.firstSeen) > tb.maxWaitTime || pending.complete {
-			// Force deliver incomplete transaction
+		// Check if transaction should be delivered:
+		// 1. Timed out
+		// 2. Marked complete
+		// 3. Batch size limits reached
+		shouldDeliver := pending.complete ||
+			now.Sub(pending.firstSeen) > tb.maxWaitTime ||
+			len(tb.pending) >= tb.maxTxCount ||
+			tb.estimatedBytes >= tb.maxBatchBytes
+
+		if shouldDeliver {
 			tx := tb.buildTransaction(pending)
 			if tx != nil {
 				if tb.onTimeout != nil {
@@ -82,6 +117,8 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 				}
 				complete = append(complete, tx)
 				toRemove = append(toRemove, txID)
+				// Subtract from estimated bytes
+				tb.estimatedBytes -= pending.estimatedSize
 			}
 		}
 	}
@@ -107,6 +144,7 @@ func (tb *TransactionBuffer) SetComplete(txID string) *Transaction {
 	pending.complete = true
 	tx := tb.buildTransaction(pending)
 	delete(tb.pending, txID)
+	tb.estimatedBytes -= pending.estimatedSize
 
 	return tx
 }

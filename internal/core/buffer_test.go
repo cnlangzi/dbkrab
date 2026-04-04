@@ -8,7 +8,7 @@ import (
 
 // TestTransactionBufferBasicAddAndGet tests basic add and retrieval
 func TestTransactionBufferBasicAddAndGet(t *testing.T) {
-	buffer := NewTransactionBuffer(100 * time.Millisecond)
+	buffer := NewTransactionBuffer(100 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add a change
@@ -27,7 +27,7 @@ func TestTransactionBufferBasicAddAndGet(t *testing.T) {
 
 // TestTransactionBufferMultipleChangesSameTransaction tests multiple changes in same transaction
 func TestTransactionBufferMultipleChangesSameTransaction(t *testing.T) {
-	buffer := NewTransactionBuffer(100 * time.Millisecond)
+	buffer := NewTransactionBuffer(100 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add multiple changes to same transaction
@@ -62,7 +62,7 @@ func TestTransactionBufferMultipleChangesSameTransaction(t *testing.T) {
 
 // TestTransactionBufferMultipleTransactions tests multiple concurrent transactions
 func TestTransactionBufferMultipleTransactions(t *testing.T) {
-	buffer := NewTransactionBuffer(100 * time.Millisecond)
+	buffer := NewTransactionBuffer(100 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add changes to 3 different transactions
@@ -99,7 +99,7 @@ func TestTransactionBufferMultipleTransactions(t *testing.T) {
 
 // TestTransactionBufferCallback tests timeout callback
 func TestTransactionBufferCallback(t *testing.T) {
-	buffer := NewTransactionBuffer(50 * time.Millisecond)
+	buffer := NewTransactionBuffer(50 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	var timeoutCalled bool
@@ -137,7 +137,7 @@ func TestTransactionBufferCallback(t *testing.T) {
 
 // TestTransactionBufferClose tests proper cleanup
 func TestTransactionBufferClose(t *testing.T) {
-	buffer := NewTransactionBuffer(1 * time.Second)
+	buffer := NewTransactionBuffer(1 * time.Second, 1000, 10*1024*1024)
 
 	// Add some changes
 	buffer.Add(Change{
@@ -164,7 +164,7 @@ func TestTransactionBufferClose(t *testing.T) {
 
 // TestTransactionBufferTableTracking tests that tables are tracked correctly
 func TestTransactionBufferTableTracking(t *testing.T) {
-	buffer := NewTransactionBuffer(100 * time.Millisecond)
+	buffer := NewTransactionBuffer(100 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add changes from different tables for same transaction
@@ -202,7 +202,7 @@ func TestTransactionBufferTableTracking(t *testing.T) {
 
 // TestTransactionBufferConcurrentAdd tests concurrent add operations
 func TestTransactionBufferConcurrentAdd(t *testing.T) {
-	buffer := NewTransactionBuffer(1 * time.Second)
+	buffer := NewTransactionBuffer(1 * time.Second, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	var wg sync.WaitGroup
@@ -235,7 +235,7 @@ func TestTransactionBufferConcurrentAdd(t *testing.T) {
 
 // TestTransactionBufferEmptyTransaction tests handling of empty transactions
 func TestTransactionBufferEmptyTransaction(t *testing.T) {
-	buffer := NewTransactionBuffer(50 * time.Millisecond)
+	buffer := NewTransactionBuffer(50 * time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Don't add any changes
@@ -252,7 +252,7 @@ func TestTransactionBufferEmptyTransaction(t *testing.T) {
 
 // TestTransactionBufferSize tests buffer size tracking
 func TestTransactionBufferSize(t *testing.T) {
-	buffer := NewTransactionBuffer(1 * time.Second)
+	buffer := NewTransactionBuffer(1 * time.Second, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Initial size should be 0
