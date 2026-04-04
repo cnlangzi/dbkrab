@@ -2,7 +2,7 @@ package offset
 
 import (
 	"database/sql"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -26,7 +26,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("db.Close error after exec failure: %v", closeErr)
+			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		)
 	`); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("db.Close error after exec failure: %v", closeErr)
+			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
 			// Log but don't return error for Close
-			log.Printf("rows.Close error: %v", closeErr)
+			slog.Warn("rows.Close error", "error", closeErr)
 		}
 	}()
 

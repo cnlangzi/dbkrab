@@ -54,8 +54,10 @@ type CDCProtectionConfig struct {
 
 // TransactionBufferConfig contains transaction buffer settings
 type TransactionBufferConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	MaxWaitTime string `yaml:"max_wait_time"` // e.g., "30s"
+	Enabled              bool   `yaml:"enabled"`
+	MaxWaitTime          string `yaml:"max_wait_time"`          // e.g., "30s"
+	MaxTransactionsPerBatch int   `yaml:"max_transactions_per_batch"` // e.g., 1000
+	MaxBatchBytes        int    `yaml:"max_batch_bytes"`         // e.g., 10485760 (10MB)
 }
 
 // RecoveryConfig contains recovery strategy settings
@@ -115,6 +117,17 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.CDCProtection.Recovery.Strategy == "" {
 		cfg.CDCProtection.Recovery.Strategy = "manual" // Default to manual intervention
+	}
+
+	// Transaction buffer defaults
+	if cfg.TransactionBuffer.MaxWaitTime == "" {
+		cfg.TransactionBuffer.MaxWaitTime = "30s"
+	}
+	if cfg.TransactionBuffer.MaxTransactionsPerBatch == 0 {
+		cfg.TransactionBuffer.MaxTransactionsPerBatch = 1000
+	}
+	if cfg.TransactionBuffer.MaxBatchBytes == 0 {
+		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
 	}
 
 	return &cfg, nil

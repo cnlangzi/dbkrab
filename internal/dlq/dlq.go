@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -80,7 +80,7 @@ func New(dbPath string) (*DLQ, error) {
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("db.Close error after exec failure: %v", closeErr)
+			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, fmt.Errorf("enable WAL mode: %w", err)
 	}
@@ -88,7 +88,7 @@ func New(dbPath string) (*DLQ, error) {
 	// Create table
 	if _, err := db.Exec(Schema); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("db.Close error after exec failure: %v", closeErr)
+			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, fmt.Errorf("create table: %w", err)
 	}
@@ -146,8 +146,11 @@ func (d *DLQ) Write(entry *DLQEntry) error {
 	}
 	entry.ID = id
 
-	log.Printf("[DLQ] Written entry %d for table %s, LSN %s: %s",
-		entry.ID, entry.TableName, entry.LSN, entry.ErrorMessage)
+	slog.Info("DLQ entry written",
+		"entry_id", entry.ID,
+		"table", entry.TableName,
+		"lsn", entry.LSN,
+		"error", entry.ErrorMessage)
 
 	return nil
 }
@@ -203,7 +206,7 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("rows.Close error: %v", closeErr)
+			slog.Warn("rows.Close error", "error", closeErr)
 		}
 	}()
 
@@ -346,7 +349,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 		`, StatusPending, time.Now(),
 			fmt.Sprintf("%s (replay failed: %v)", entry.ErrorMessage, err), id)
 		if updateErr != nil {
-			log.Printf("Failed to revert status: %v", updateErr)
+			slog.Warn("failed to revert status", "error", updateErr)
 		}
 		return fmt.Errorf("handler failed: %w", err)
 	}
@@ -361,7 +364,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 		return fmt.Errorf("update status to resolved: %w", err)
 	}
 
-	log.Printf("[DLQ] Entry %d successfully replayed", id)
+	slog.Info("DLQ entry replayed", "entry_id", id)
 	return nil
 }
 
@@ -391,7 +394,7 @@ func (d *DLQ) Ignore(id int64, note string) error {
 		return ErrEntryNotFound
 	}
 
-	log.Printf("[DLQ] Entry %d marked as ignored: %s", id, note)
+	slog.Info("DLQ entry ignored", "entry_id", id, "note", note)
 	return nil
 }
 
@@ -417,7 +420,7 @@ func (d *DLQ) Delete(id int64) error {
 		return ErrEntryNotFound
 	}
 
-	log.Printf("[DLQ] Entry %d deleted", id)
+	slog.Info("DLQ entry deleted", "entry_id", id)
 	return nil
 }
 
@@ -440,7 +443,7 @@ func (d *DLQ) Stats() (map[Status]int, error) {
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("rows.Close error: %v", closeErr)
+			slog.Warn("rows.Close error", "error", closeErr)
 		}
 	}()
 

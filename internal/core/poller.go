@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -80,18 +80,25 @@ func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.Sto
 	if cfg.TransactionBuffer.Enabled {
 		maxWaitTime, err := time.ParseDuration(cfg.TransactionBuffer.MaxWaitTime)
 		if err != nil {
-			log.Printf("Invalid transaction_buffer.max_wait_time, using default 30s: %v", err)
+			slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
 			maxWaitTime = 30 * time.Second
 		}
-		poller.txBuffer = NewTransactionBuffer(maxWaitTime)
-		log.Printf("Transaction buffer enabled (max_wait_time=%v)", maxWaitTime)
+		poller.txBuffer = NewTransactionBuffer(
+			maxWaitTime,
+			cfg.TransactionBuffer.MaxTransactionsPerBatch,
+			cfg.TransactionBuffer.MaxBatchBytes,
+		)
+		slog.Info("transaction buffer enabled",
+			"max_wait_time", maxWaitTime,
+			"max_transactions_per_batch", cfg.TransactionBuffer.MaxTransactionsPerBatch,
+			"max_batch_bytes", cfg.TransactionBuffer.MaxBatchBytes)
 	}
 
 	// Initialize gap detector if CDC protection is enabled
 	if cfg.CDCProtection.Enabled {
 		poller.gapDetector = cdc.NewGapDetector(db)
 		poller.alertManager = alert.NewAlertManager(cfg.CDCProtection.Alert)
-		log.Println("CDC gap protection enabled")
+		slog.Info("CDC gap protection enabled")
 	}
 
 	return poller
@@ -117,7 +124,7 @@ func (p *Poller) Start(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	log.Printf("Starting CDC poller with %v interval for %d tables", interval, len(p.cfg.Tables))
+	slog.Info("starting CDC poller", "interval", interval, "tables", len(p.cfg.Tables))
 
 	for {
 		select {
@@ -127,7 +134,7 @@ func (p *Poller) Start(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := p.poll(ctx); err != nil {
-				log.Printf("Poll error: %v", err)
+				slog.Error("poll error", "error", err)
 				// Continue polling despite errors
 			}
 		}
@@ -151,7 +158,7 @@ func (p *Poller) Stop() {
 func (p *Poller) poll(ctx context.Context) error {
 	// Check if paused due to gap detection
 	if p.isPaused() {
-		log.Println("Poller is paused due to CDC gap detection")
+		slog.Warn("poller is paused due to CDC gap detection")
 		return nil
 	}
 
@@ -165,7 +172,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	// Respect check_interval configuration
 	if p.gapDetector != nil && p.shouldCheckGaps() {
 		if err := p.checkGaps(ctx); err != nil {
-			log.Printf("Gap detection error: %v", err)
+			slog.Error("gap detection error", "error", err)
 			// Gap detection errors don't block polling, but are logged
 		}
 		p.recordGapCheck()
@@ -281,7 +288,9 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 				return p.handler.Handle(tx)
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
-				log.Printf("Handler error for tx %s after retries: %v", tx.ID, err)
+				slog.Error("handler error",
+					"tx_id", tx.ID,
+					"error", err)
 				// Handler errors don't block offset advancement, but write to DLQ
 				p.writeToDLQ(tx, err, "handler")
 			}
@@ -293,7 +302,9 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 				return p.sink.Write(tx)
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
 			if err != nil {
-				log.Printf("Sink error for tx %s after retries: %v", tx.ID, err)
+				slog.Error("sink error",
+					"tx_id", tx.ID,
+					"error", err)
 				p.writeToDLQ(tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
 			}
@@ -324,7 +335,9 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 				return p.handler.Handle(&tx)
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
-				log.Printf("Handler error for tx %s after retries: %v", tx.ID, err)
+				slog.Error("handler error",
+					"tx_id", tx.ID,
+					"error", err)
 				// Handler errors don't block offset advancement, but write to DLQ
 				p.writeToDLQ(&tx, err, "handler")
 			}
@@ -336,7 +349,9 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 				return p.sink.Write(&tx)
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
 			if err != nil {
-				log.Printf("Sink error for tx %s after retries: %v", tx.ID, err)
+				slog.Error("sink error",
+					"tx_id", tx.ID,
+					"error", err)
 				p.writeToDLQ(&tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
 			}
@@ -381,11 +396,13 @@ func (p *Poller) updateOffsets(results []tablePollResult) error {
 		// Only advance offsets for successfully polled tables
 		for table := range successfulTables {
 			if err := p.offsets.Set(table, minLSN.String()); err != nil {
-				log.Printf("Failed to save offset for %s: %v", table, err)
+				slog.Error("failed to save offset", "table", table, "error", err)
 			}
 		}
 
-		log.Printf("Advanced global checkpoint to LSN %s across %d successfully polled tables", minLSN.String(), len(successfulTables))
+		slog.Info("advanced global checkpoint",
+			"lsn", minLSN.String(),
+			"tables", len(successfulTables))
 	}
 
 	return nil
@@ -421,12 +438,12 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 	// Parse duration thresholds with explicit error handling
 	warningLagDuration, err := p.cfg.WarningLagDuration()
 	if err != nil {
-		log.Printf("Warning: invalid warning_lag_duration config, using default 1h: %v", err)
+		slog.Warn("invalid warning_lag_duration config, using default 1h", "error", err)
 		warningLagDuration = 1 * time.Hour
 	}
 	criticalLagDuration, err := p.cfg.CriticalLagDuration()
 	if err != nil {
-		log.Printf("Warning: invalid critical_lag_duration config, using default 6h: %v", err)
+		slog.Warn("invalid critical_lag_duration config, using default 6h", "error", err)
 		criticalLagDuration = 6 * time.Hour
 	}
 
@@ -447,15 +464,17 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 		// Check for gaps
 		gap, err := p.gapDetector.CheckGap(ctx, tableName, captureInstance, currentLSN)
 		if err != nil {
-			log.Printf("Gap check error for %s: %v", table, err)
+			slog.Error("gap check error", "table", table, "error", err)
 			continue
 		}
 
 		// Handle gap based on severity
 		if gap.HasGap {
 			// Data loss detected - emergency
-			log.Printf("[EMERGENCY] CDC data loss detected for %s: missing LSN %X to %X",
-				table, gap.MissingLSNRange.Start, gap.MissingLSNRange.End)
+			slog.Error("CDC data loss detected",
+				"table", table,
+				"missing_lsn_start", fmt.Sprintf("%X", gap.MissingLSNRange.Start),
+				"missing_lsn_end", fmt.Sprintf("%X", gap.MissingLSNRange.End))
 			p.alertManager.SendEmergency("CDC Data Loss Detected", gap)
 			p.pause()
 			return fmt.Errorf("CDC data loss for %s", table)
@@ -463,16 +482,20 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 
 		if gap.IsGapCritical(criticalLagBytes, criticalLagDuration) {
 			// Critical lag
-			log.Printf("[CRITICAL] CDC lag critical for %s: %d bytes, %v",
-				table, gap.LagBytes, gap.LagDuration)
+			slog.Error("CDC lag critical",
+				"table", table,
+				"lag_bytes", gap.LagBytes,
+				"lag_duration", gap.LagDuration)
 			p.alertManager.SendCritical("CDC Lag Critical", gap)
 			// Continue polling but alert
 		}
 
 		if gap.IsGapWarning(warningLagBytes, warningLagDuration) {
 			// Warning lag
-			log.Printf("[WARNING] CDC lag warning for %s: %d bytes, %v",
-				table, gap.LagBytes, gap.LagDuration)
+			slog.Warn("CDC lag warning",
+				"table", table,
+				"lag_bytes", gap.LagBytes,
+				"lag_duration", gap.LagDuration)
 			p.alertManager.SendWarning("CDC Lag Warning", gap)
 		}
 	}
@@ -485,7 +508,7 @@ func (p *Poller) pause() {
 	p.pausedMu.Lock()
 	defer p.pausedMu.Unlock()
 	p.paused = true
-	log.Println("Poller paused")
+	slog.Warn("poller paused")
 }
 
 // isPaused returns true if the poller is paused
@@ -524,7 +547,7 @@ func (p *Poller) recordGapCheck() {
 // writeToDLQ writes a failed transaction to the dead letter queue
 func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	if p.dlq == nil {
-		log.Printf("[DLQ] Cannot write entry: DLQ not initialized")
+		slog.Warn("cannot write to DLQ: not initialized")
 		return
 	}
 
@@ -549,7 +572,7 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 	changeJSON, encodeErr := json.Marshal(txData)
 	if encodeErr != nil {
-		log.Printf("[DLQ] Failed to encode transaction data: %v", encodeErr)
+		slog.Error("failed to encode transaction data", "error", encodeErr)
 		changeJSON = []byte("{}")
 	}
 
@@ -570,7 +593,7 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 
 	if writeErr := p.dlq.Write(entry); writeErr != nil {
-		log.Printf("[DLQ] Failed to write entry: %v", writeErr)
+		slog.Error("failed to write DLQ entry", "error", writeErr)
 		return
 	}
 
@@ -588,6 +611,9 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 		)
 	}
 
-	log.Printf("[DLQ] Transaction %s written to DLQ (table=%s, operation=%s, retries=%d)",
-		tx.ID, tableName, operation, retryCount)
+	slog.Warn("transaction written to DLQ",
+		"tx_id", tx.ID,
+		"table", tableName,
+		"operation", operation,
+		"retries", retryCount)
 }
