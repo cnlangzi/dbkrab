@@ -13,6 +13,7 @@ import (
 	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
@@ -87,11 +88,23 @@ func main() {
 		log.Fatalf("Unknown sink type: %s", cfg.Sink.Type)
 	}
 
+	// Create DLQ (use same SQLite path as sink for simplicity)
+	dlqStore, err := dlq.New(cfg.Sink.Path)
+	if err != nil {
+		log.Fatalf("Failed to create DLQ: %v", err)
+	}
+	defer func() {
+		if err := dlqStore.CloseAndDB(); err != nil {
+			log.Printf("dlq.CloseAndDB error: %v", err)
+		}
+	}()
+	log.Println("Dead letter queue initialized")
+
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, db, sink, offsetStore)
+	poller := core.NewPoller(cfg, db, sink, offsetStore, dlqStore)
 	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
 		return pluginManager.Handle(tx)
 	}))
@@ -104,7 +117,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start API server
-	apiServer := api.NewServer(pluginManager, *apiPort)
+	apiServer := api.NewServerWithDLQ(pluginManager, dlqStore, *apiPort)
 	go func() {
 		log.Printf("API server starting on port %d", *apiPort)
 		if err := apiServer.Start(); err != nil {
