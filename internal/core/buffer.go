@@ -31,6 +31,14 @@ type pendingTransaction struct {
 
 // NewTransactionBuffer creates a new transaction buffer
 func NewTransactionBuffer(maxWaitTime time.Duration, maxTxCount int, maxBatchBytes int) *TransactionBuffer {
+	// Normalize zero/negative values to "no limit"
+	if maxTxCount <= 0 {
+		maxTxCount = int(^uint(0) >> 1) // Max int ( effectively unlimited)
+	}
+	if maxBatchBytes <= 0 {
+		maxBatchBytes = int(^uint(0) >> 1) // Max int (effectively unlimited)
+	}
+
 	tb := &TransactionBuffer{
 		pending:        make(map[string]*pendingTransaction),
 		maxWaitTime:    maxWaitTime,
@@ -99,15 +107,28 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	var complete []*Transaction
 	var toRemove []string
 
+	// Track batch size to enforce per-batch limits (not global buffer size)
+	batchTxCount := 0
+	batchBytes := 0
+
 	for txID, pending := range tb.pending {
 		// Check if transaction should be delivered:
 		// 1. Timed out
 		// 2. Marked complete
 		// 3. Batch size limits reached
-		shouldDeliver := pending.complete ||
-			now.Sub(pending.firstSeen) > tb.maxWaitTime ||
-			len(tb.pending) >= tb.maxTxCount ||
-			tb.estimatedBytes >= tb.maxBatchBytes
+		shouldDeliver := pending.complete || now.Sub(pending.firstSeen) > tb.maxWaitTime
+
+		// Check batch limits only if not already delivering for other reasons
+		if !shouldDeliver {
+			// Check if adding this transaction would exceed batch limits
+			// Use > (not >=) to allow exactly reaching the limit
+			if batchTxCount >= tb.maxTxCount {
+				shouldDeliver = true
+			}
+			if batchBytes+pending.estimatedSize > tb.maxBatchBytes {
+				shouldDeliver = true
+			}
+		}
 
 		if shouldDeliver {
 			tx := tb.buildTransaction(pending)
@@ -117,7 +138,9 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 				}
 				complete = append(complete, tx)
 				toRemove = append(toRemove, txID)
-				// Subtract from estimated bytes
+				// Update batch counters and subtract from global estimated bytes
+				batchTxCount++
+				batchBytes += pending.estimatedSize
 				tb.estimatedBytes -= pending.estimatedSize
 			}
 		}
