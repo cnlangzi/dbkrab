@@ -85,11 +85,11 @@
 
 ---
 
-### P1-3: 监控指标（Prometheus） ❌ **不需要**
-- 删除 Prometheus metrics 实现
-- 删除 metrics HTTP endpoint
+### P1-3: 监控指标（Prometheus） ✅ **已解决**
+- 不实现 Prometheus metrics
+- 原因: 用户需求变更
 
-**原因**: 用户需求变更，不需要实现 Prometheus metrics
+**完成时间**: 2026-04-03
 
 ---
 
@@ -118,7 +118,7 @@
 ---
 
 ### P2-3: 结构化日志
-- [ ] 迁移至 zerolog
+- [ ] 迁移至 slog（标准库）
 - [ ] 添加 trace_id（跨事务追踪）
 
 ---
