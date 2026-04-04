@@ -1,10 +1,9 @@
 <!--layout:dashboard-->
 {{ define "content" }}
 <div class="space-y-6">
-    <div class="flex justify-between items-center">
+    <div class="flex justify-between items-center mb-4">
         <h2 class="text-2xl font-bold text-gray-800">Dead Letter Queue</h2>
-        <button onclick="window.location.reload()"
-                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+        <button onclick="window.location.reload()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
             🔄 Refresh
         </button>
     </div>
@@ -43,20 +42,37 @@
                             <span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">ignored</span>
                         {{end}}
                     </td>
-                    <td class="px-6 py-4 text-sm space-x-2">
+                    <td class="px-6 py-4 text-sm">
+                        <!-- View: opens read-only modal -->
+                        <button hx-get="/api/dlq/{{.ID}}"
+                           hx-target="#view-modal"
+                           hx-swap="innerHTML"
+                           onclick="document.getElementById('view-modal').classList.remove('hidden')"
+                           class="text-blue-600 hover:text-blue-800 mr-2">
+                            👁 View
+                        </button>
+
                         {{if eq .Status "pending"}}
+                            <!-- Replay -->
                             <button hx-post="/api/dlq/{{.ID}}/replay"
-                                    hx-confirm="Replay this entry?"
-                                    hx-swap="none"
-                                    class="text-green-600 hover:text-green-800">
+                                hx-confirm="Replay this entry?"
+                                hx-swap="none"
+                                class="text-green-600 hover:text-green-800 mr-2">
                                 🔄 Replay
                             </button>
+                            <!-- Ignore: opens ignore form modal -->
+                            <button onclick="document.getElementById('ignore-id').value='{{.ID}}';document.getElementById('ignore-modal').classList.remove('hidden')"
+                                class="text-orange-600 hover:text-orange-800 mr-2">
+                                ⏭ Ignore
+                            </button>
                         {{end}}
+
+                        <!-- Delete -->
                         <button hx-delete="/api/dlq/{{.ID}}"
-                                hx-confirm="Delete this entry?"
-                                hx-swap="none"
-                                class="text-red-600 hover:text-red-800">
-                            🗑️ Delete
+                            hx-confirm="Delete this entry?"
+                            hx-swap="none"
+                            class="text-red-600 hover:text-red-800">
+                            🗑 Delete
                         </button>
                     </td>
                 </tr>
@@ -69,6 +85,41 @@
                 {{end}}
             </tbody>
         </table>
+    </div>
+</div>
+
+<!-- View Modal: Read-only entry details -->
+<div id="view-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto m-4 p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold">View DLQ Entry</h3>
+            <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <div class="text-sm text-gray-500">Loading...</div>
+    </div>
+</div>
+
+<!-- Ignore Modal: Ignore form -->
+<div id="ignore-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto m-4 p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold">Ignore DLQ Entry</h3>
+            <button onclick="document.getElementById('ignore-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <form hx-post="/api/dlq/ignore" hx-swap="none" 
+              hx-on="htmx:after-request: if(event.detail.successful) { document.getElementById('ignore-modal').classList.add('hidden'); window.location.reload(); }">
+            <input type="hidden" name="id" id="ignore-id" value="">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Reason for ignoring:</label>
+                <textarea name="note" rows="3" required 
+                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="document.getElementById('ignore-modal').classList.add('hidden')"
+                    class="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">Ignore Entry</button>
+            </div>
+        </form>
     </div>
 </div>
 {{ end }}
