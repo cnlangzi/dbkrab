@@ -1,0 +1,73 @@
+{{define "content"}}
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-gray-800">Overview</h2>
+    
+    <!-- Health Status -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center gap-3">
+            {{if eq .health "healthy"}}
+                <span class="text-4xl">✅</span>
+                <div>
+                    <h3 class="text-xl font-semibold text-green-600">System Healthy</h3>
+                    <p class="text-gray-600">All services are running normally</p>
+                </div>
+            {{else}}
+                <span class="text-4xl">❌</span>
+                <div>
+                    <h3 class="text-xl font-semibold text-red-600">System Unhealthy</h3>
+                    <p class="text-gray-600">Some services need attention</p>
+                </div>
+            {{end}}
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- DLQ Pending -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <p class="text-gray-500 text-sm mb-1">DLQ Pending</p>
+            <p class="text-4xl font-bold {{if gt (index .stats "pending") 0}}text-red-600{{else}}text-green-600{{end}}">
+                {{index .stats "pending"}}
+            </p>
+        </div>
+
+        <!-- DLQ Resolved -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <p class="text-gray-500 text-sm mb-1">DLQ Resolved</p>
+            <p class="text-4xl font-bold text-green-600">
+                {{index .stats "resolved"}}
+            </p>
+        </div>
+
+        <!-- DLQ Ignored -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <p class="text-gray-500 text-sm mb-1">DLQ Ignored</p>
+            <p class="text-4xl font-bold text-gray-500">
+                {{index .stats "ignored"}}
+            </p>
+        </div>
+
+        <!-- Active Plugins -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <p class="text-gray-500 text-sm mb-1">Active Plugins</p>
+            <p class="text-4xl font-bold text-blue-600">
+                {{len .plugins.Plugins}}
+            </p>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold mb-4">Quick Actions</h3>
+        <div class="flex gap-4">
+            <button onclick="window.location.reload()"
+                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+                🔄 Refresh
+            </button>
+            <a href="/dlq" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">
+                View DLQ →
+            </a>
+        </div>
+    </div>
+</div>
+{{end}}

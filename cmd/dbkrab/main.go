@@ -5,14 +5,11 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	dbkrab "github.com/cnlangzi/dbkrab"
 	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -25,7 +22,7 @@ import (
 
 var (
 	configPath = flag.String("config", "config.yml", "Path to config file")
-	apiPort    = flag.Int("api-port", 9020, "API server port")
+	apiPort    = flag.Int("api-port", 3000, "API/Dashboard server port (default: 3000)")
 
 	// Version and BuildTime are set via ldflags during build
 	Version   = "dev"
@@ -130,20 +127,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start API server
+	// Start API/Dashboard server
 	apiServer := api.NewServerWithDLQ(pluginManager, dlqStore, *apiPort)
-	
-	// Setup dashboard file system
-	dashboardSubFS, err := fs.Sub(dbkrab.DashboardFS, "dashboard/dist")
-	if err == nil {
-		apiServer.WithDashboard(http.FS(dashboardSubFS))
-		slog.Info("Dashboard embedded", "path", "/")
-	}
-	
 	go func() {
-		slog.Info("API server starting", "port", *apiPort)
+		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
 		if err := apiServer.Start(); err != nil {
-			slog.Warn("API server stopped", "error", err)
+			slog.Warn("Dashboard stopped", "error", err)
 		}
 	}()
 
@@ -162,7 +151,7 @@ func main() {
 		cancel()
 		poller.Stop()
 		if err := apiServer.Stop(); err != nil {
-			slog.Warn("API server stop error", "error", err)
+			slog.Warn("Dashboard stop error", "error", err)
 		}
 	}()
 
