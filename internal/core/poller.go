@@ -178,6 +178,7 @@ func (p *Poller) Stop() {
 // poll performs one polling cycle
 // P0 fix: offset is only updated after sink successfully writes
 // P0 fix: multi-table sync via min LSN checkpoint
+// P0-6 fix: CDC queries have timeout to prevent blocking
 func (p *Poller) poll(ctx context.Context) error {
 	// Check if paused due to gap detection
 	if p.isPaused() {
@@ -185,19 +186,27 @@ func (p *Poller) poll(ctx context.Context) error {
 		return nil
 	}
 
+	// P0-6: Use timeout context for CDC queries to prevent blocking
+	const queryTimeout = 10 * time.Second
+	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	// Get max LSN from MSSQL
-	_, err := p.querier.GetMaxLSN(ctx)
+	_, err := p.querier.GetMaxLSN(queryCtx)
 	if err != nil {
+		cancel() // Release resources before returning
 		return fmt.Errorf("get max LSN: %w", err)
 	}
 
 	// CDC gap detection (before polling)
 	// Respect check_interval configuration
 	if p.gapDetector != nil && p.shouldCheckGaps() {
-		if err := p.checkGaps(ctx); err != nil {
+		gapCtx, gapCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := p.checkGaps(gapCtx); err != nil {
 			slog.Error("gap detection error", "error", err)
 			// Gap detection errors don't block polling, but are logged
 		}
+		gapCancel()
 		p.recordGapCheck()
 	}
 
@@ -208,7 +217,7 @@ func (p *Poller) poll(ctx context.Context) error {
 		schema, tableName := cdc.ParseTableName(table)
 		captureInstance := cdc.CaptureInstanceName(schema, tableName)
 
-		// Get starting LSN from offset store
+		// Get starting LSN from offset store (no DB query, no timeout needed)
 		startLSN := LSN{}
 		stored, err := p.offsets.Get(table)
 		if err == nil && stored.LSN != "" {
@@ -218,10 +227,14 @@ func (p *Poller) poll(ctx context.Context) error {
 			}
 		}
 
+		// P0-6: Per-table query timeout context
+		tableCtx, tableCancel := context.WithTimeout(ctx, queryTimeout)
+
 		// If first time, get min LSN from CDC
 		if len(startLSN) == 0 || startLSN.IsZero() {
-			minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
+			minLSN, err := p.querier.GetMinLSN(tableCtx, captureInstance)
 			if err != nil {
+				tableCancel()
 				results = append(results, tablePollResult{table: table, err: err})
 				continue
 			}
@@ -229,11 +242,13 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 
 		// Get changes since last poll
-		cdcChanges, err := p.querier.GetChanges(ctx, captureInstance, startLSN, nil)
+		cdcChanges, err := p.querier.GetChanges(tableCtx, captureInstance, startLSN, nil)
 		if err != nil {
+			tableCancel()
 			results = append(results, tablePollResult{table: table, err: err})
 			continue
 		}
+		tableCancel() // Release resources after successful query
 
 		// Convert cdc.Change to core.Change
 		changes := make([]Change, len(cdcChanges))

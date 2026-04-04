@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -59,6 +60,12 @@ func main() {
 		}
 	}()
 
+	// Configure connection pool (P0-5: prevent connection exhaustion and stale connections)
+	db.SetMaxOpenConns(10)                     // Max concurrent connections to MSSQL
+	db.SetMaxIdleConns(5)                      // Keep warm connections for fast response
+	db.SetConnMaxLifetime(30 * time.Minute)   // Recycle connections to prevent server-side timeouts
+	db.SetConnMaxIdleTime(5 * time.Minute)    // Close idle connections
+
 	if err := db.Ping(); err != nil {
 		slog.Error("failed to ping MSSQL", "error", err)
 		os.Exit(1)
@@ -68,7 +75,11 @@ func main() {
 		"user", cfg.MSSQL.User,
 		"host", cfg.MSSQL.Host,
 		"port", cfg.MSSQL.Port,
-		"database", cfg.MSSQL.Database)
+		"database", cfg.MSSQL.Database,
+		"pool_max_open", 10,
+		"pool_max_idle", 5,
+		"pool_max_lifetime", "30m",
+		"pool_max_idle_time", "5m")
 
 	// Create offset store
 	offsetStore, err := offset.NewStoreFromConfig(cfg.Offset.Type, cfg.Offset.JSONPath, cfg.Offset.SQLitePath)
