@@ -12,6 +12,9 @@ dist/
 *.out
 coverage.out
 
+# Allow Dockerfile.test
+!tests/**/Dockerfile.test
+
 # Go workspace
 go.work
 
