@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"strings"
 )
@@ -76,7 +76,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("rows.Close error: %v", err)
+			slog.Warn("rows.Close error", "error", err)
 		}
 	}()
 

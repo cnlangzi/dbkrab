@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,7 +35,8 @@ func main() {
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	// Connect to MSSQL
@@ -49,26 +50,33 @@ func main() {
 
 	db, err := sql.Open("sqlserver", connStr)
 	if err != nil {
-		log.Fatalf("Failed to connect to MSSQL: %v", err)
+		slog.Error("failed to connect to MSSQL", "error", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Printf("db.Close error: %v", err)
+			slog.Warn("db.Close error", "error", err)
 		}
 	}()
 
 	if err := db.Ping(); err != nil {
-		log.Fatalf("Failed to ping MSSQL: %v", err)
+		slog.Error("failed to ping MSSQL", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Connected to MSSQL: %s@%s:%d/%s", cfg.MSSQL.User, cfg.MSSQL.Host, cfg.MSSQL.Port, cfg.MSSQL.Database)
+	slog.Info("connected to MSSQL",
+		"user", cfg.MSSQL.User,
+		"host", cfg.MSSQL.Host,
+		"port", cfg.MSSQL.Port,
+		"database", cfg.MSSQL.Database)
 
 	// Create offset store
 	offsetStore, err := offset.NewStoreFromConfig(cfg.Offset.Type, cfg.Offset.JSONPath, cfg.Offset.SQLitePath)
 	if err != nil {
-		log.Fatalf("Failed to create offset store: %v", err)
+		slog.Error("failed to create offset store", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("Offset store initialized: type=%s", cfg.Offset.Type)
+	slog.Info("offset store initialized", "type", cfg.Offset.Type)
 
 	// Create sink
 	var sink core.Sink
@@ -76,29 +84,32 @@ func main() {
 	case "sqlite":
 		sink, err = sqlite.NewSink(cfg.Sink.Path)
 		if err != nil {
-			log.Fatalf("Failed to create SQLite sink: %v", err)
+			slog.Error("failed to create SQLite sink", "error", err)
+			os.Exit(1)
 		}
 		defer func() {
 			if err := sink.Close(); err != nil {
-				log.Printf("sink.Close error: %v", err)
+				slog.Warn("sink.Close error", "error", err)
 			}
 		}()
-		log.Printf("SQLite sink initialized: %s", cfg.Sink.Path)
+		slog.Info("SQLite sink initialized", "path", cfg.Sink.Path)
 	default:
-		log.Fatalf("Unknown sink type: %s", cfg.Sink.Type)
+		slog.Error("unknown sink type", "type", cfg.Sink.Type)
+		os.Exit(1)
 	}
 
 	// Create DLQ (use same SQLite path as sink for simplicity)
 	dlqStore, err := dlq.New(cfg.Sink.Path)
 	if err != nil {
-		log.Fatalf("Failed to create DLQ: %v", err)
+		slog.Error("failed to create DLQ", "error", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := dlqStore.CloseAndDB(); err != nil {
-			log.Printf("dlq.CloseAndDB error: %v", err)
+			slog.Warn("dlq.CloseAndDB error", "error", err)
 		}
 	}()
-	log.Println("Dead letter queue initialized")
+	slog.Info("dead letter queue initialized")
 
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
@@ -119,9 +130,9 @@ func main() {
 	// Start API server
 	apiServer := api.NewServerWithDLQ(pluginManager, dlqStore, *apiPort)
 	go func() {
-		log.Printf("API server starting on port %d", *apiPort)
+		slog.Info("API server starting", "port", *apiPort)
 		if err := apiServer.Start(); err != nil {
-			log.Printf("API server stopped: %v", err)
+			slog.Warn("API server stopped", "error", err)
 		}
 	}()
 
@@ -129,26 +140,27 @@ func main() {
 	if cfg.Plugin != "" {
 		go func() {
 			if err := pluginManager.Watch(ctx, cfg.Plugin); err != nil {
-				log.Printf("Plugin watch error: %v", err)
+				slog.Warn("plugin watch error", "error", err)
 			}
 		}()
 	}
 
 	go func() {
 		<-sigCh
-		log.Println("Shutting down...")
+		slog.Info("shutting down")
 		cancel()
 		poller.Stop()
 		if err := apiServer.Stop(); err != nil {
-			log.Printf("API server stop error: %v", err)
+			slog.Warn("API server stop error", "error", err)
 		}
 	}()
 
 	// Start polling
-	log.Printf("Starting dbkrab %s (built %s)", Version, BuildTime)
+	slog.Info("starting dbkrab", "version", Version, "built", BuildTime)
 	if err := poller.Start(ctx); err != nil && err != context.Canceled {
-		log.Fatalf("Poller error: %v", err)
+		slog.Error("poller error", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Goodbye!")
+	slog.Info("goodbye")
 }

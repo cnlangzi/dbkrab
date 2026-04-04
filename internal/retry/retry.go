@@ -3,7 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -191,7 +191,7 @@ func DoWithName(ctx context.Context, fn func() error, cfg RetryConfig, operation
 		if err == nil {
 			// Success
 			if retryCount > 0 {
-				log.Printf("[RETRY] %s succeeded after %d retries", operationName, retryCount)
+				slog.Info("retry succeeded", "operation", operationName, "retries", retryCount)
 			}
 			return nil
 		}
@@ -200,7 +200,7 @@ func DoWithName(ctx context.Context, fn func() error, cfg RetryConfig, operation
 
 		// Check if error is retryable
 		if !IsRetryableWithConfig(err, cfg) {
-			log.Printf("[RETRY] %s failed with non-retryable error: %v", operationName, err)
+			slog.Warn("retry failed with non-retryable error", "operation", operationName, "error", err)
 			return &RetryError{
 				LastError:  err,
 				RetryCount: retryCount,
@@ -210,7 +210,7 @@ func DoWithName(ctx context.Context, fn func() error, cfg RetryConfig, operation
 
 		// If we've exhausted retries, return error
 		if i >= cfg.MaxRetries {
-			log.Printf("[RETRY] %s failed after %d retries: %v", operationName, cfg.MaxRetries, err)
+			slog.Warn("retry failed after max retries", "operation", operationName, "max_retries", cfg.MaxRetries, "error", err)
 			return &RetryError{
 				LastError:  err,
 				RetryCount: retryCount,
@@ -225,8 +225,12 @@ func DoWithName(ctx context.Context, fn func() error, cfg RetryConfig, operation
 			delay = cfg.MaxDelay
 		}
 
-		log.Printf("[RETRY] %s failed (attempt %d/%d), retrying in %v: %v",
-			operationName, retryCount, cfg.MaxRetries, delay, err)
+		slog.Warn("retry failed",
+			"operation", operationName,
+			"attempt", retryCount,
+			"max_retries", cfg.MaxRetries,
+			"delay", delay,
+			"error", err)
 
 		// Wait before retry
 		select {
