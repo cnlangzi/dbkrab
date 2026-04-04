@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -10,15 +11,20 @@ import (
 
 // Watcher monitors config file changes and triggers safe reloads
 type Watcher struct {
-	path    string
-	cfg     *Config
-	watcher *fsnotify.Watcher
-	mu      sync.RWMutex
-	done    chan struct{}
+	path     string
+	cfg      *Config
+	watcher  *fsnotify.Watcher
+	mu       sync.RWMutex
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewWatcher creates a new config watcher
 func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
+	if initialCfg == nil {
+		return nil, fmt.Errorf("initialCfg cannot be nil")
+	}
+
 	w := Watcher{
 		path: path,
 		cfg:  initialCfg,
@@ -32,10 +38,12 @@ func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
 	}
 	w.watcher = fw
 
-	// Watch the config file
-	if err := w.watcher.Add(path); err != nil {
+	// Watch the parent directory instead of the file itself so that
+	// atomic renames/rotations of the config file (new inode) are still observed.
+	dir := filepath.Dir(path)
+	if err := w.watcher.Add(dir); err != nil {
 		w.watcher.Close()
-		return nil, fmt.Errorf("watch config file: %w", err)
+		return nil, fmt.Errorf("watch config dir %q: %w", dir, err)
 	}
 
 	return &w, nil
@@ -49,7 +57,11 @@ func (w *Watcher) Start(onReload func(*Config)) {
 			case <-w.done:
 				return
 			case event := <-w.watcher.Events:
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+				// Filter by filename to only handle events for the target config file
+				if filepath.Base(event.Name) != filepath.Base(w.path) {
+					continue
+				}
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Chmod) {
 					slog.Info("config file changed, reloading...", "path", w.path)
 					newCfg, err := Load(w.path)
 					if err != nil {
@@ -111,6 +123,8 @@ func (w *Watcher) Get() *Config {
 
 // Stop stops the watcher
 func (w *Watcher) Stop() error {
-	close(w.done)
+	w.stopOnce.Do(func() {
+		close(w.done)
+	})
 	return w.watcher.Close()
 }
