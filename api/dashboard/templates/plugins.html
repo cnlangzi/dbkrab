@@ -1,0 +1,65 @@
+{{define "content"}}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-gray-800">Plugins Management</h2>
+        <button onclick="window.location.reload()"
+                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+            🔄 Refresh
+        </button>
+    </div>
+
+    <!-- Plugins Table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tables</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {{if .plugins.Success}}
+                    {{range .plugins.Plugins}}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm font-medium text-gray-900">{{.Name}}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">{{.Description}}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">{{.Version}}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">
+                            {{if .Tables}}
+                                {{range .Tables}}
+                                    <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs mr-1">{{.}}</span>
+                                {{end}}
+                            {{else}}
+                                -
+                            {{end}}
+                        </td>
+                        <td class="px-6 py-4 text-sm space-x-2">
+                            <button hx-post="/api/plugins/{{.Name}}/reload"
+                                    hx-swap="none"
+                                    class="text-blue-600 hover:text-blue-800">
+                                🔄 Reload
+                            </button>
+                            <button hx-delete="/api/plugins/{{.Name}}"
+                                    hx-confirm="Unload plugin '{{.Name}}'?"
+                                    hx-swap="none"
+                                    class="text-red-600 hover:text-red-800">
+                                🗑️ Unload
+                            </button>
+                        </td>
+                    </tr>
+                    {{end}}
+                {{else}}
+                    <tr>
+                        <td colspan="5" class="px-6 py-8 text-center text-gray-500">
+                            No plugins loaded
+                        </td>
+                    </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{end}}
