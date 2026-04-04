@@ -312,6 +312,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
+					"trace_id", tx.TraceID,
 					"tx_id", tx.ID,
 					"error", err)
 				// Handler errors don't block offset advancement, but write to DLQ
@@ -326,6 +327,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("sink error",
+					"trace_id", tx.TraceID,
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(tx, err, "sink")
@@ -674,7 +676,9 @@ func (p *Poller) recordGapCheck() {
 // writeToDLQ writes a failed transaction to the dead letter queue
 func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	if p.dlq == nil {
-		slog.Warn("cannot write to DLQ: not initialized")
+		slog.Warn("cannot write to DLQ: not initialized",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID)
 		return
 	}
 
@@ -699,7 +703,10 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 	changeJSON, encodeErr := json.Marshal(txData)
 	if encodeErr != nil {
-		slog.Error("failed to encode transaction data", "error", encodeErr)
+		slog.Error("failed to encode transaction data",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID,
+			"error", encodeErr)
 		changeJSON = []byte("{}")
 	}
 
@@ -710,6 +717,7 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 
 	entry := &dlq.DLQEntry{
+		TraceID:     tx.TraceID,
 		LSN:          lsn,
 		TableName:    tableName,
 		Operation:    operation,
@@ -720,7 +728,10 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 
 	if writeErr := p.dlq.Write(entry); writeErr != nil {
-		slog.Error("failed to write DLQ entry", "error", writeErr)
+		slog.Error("failed to write DLQ entry",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID,
+			"error", writeErr)
 		return
 	}
 
@@ -733,12 +744,13 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 			CheckedAt:   time.Now(),
 		}
 		p.alertManager.SendWarning(
-			fmt.Sprintf("Transaction %s written to DLQ", tx.ID),
+			fmt.Sprintf("Transaction %s (trace: %s) written to DLQ", tx.ID, tx.TraceID),
 			gapInfo,
 		)
 	}
 
 	slog.Warn("transaction written to DLQ",
+		"trace_id", tx.TraceID,
 		"tx_id", tx.ID,
 		"table", tableName,
 		"operation", operation,
