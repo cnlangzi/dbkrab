@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ type Poller struct {
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
 	txBuffer      *TransactionBuffer // For cross-table transaction integrity
+	
+	// Graceful degradation fields
+	disconnectStart time.Time
+	disconnectMu    sync.RWMutex
 }
 
 // Sink interface for storing changes
@@ -126,6 +131,12 @@ func (p *Poller) Start(ctx context.Context) error {
 
 	slog.Info("starting CDC poller", "interval", interval, "tables", len(p.cfg.Tables))
 
+	// Graceful degradation: track reconnection state
+	var reconnectDelay time.Duration
+	if p.cfg.GracefulDegradation.Enabled {
+		reconnectDelay = p.cfg.ReconnectBaseDelay()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -135,6 +146,18 @@ func (p *Poller) Start(ctx context.Context) error {
 		case <-ticker.C:
 			if err := p.poll(ctx); err != nil {
 				slog.Error("poll error", "error", err)
+
+				// Graceful degradation: handle MSSQL disconnection
+				if p.cfg.GracefulDegradation.Enabled && p.isMSSQLDisconnectError(err) {
+					if handled := p.handleDisconnection(ctx, err, reconnectDelay); handled {
+						// Reset reconnect delay on success
+						reconnectDelay = p.cfg.ReconnectBaseDelay()
+						continue
+					}
+					// Exponential backoff for next retry
+					reconnectDelay = min(reconnectDelay*2, p.cfg.ReconnectMaxDelay())
+				}
+
 				// Continue polling despite errors
 			}
 		}
@@ -406,6 +429,110 @@ func (p *Poller) updateOffsets(results []tablePollResult) error {
 	}
 
 	return nil
+}
+
+// isMSSQLDisconnectError checks if the error is related to MSSQL disconnection
+func (p *Poller) isMSSQLDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Normalize error string for case-insensitive matching
+	errStr := strings.ToLower(err.Error())
+
+	// Common MSSQL disconnection errors
+	disconnectPatterns := []string{
+		"connection reset",
+		"connection closed",
+		"broken pipe",
+		"eof",
+		"i/o timeout",
+		"context deadline exceeded",
+		"no connection",
+		"network related",
+	}
+
+	for _, pattern := range disconnectPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleDisconnection handles MSSQL disconnection with graceful degradation
+func (p *Poller) handleDisconnection(ctx context.Context, err error, reconnectDelay time.Duration) bool {
+	// Record Disconnect start time
+	p.disconnectMu.Lock()
+	if p.disconnectStart.IsZero() {
+		p.disconnectStart = time.Now()
+		slog.Warn("MSSQL disconnection detected, entering reconnection mode", 
+			"error", err)
+	}
+	p.disconnectMu.Unlock()
+
+	// Check if exceeded max disconnect duration
+	maxDuration := p.cfg.MaxDisconnectDuration()
+
+	p.disconnectMu.RLock()
+	disconnectDuration := time.Since(p.disconnectStart)
+	p.disconnectMu.RUnlock()
+
+	if disconnectDuration > maxDuration {
+		slog.Error("MSSQL disconnection exceeded maximum duration, alerting",
+			"duration", disconnectDuration,
+			"max_duration", maxDuration)
+		// Alert if alert manager is available
+		if p.alertManager != nil {
+			p.alertManager.SendEmergency(
+				"MSSQL Disconnection Timeout",
+				cdc.GapInfo{
+					Table:     "ALL",
+					CheckedAt: time.Now(),
+				},
+			)
+		}
+		return false
+	}
+
+	// Wait for reconnect delay
+	slog.Info("waiting before reconnection attempt",
+		"delay", reconnectDelay,
+		"disconnect_duration", disconnectDuration)
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-p.stopCh:
+		return false
+	case <-time.After(reconnectDelay):
+		// Try to reconnect by testing the connection
+		if p.testConnection(ctx) {
+			slog.Info("MSSQL reconnection successful",
+				"disconnect_duration", time.Since(p.disconnectStart))
+			// Reset disconnect start
+			p.disconnectMu.Lock()
+			p.disconnectStart = time.Time{}
+			p.disconnectMu.Unlock()
+			return true
+		}
+		return false
+	}
+}
+
+// testConnection tests if MSSQL connection is restored
+func (p *Poller) testConnection(ctx context.Context) bool {
+	_, err := p.querier.GetMaxLSN(ctx)
+	return err == nil
+}
+
+// min returns the minimum of two durations
+func min(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // groupByTransaction groups changes by transaction ID
