@@ -143,25 +143,25 @@
 ---
 
 ### P2-5: 运维 Dashboard ✅ **已完成**
-- [x] React + Ant Design 前端
-- [x] DLQ 管理（查看/重放/忽略/删除）
+- [x] SSR Dashboard（Go 原生模板）
+- [x] HTMX 交互（无复杂 JS 框架）
+- [x] TailwindCSS CDN（无自定义 CSS）
+- [x] DLQ 管理（查看/重放/删除）
 - [x] 插件管理（查看/重载/卸载）
-- [x] 系统健康监控
-- [x] 端口 3001（开发）/ 3000（生产嵌入）
+- [x] 端口 3000
 
 **验收标准**:
-- [x] 查看所有 DLQ 条目及详情
-- [x] DLQ 操作（重放/忽略/删除）
-- [x] 查看插件列表
+- [x] 3 个页面：Overview / DLQ / Plugins
+- [x] DLQ 操作（重放/删除）
 - [x] 插件操作（重载/卸载）
 - [x] 系统健康状态显示
 
 **完成时间**: 2026-04-04 (PR #10)
 
 **技术栈**:
-- Frontend: React 18 + Vite + Ant Design 5
-- Backend: Go 1.26 (embed FS)
-- 开发端口：3001，生产端口：3000
+- Backend: Go html/template + embed.FS
+- Frontend: HTMX 1.9 + TailwindCSS CDN
+- 端口：3000（生产嵌入）
 
 ---
 
