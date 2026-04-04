@@ -4,27 +4,26 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	"html/template"
 	"io"
 	"net/http"
-	"reflect"
 	"strconv"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
+	"github.com/yaitoo/xun"
 )
 
-//go:embed dashboard/templates
-var templatesFS embed.FS
+//go:embed dashboard
+var dashboardFS embed.FS
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager   *plugin.Manager
-	dlq       *dlq.DLQ
-	port      int
-	server    *http.Server
-	templates *template.Template
+	manager *plugin.Manager
+	dlq     *dlq.DLQ
+	port    int
+	app     *xun.App
+	mux     *http.ServeMux
 }
 
 // NewServer creates a new API server
@@ -44,282 +43,207 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 	}
 }
 
-// Start starts the API server
+// Start starts the API server with xun framework
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
+	// Create a mux to use with xun
+	s.mux = http.NewServeMux()
 
-	// Page routes
-	mux.HandleFunc("GET /", s.handleDashboard)
-	mux.HandleFunc("GET /dlq", s.handleDLQPage)
-	mux.HandleFunc("GET /plugins", s.handlePluginsPage)
+	// Create xun app with our mux and template filesystem
+	s.app = xun.New(
+		xun.WithFsys(dashboardFS),
+		xun.WithMux(s.mux),
+	)
 
-	// API routes
-	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
-	mux.HandleFunc("GET /api/plugins/", s.handlePluginGet)
-	mux.HandleFunc("DELETE /api/plugins/", s.handlePluginDelete)
-	mux.HandleFunc("POST /api/plugins/", s.handlePluginReload)
+	// Register API routes
+	s.registerAPIRoutes()
 
-	if s.dlq != nil {
-		mux.HandleFunc("GET /api/dlq/list", s.handleDLQList)
-		mux.HandleFunc("GET /api/dlq/stats", s.handleDLQStats)
-		mux.HandleFunc("GET /api/dlq/", s.handleDLQGet)
-		mux.HandleFunc("POST /api/dlq/", s.handleDLQReplay)
-		mux.HandleFunc("POST /api/dlq/", s.handleDLQIgnore)
-		mux.HandleFunc("DELETE /api/dlq/", s.handleDLQDelete)
-	}
+	// Start xun (this finalizes route registration)
+	s.app.Start()
 
-	mux.HandleFunc("GET /health", s.handleHealth)
-
-	s.server = &http.Server{
+	// Create http server using our mux
+	srv := &http.Server{
 		Addr:         ":" + strconv.Itoa(s.port),
-		Handler:      mux,
+		Handler:      s.mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
-	return s.server.ListenAndServe()
+	return srv.ListenAndServe()
 }
 
 // Stop stops the API server
 func (s *Server) Stop() error {
-	if s.server != nil {
-		return s.server.Close()
+	if s.app != nil {
+		s.app.Close()
 	}
 	return nil
 }
 
-// renderTemplate renders a template with the given data
-func (s *Server) renderTemplate(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Use xun's template engine indirectly via standard html/template
-	tmpl := template.New("").Funcs(template.FuncMap{
-		"eq":      func(a, b any) bool { return a == b },
-		"index":   func(m map[string]any, key string) any { return m[key] },
-		"len":     func(v any) int { return reflect.ValueOf(v).Len() },
-		"datetime": func(t time.Time) string { return t.Format("2006-01-02 15:04:05") },
-	})
-	// Parse templates from embed.FS
-	var err error
-	s.templates, err = tmpl.ParseGlob("dashboard/templates/**/*.html")
-	if err != nil {
-		http.Error(w, "template error: "+err.Error(), 500)
-		return
-	}
-	if err := s.templates.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, err.Error(), 500)
-	}
-}
+// registerAPIRoutes registers API routes with JsonViewer
+func (s *Server) registerAPIRoutes() {
+	api := s.app.Group("/api")
+	api.Get("/plugins", s.handlePlugins, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
 
-// handleDashboard renders the main dashboard page
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	stats, _ := s.getDLQStats()
-	plugins := s.manager.HandleAPI("list", nil)
-
-	s.renderTemplate(w, "index.html", map[string]any{
-		"title":     "Dashboard",
-		"stats":     stats,
-		"plugins":   plugins,
-		"health":    "healthy",
-		"activeTab": "overview",
-	})
-}
-
-// handleDLQPage renders the DLQ management page
-func (s *Server) handleDLQPage(w http.ResponseWriter, r *http.Request) {
-	if s.dlq == nil {
-		s.renderTemplate(w, "dlq.html", map[string]any{
-			"title":   "Error",
-			"message": "DLQ not initialized",
-		})
-		return
+	if s.dlq != nil {
+		api.Get("/dlq/list", s.handleDLQList, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/dlq/stats", s.handleDLQStats, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/dlq/:id", s.handleDLQGet, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/dlq/:id/replay", s.handleDLQReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/dlq/:id/ignore", s.handleDLQIgnore, xun.WithViewer(&xun.JsonViewer{}))
+		api.Delete("/dlq/:id", s.handleDLQDelete, xun.WithViewer(&xun.JsonViewer{}))
 	}
 
-	entries, err := s.dlq.List("")
-	if err != nil {
-		s.renderTemplate(w, "dlq.html", map[string]any{
-			"title":   "Error",
-			"message": err.Error(),
-		})
-		return
-	}
-
-	s.renderTemplate(w, "dlq.html", map[string]any{
-		"title":     "Dead Letter Queue",
-		"entries":   entries,
-		"activeTab": "dlq",
-	})
-}
-
-// handlePluginsPage renders the plugins management page
-func (s *Server) handlePluginsPage(w http.ResponseWriter, r *http.Request) {
-	plugins := s.manager.HandleAPI("list", nil)
-
-	s.renderTemplate(w, "plugins.html", map[string]any{
-		"title":     "Plugins",
-		"plugins":   plugins,
-		"activeTab": "plugins",
-	})
+	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 }
 
 // handlePlugins handles GET /api/plugins
-func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePlugins(c *xun.Context) error {
 	resp := s.manager.HandleAPI("list", nil)
-	s.writeJSON(w, resp)
+	return c.View(resp)
 }
 
 // handlePluginGet handles GET /api/plugins/:name
-func (s *Server) handlePluginGet(w http.ResponseWriter, r *http.Request) {
-	name := extractPathParam(r.URL.Path, "/api/plugins/")
+func (s *Server) handlePluginGet(c *xun.Context) error {
+	name := c.Routing.Options.GetString("name")
 	resp := s.manager.HandleAPI("get", map[string]any{"name": name})
 	if !resp.Success {
-		w.WriteHeader(http.StatusNotFound)
+		c.WriteStatus(http.StatusNotFound)
 	}
-	s.writeJSON(w, resp)
+	return c.View(resp)
 }
 
 // handlePluginDelete handles DELETE /api/plugins/:name
-func (s *Server) handlePluginDelete(w http.ResponseWriter, r *http.Request) {
-	name := extractPathParam(r.URL.Path, "/api/plugins/")
+func (s *Server) handlePluginDelete(c *xun.Context) error {
+	name := c.Routing.Options.GetString("name")
 	resp := s.manager.HandleAPI("unload", map[string]any{"name": name})
-	s.writeJSON(w, resp)
+	return c.View(resp)
 }
 
 // handlePluginReload handles POST /api/plugins/:name/reload
-func (s *Server) handlePluginReload(w http.ResponseWriter, r *http.Request) {
-	name := extractPathParam(r.URL.Path, "/api/plugins/")
+func (s *Server) handlePluginReload(c *xun.Context) error {
+	name := c.Routing.Options.GetString("name")
 	resp := s.manager.HandleAPI("reload", map[string]any{"name": name})
-	s.writeJSON(w, resp)
+	return c.View(resp)
 }
 
 // handleDLQList handles GET /api/dlq/list
-func (s *Server) handleDLQList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQList(c *xun.Context) error {
 	if s.dlq == nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": "DLQ not initialized"})
-		return
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	status := r.URL.Query().Get("status")
+	status := c.Request.URL.Query().Get("status")
 	entries, err := s.dlq.List(status)
 	if err != nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	s.writeJSON(w, map[string]any{"success": true, "count": len(entries), "entries": entries})
+	return c.View(map[string]any{"success": true, "count": len(entries), "entries": entries})
 }
 
 // handleDLQStats handles GET /api/dlq/stats
-func (s *Server) handleDLQStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQStats(c *xun.Context) error {
 	stats, err := s.getDLQStats()
 	if err != nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
-	s.writeJSON(w, map[string]any{"success": true, "stats": stats})
+	return c.View(map[string]any{"success": true, "stats": stats})
 }
 
 // handleDLQGet handles GET /api/dlq/:id
-func (s *Server) handleDLQGet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQGet(c *xun.Context) error {
 	if s.dlq == nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": "DLQ not initialized"})
-		return
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(extractPathParam(r.URL.Path, "/api/dlq/"), 10, 64)
+	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.writeJSON(w, map[string]any{"success": false, "error": "invalid entry ID"})
-		return
+		c.WriteStatus(http.StatusBadRequest)
+		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
 	}
 
 	entry, err := s.dlq.Get(id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		c.WriteStatus(http.StatusNotFound)
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	s.writeJSON(w, map[string]any{"success": true, "entry": entry})
+	return c.View(map[string]any{"success": true, "entry": entry})
 }
 
 // handleDLQReplay handles POST /api/dlq/:id/replay
-func (s *Server) handleDLQReplay(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQReplay(c *xun.Context) error {
 	if s.dlq == nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": "DLQ not initialized"})
-		return
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(extractPathParam(r.URL.Path, "/api/dlq/"), 10, 64)
+	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.writeJSON(w, map[string]any{"success": false, "error": "invalid entry ID"})
-		return
+		c.WriteStatus(http.StatusBadRequest)
+		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
 	}
 
 	err = s.dlq.Replay(context.Background(), id, func(*dlq.DLQEntry) error { return nil })
 	if err != nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	s.writeJSON(w, map[string]any{"success": true, "message": "Entry replayed"})
+	return c.View(map[string]any{"success": true, "message": "Entry replayed"})
 }
 
 // handleDLQIgnore handles POST /api/dlq/:id/ignore
-func (s *Server) handleDLQIgnore(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQIgnore(c *xun.Context) error {
 	if s.dlq == nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": "DLQ not initialized"})
-		return
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(extractPathParam(r.URL.Path, "/api/dlq/"), 10, 64)
+	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.writeJSON(w, map[string]any{"success": false, "error": "invalid entry ID"})
-		return
+		c.WriteStatus(http.StatusBadRequest)
+		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
 	}
 
-	body, _ := io.ReadAll(r.Body)
+	body, _ := io.ReadAll(c.Request.Body)
 	var params struct{ Note string }
 	json.Unmarshal(body, &params)
 
 	err = s.dlq.Ignore(id, params.Note)
 	if err != nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	s.writeJSON(w, map[string]any{"success": true, "message": "Entry ignored"})
+	return c.View(map[string]any{"success": true, "message": "Entry ignored"})
 }
 
 // handleDLQDelete handles DELETE /api/dlq/:id
-func (s *Server) handleDLQDelete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDLQDelete(c *xun.Context) error {
 	if s.dlq == nil {
-		s.writeJSON(w, map[string]any{"success": false, "error": "DLQ not initialized"})
-		return
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(extractPathParam(r.URL.Path, "/api/dlq/"), 10, 64)
+	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.writeJSON(w, map[string]any{"success": false, "error": "invalid entry ID"})
-		return
+		c.WriteStatus(http.StatusBadRequest)
+		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
 	}
 
 	err = s.dlq.Delete(id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		s.writeJSON(w, map[string]any{"success": false, "error": err.Error()})
-		return
+		c.WriteStatus(http.StatusNotFound)
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	s.writeJSON(w, map[string]any{"success": true, "message": "Entry deleted"})
+	return c.View(map[string]any{"success": true, "message": "Entry deleted"})
 }
 
 // handleHealth handles GET /health
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+func (s *Server) handleHealth(c *xun.Context) error {
+	c.WriteHeader("Content-Type", "text/plain")
+	c.WriteStatus(http.StatusOK)
+	return c.View(map[string]any{"status": "OK"})
 }
 
 // getDLQStats returns formatted DLQ stats
@@ -338,34 +262,4 @@ func (s *Server) getDLQStats() (map[string]int, error) {
 		stats[string(status)] = count
 	}
 	return stats, nil
-}
-
-// writeJSON writes JSON response
-func (s *Server) writeJSON(w http.ResponseWriter, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// extractPathParam extracts the path parameter from a URL path
-func extractPathParam(path, prefix string) string {
-	// Handle both /api/dlq/123 and /api/plugins/name/reload formats
-	path = trimPrefix(path, prefix)
-	// Remove trailing /replay or /ignore if present
-	path = trimSuffix(path, "/replay")
-	path = trimSuffix(path, "/ignore")
-	return path
-}
-
-func trimPrefix(s, prefix string) string {
-	if len(s) > len(prefix) && s[:len(prefix)] == prefix {
-		return s[len(prefix):]
-	}
-	return s
-}
-
-func trimSuffix(s, suffix string) string {
-	if len(s) > len(suffix) && s[len(s)-len(suffix):] == suffix {
-		return s[:len(s)-len(suffix)]
-	}
-	return s
 }
