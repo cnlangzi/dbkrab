@@ -56,3 +56,66 @@ jobs:
         with:
           version: v2.11.4
           args: --timeout=5m --disable=staticcheck
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Test1234!
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q 'SELECT 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=30s
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Wait for SQL Server to be ready
+        run: |
+          echo "Waiting for SQL Server to start..."
+          for i in {1..30}; do
+            if /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q "SELECT 1" &>/dev/null; then
+              echo "SQL Server is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 5
+          done
+
+      - name: Setup test database and enable CDC
+        run: |
+          /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -i tests/integration/setup.sql
+
+      - name: Install test dependencies
+        run: |
+          go get github.com/stretchr/testify/assert
+          go get github.com/stretchr/testify/require
+          go get github.com/microsoft/go-mssqldb
+
+      - name: Run integration tests
+        run: |
+          cd tests/integration
+          go test -v -race -timeout=5m ./...
+        env:
+          MSSQL_HOST: localhost
+          MSSQL_PORT: 1433
+          MSSQL_USER: sa
+          MSSQL_PASSWORD: Test1234!
+          MSSQL_DATABASE: dbkrab_test

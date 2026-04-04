@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: dbkrab-test-mssql
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=Test1234!
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./setup.sql:/setup.sql:ro
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q "SELECT 1"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  dbkrab-test:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Dockerfile.test
+    container_name: dbkrab-test-runner
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      - MSSQL_HOST=mssql
+      - MSSQL_PORT=1433
+      - MSSQL_USER=sa
+      - MSSQL_PASSWORD=Test1234!
+      - MSSQL_DATABASE=dbkrab_test
+    volumes:
+      - ../../data:/app/data
+    networks:
+      - dbkrab-test-network
+
+volumes:
+  mssql_data:
+
+networks:
+  dbkrab-test-network:
+    driver: bridge

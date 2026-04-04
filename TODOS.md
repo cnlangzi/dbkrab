@@ -182,9 +182,27 @@
 
 ---
 
-### P3-4: 集成测试
-- [ ] Docker Compose 测试环境（MSSQL + dbkrab）
-- [ ] 自动化测试：CDC 启用、变更捕获、故障恢复
+### P3-4: 集成测试 ✅ **已完成**
+- [x] Docker Compose 测试环境（MSSQL + dbkrab）
+- [x] 自动化测试：CDC 启用、变更捕获、故障恢复
+- [x] GitHub Actions CI 集成（PR 触发）
+
+**验收标准**:
+- [x] Docker Compose 一键启动测试环境
+- [x] 自动化验证 CDC 启用状态
+- [x] 自动化验证变更捕获功能
+- [x] 自动化验证跨表事务完整性
+- [x] GitHub Actions 在 PR 时自动运行集成测试
+
+**完成时间**: 2026-04-04 (PR #9)
+
+**测试覆盖**:
+- `TestCDCEnabled`: 验证数据库和表的 CDC 启用状态
+- `TestChangeCapture`: 验证 INSERT/UPDATE 操作被 CDC 捕获
+- `TestCrossTableTransaction`: 验证跨表事务的完整性
+- `TestLSNProgression`: 验证 LSN 正确递进
+- `TestConnectionRecovery`: 验证数据库连接可用性
+- `TestDataDirectory`: 验证数据目录可写性
 
 ---
 
@@ -201,3 +219,5 @@
 | 2026-04-03 | P1-2 死信队列（DLQ） | ✅ | PR #6 |
 | 2026-04-03 | P2-2 批处理控制 | ✅ | PR #7 |
 | 2026-04-03 | P2-3 结构化日志(slog) | ✅ | PR #7 |
+| 2026-04-04 | P3-3 优雅降级 | ✅ | PR #8 |
+| 2026-04-04 | P3-4 集成测试 | ✅ | PR #9 |
