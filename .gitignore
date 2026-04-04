@@ -1,34 +1,17 @@
-# Binaries
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-bin/
+# Build output
+dbkrab
 dist/
 
-# Test files
-*.test
-*.out
-coverage.out
-
-# Allow Dockerfile.test
-!tests/**/Dockerfile.test
-
-# Go workspace
-go.work
+# Dependencies
+node_modules/
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
 
-# Data files
-data/
-*.db
-*.json
+# Logs
+*.log
 
-# Config
-config.yml
-!config.example.yml
+# OS
+.DS_Store
+Thumbs.db
