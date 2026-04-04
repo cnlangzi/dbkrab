@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Test database credentials (used by both workflow and setup script)
+  MSSQL_SA_PASSWORD: Test1234!
+  MSSQL_TEST_USER_PASSWORD: Test1234!
+
 jobs:
   test:
     name: Test
@@ -66,12 +71,12 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
           ACCEPT_EULA: Y
-          MSSQL_SA_PASSWORD: Test1234!
+          MSSQL_SA_PASSWORD: ${{ env.MSSQL_SA_PASSWORD }}
           MSSQL_PID: Developer
         ports:
           - 1433:1433
         options: >-
-          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q 'SELECT 1'"
+          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '${{ env.MSSQL_SA_PASSWORD }}' -Q 'SELECT 1'"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -91,7 +96,7 @@ jobs:
         run: |
           echo "Waiting for SQL Server to start..."
           for i in {1..30}; do
-            if /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q "SELECT 1" &>/dev/null; then
+            if /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '${{ env.MSSQL_SA_PASSWORD }}' -Q "SELECT 1" &>/dev/null; then
               echo "SQL Server is ready!"
               break
             fi
@@ -103,14 +108,10 @@ jobs:
         run: |
           echo "Setting up test database with CDC..."
           docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools18/bin/sqlcmd \
-            -S localhost -U sa -P 'Test1234!' -i tests/integration/setup.sql
+            -S localhost -U sa -P '${{ env.MSSQL_SA_PASSWORD }}' \
+            -v TEST_USER_PASSWORD='${{ env.MSSQL_TEST_USER_PASSWORD }}' \
+            -i /__w/dbkrab/dbkrab/tests/integration/setup.sql
           echo "CDC setup complete"
-
-      - name: Install test dependencies
-        run: |
-          go get github.com/stretchr/testify/assert
-          go get github.com/stretchr/testify/require
-          go get github.com/microsoft/go-mssqldb
 
       - name: Run integration tests
         run: |
@@ -121,7 +122,7 @@ jobs:
           MSSQL_HOST: localhost
           MSSQL_PORT: 1433
           MSSQL_USER: sa
-          MSSQL_PASSWORD: Test1234!
+          MSSQL_PASSWORD: ${{ env.MSSQL_SA_PASSWORD }}
           MSSQL_DATABASE: dbkrab_test
 
   test-summary:

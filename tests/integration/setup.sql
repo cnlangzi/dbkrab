@@ -1,5 +1,6 @@
 -- dbkrab Integration Test Setup Script
 -- Creates test database, tables, and enables CDC
+-- Uses environment variables for credentials when available
 
 USE master;
 GO
@@ -14,10 +15,15 @@ GO
 USE dbkrab_test;
 GO
 
--- Create test user
+-- Create test user with configurable password (default: Test1234!)
+DECLARE @password NVARCHAR(128) = COALESCE(NULLIF(RTRIM(LTRIM('$(TEST_USER_PASSWORD)')), ''), 'Test1234!');
+DECLARE @sql NVARCHAR(MAX);
+
 IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'dbkrab_test_user')
 BEGIN
-    CREATE LOGIN dbkrab_test_user WITH PASSWORD = 'Test1234!';
+    SET @sql = N'CREATE LOGIN dbkrab_test_user WITH PASSWORD = ''' + @password + N'''';
+    EXEC sp_executesql @sql;
+    
     CREATE USER dbkrab_test_user FOR LOGIN dbkrab_test_user;
     ALTER ROLE db_datareader ADD MEMBER dbkrab_test_user;
     ALTER ROLE db_datawriter ADD MEMBER dbkrab_test_user;
@@ -96,13 +102,6 @@ BEGIN
         @role_name = NULL,
         @supports_net_changes = 1;
 END
-GO
-
--- Insert initial test data
-INSERT INTO TestProducts (ProductName, Price, Stock) VALUES
-    ('Test Product A', 10.00, 100),
-    ('Test Product B', 20.00, 50),
-    ('Test Product C', 30.00, 25);
 GO
 
 -- Grant CDC schema permissions to test user
