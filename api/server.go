@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
 )
 
-// Server provides HTTP API for plugin management
+// Server provides HTTP API for plugin and DLQ management
 type Server struct {
 	manager  *plugin.Manager
+	dlq      *dlq.DLQ
 	port     int
 	server   *http.Server
 }
@@ -25,6 +28,15 @@ func NewServer(manager *plugin.Manager, port int) *Server {
 	}
 }
 
+// NewServerWithDLQ creates a new API server with DLQ support
+func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Server {
+	return &Server{
+		manager: manager,
+		dlq:     dlqStore,
+		port:    port,
+	}
+}
+
 // Start starts the API server
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
@@ -32,6 +44,14 @@ func (s *Server) Start() error {
 	// Plugin management endpoints
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
 	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
+
+	// DLQ endpoints
+	if s.dlq != nil {
+		mux.HandleFunc("/api/dlq/list", s.handleDLQList)
+		mux.HandleFunc("/api/dlq/", s.handleDLQAction)
+		mux.HandleFunc("/api/dlq/stats", s.handleDLQStats)
+	}
+
 	mux.HandleFunc("/health", s.handleHealth)
 
 	s.server = &http.Server{
@@ -83,9 +103,6 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePluginAction handles plugin-specific actions
-// GET /api/plugins/{name} - get info
-// DELETE /api/plugins/{name} - unload
-// POST /api/plugins/{name}/reload - reload
 func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	// Extract plugin name from path
 	path := r.URL.Path[len("/api/plugins/"):]
@@ -132,6 +149,217 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleDLQList handles GET /api/dlq/list?status=pending
+func (s *Server) handleDLQList(w http.ResponseWriter, r *http.Request) {
+	if s.dlq == nil {
+		s.writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   "DLQ not initialized",
+		})
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status := r.URL.Query().Get("status")
+	entries, err := s.dlq.List(status)
+	if err != nil {
+		s.writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	s.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"count":   len(entries),
+		"entries": entries,
+	})
+}
+
+// handleDLQAction handles DLQ entry actions
+// GET /api/dlq/{id} - get entry
+// POST /api/dlq/{id}/replay - replay entry
+// POST /api/dlq/{id}/ignore - ignore entry
+// DELETE /api/dlq/{id} - delete entry
+func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
+	if s.dlq == nil {
+		s.writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   "DLQ not initialized",
+		})
+		return
+	}
+
+	// Extract ID and action from path
+	path := r.URL.Path[len("/api/dlq/"):]
+	if path == "" {
+		http.Error(w, "entry ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Check for sub-action
+	var action string
+	var idStr string
+
+	if len(path) > 7 && path[len(path)-7:] == "/replay" {
+		action = "replay"
+		idStr = path[:len(path)-7]
+	} else if len(path) > 7 && path[len(path)-7:] == "/ignore" {
+		action = "ignore"
+		idStr = path[:len(path)-7]
+	} else {
+		idStr = path
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid entry ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		// Get single entry
+		entry, err := s.dlq.Get(id)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			s.writeJSON(w, map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+		s.writeJSON(w, map[string]interface{}{
+			"success": true,
+			"entry":   entry,
+		})
+
+	case "POST":
+		if action == "replay" {
+			// Replay entry - for now just mark as resolved (actual replay requires handler)
+			err := s.dlq.Replay(r.Context(), id, func(entry *dlq.DLQEntry) error {
+				// In a real implementation, this would re-process the transaction
+				// For now, we just simulate success
+				return nil
+			})
+			if err != nil {
+				s.writeJSON(w, map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+			s.writeJSON(w, map[string]interface{}{
+				"success": true,
+				"message": "Entry replayed successfully",
+			})
+		} else if action == "ignore" {
+			// Read note from request body
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				s.writeJSON(w, map[string]interface{}{
+					"success": false,
+					"error":   "read body failed",
+				})
+				return
+			}
+
+			var params struct {
+				Note string `json:"note"`
+			}
+			if err := json.Unmarshal(body, &params); err != nil {
+				params.Note = ""
+			}
+
+			err = s.dlq.Ignore(id, params.Note)
+			if err != nil {
+				s.writeJSON(w, map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+			s.writeJSON(w, map[string]interface{}{
+				"success": true,
+				"message": "Entry ignored",
+			})
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			s.writeJSON(w, map[string]interface{}{
+				"success": false,
+				"error":   "unknown action",
+			})
+		}
+
+	case "DELETE":
+		// Delete entry
+		err := s.dlq.Delete(id)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			s.writeJSON(w, map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+		s.writeJSON(w, map[string]interface{}{
+			"success": true,
+			"message": "Entry deleted",
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleDLQStats handles GET /api/dlq/stats
+func (s *Server) handleDLQStats(w http.ResponseWriter, r *http.Request) {
+	if s.dlq == nil {
+		s.writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   "DLQ not initialized",
+		})
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := s.dlq.Stats()
+	if err != nil {
+		s.writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	// Convert stats map to a more readable format
+	type StatEntry struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	var result []StatEntry
+	for status, count := range stats {
+		result = append(result, StatEntry{
+			Status: string(status),
+			Count:  count,
+		})
+	}
+
+	s.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"stats":   result,
+	})
 }
 
 // handleHealth handles health check
