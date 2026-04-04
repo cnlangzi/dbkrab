@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -106,11 +106,11 @@ func (m *AlertManager) SendEmergency(title string, gap cdc.GapInfo) {
 // Uses bounded concurrency to avoid overwhelming the system
 func (m *AlertManager) send(alert Alert) {
 	if !m.config.Enabled {
-		log.Printf("[ALERT %s] %s - %s (alerts disabled)", alert.Level, alert.Title, alert.Message)
+		slog.Debug("alert skipped (disabled)", "level", alert.Level, "title", alert.Title)
 		return
 	}
 
-	log.Printf("[ALERT %s] %s - %s", alert.Level, alert.Title, alert.Message)
+	slog.Info("alert", "level", alert.Level, "title", alert.Title, "message", alert.Message)
 
 	// Acquire semaphore (non-blocking for emergency alerts)
 	if alert.Level == AlertLevelEmergency {
@@ -130,7 +130,7 @@ func (m *AlertManager) send(alert Alert) {
 				m.sendSync(alert)
 			}()
 		default:
-			log.Printf("[ALERT %s] Dropping alert due to high load: %s", alert.Level, alert.Title)
+			slog.Warn("dropping alert due to high load", "level", alert.Level, "title", alert.Title)
 		}
 	}
 }
@@ -140,7 +140,7 @@ func (m *AlertManager) sendSync(alert Alert) {
 	// Send to webhook if configured
 	if m.config.WebhookURL != "" {
 		if err := m.sendWebhook(m.config.WebhookURL, alert); err != nil {
-			log.Printf("Failed to send webhook alert: %v", err)
+			slog.Error("failed to send webhook alert", "error", err)
 		}
 	}
 
@@ -149,14 +149,14 @@ func (m *AlertManager) sendSync(alert Alert) {
 		switch channel.Type {
 		case "webhook":
 			if err := m.sendWebhook(channel.URL, alert); err != nil {
-				log.Printf("Failed to send webhook alert: %v", err)
+				slog.Error("failed to send webhook alert", "error", err)
 			}
 		case "feishu":
 			if err := m.sendFeishu(channel.URL, alert); err != nil {
-				log.Printf("Failed to send Feishu alert: %v", err)
+				slog.Error("failed to send Feishu alert", "error", err)
 			}
 		default:
-			log.Printf("Unknown alert channel type: %s", channel.Type)
+			slog.Warn("unknown alert channel type", "type", channel.Type)
 		}
 	}
 }
@@ -179,7 +179,7 @@ func (m *AlertManager) sendWebhook(url string, alert Alert) error {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("resp.Body.Close error: %v", err)
+			slog.Warn("resp.Body.Close error", "error", err)
 		}
 	}()
 
@@ -233,7 +233,7 @@ func (m *AlertManager) sendFeishu(url string, alert Alert) error {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("resp.Body.Close error: %v", err)
+			slog.Warn("resp.Body.Close error", "error", err)
 		}
 	}()
 
