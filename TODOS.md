@@ -134,9 +134,11 @@
 
 ---
 
-### P2-4: API 认证
-- [ ] 添加 API Token 验证
-- [ ] 配置 Token 文件（`/etc/dbkrab/api_token`）
+### P2-4: API 认证 ⏸️ **暂不需要**
+- 添加 API Token 验证
+- 配置 Token 文件（`/etc/dbkrab/api_token`）
+
+**决策**: 2026-04-03 - 暂时不需要，用户确认
 
 ---
 
