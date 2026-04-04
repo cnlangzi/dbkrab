@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	dbkrab "github.com/cnlangzi/dbkrab"
 	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -129,6 +132,14 @@ func main() {
 
 	// Start API server
 	apiServer := api.NewServerWithDLQ(pluginManager, dlqStore, *apiPort)
+	
+	// Setup dashboard file system
+	dashboardSubFS, err := fs.Sub(dbkrab.DashboardFS, "dashboard/dist")
+	if err == nil {
+		apiServer.WithDashboard(http.FS(dashboardSubFS))
+		slog.Info("Dashboard embedded", "path", "/")
+	}
+	
 	go func() {
 		slog.Info("API server starting", "port", *apiPort)
 		if err := apiServer.Start(); err != nil {
