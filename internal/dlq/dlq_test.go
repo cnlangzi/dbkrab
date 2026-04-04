@@ -22,7 +22,7 @@ func setupTestDLQ(t *testing.T) (*DLQ, func()) {
 
 	dlq, err := New(tmpPath)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		t.Fatalf("Failed to create DLQ: %v", err)
 	}
 
