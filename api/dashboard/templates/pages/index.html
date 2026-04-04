@@ -23,7 +23,6 @@
 
     <!-- Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <!-- DLQ Pending -->
         <div class="bg-white rounded-lg shadow p-6">
             <p class="text-gray-500 text-sm mb-1">DLQ Pending</p>
             <p class="text-4xl font-bold {{if gt (index .stats "pending") 0}}text-red-600{{else}}text-green-600{{end}}">
@@ -31,28 +30,19 @@
             </p>
         </div>
 
-        <!-- DLQ Resolved -->
         <div class="bg-white rounded-lg shadow p-6">
             <p class="text-gray-500 text-sm mb-1">DLQ Resolved</p>
-            <p class="text-4xl font-bold text-green-600">
-                {{index .stats "resolved"}}
-            </p>
+            <p class="text-4xl font-bold text-green-600">{{index .stats "resolved"}}</p>
         </div>
 
-        <!-- DLQ Ignored -->
         <div class="bg-white rounded-lg shadow p-6">
             <p class="text-gray-500 text-sm mb-1">DLQ Ignored</p>
-            <p class="text-4xl font-bold text-gray-500">
-                {{index .stats "ignored"}}
-            </p>
+            <p class="text-4xl font-bold text-gray-500">{{index .stats "ignored"}}</p>
         </div>
 
-        <!-- Active Plugins -->
         <div class="bg-white rounded-lg shadow p-6">
             <p class="text-gray-500 text-sm mb-1">Active Plugins</p>
-            <p class="text-4xl font-bold text-blue-600">
-                {{len .plugins.Plugins}}
-            </p>
+            <p class="text-4xl font-bold text-blue-600">{{len .plugins.Plugins}}</p>
         </div>
     </div>
 
