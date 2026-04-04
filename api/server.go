@@ -14,10 +14,11 @@ import (
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager  *plugin.Manager
-	dlq      *dlq.DLQ
-	port     int
-	server   *http.Server
+	manager    *plugin.Manager
+	dlq        *dlq.DLQ
+	port       int
+	server     *http.Server
+	dashboardFS http.FileSystem
 }
 
 // NewServer creates a new API server
@@ -37,22 +38,44 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 	}
 }
 
+// WithDashboard sets the dashboard file system
+func (s *Server) WithDashboard(fs http.FileSystem) {
+	s.dashboardFS = fs
+}
+
 // Start starts the API server
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	// Enable CORS for all API endpoints
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	})
+
 	// Plugin management endpoints
-	mux.HandleFunc("/api/plugins", s.handlePlugins)
-	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
+	mux.HandleFunc("/api/plugins", s.corsHandler(s.handlePlugins))
+	mux.HandleFunc("/api/plugins/", s.corsHandler(s.handlePluginAction))
 
 	// DLQ endpoints
 	if s.dlq != nil {
-		mux.HandleFunc("/api/dlq/list", s.handleDLQList)
-		mux.HandleFunc("/api/dlq/", s.handleDLQAction)
-		mux.HandleFunc("/api/dlq/stats", s.handleDLQStats)
+		mux.HandleFunc("/api/dlq/list", s.corsHandler(s.handleDLQList))
+		mux.HandleFunc("/api/dlq/", s.corsHandler(s.handleDLQAction))
+		mux.HandleFunc("/api/dlq/stats", s.corsHandler(s.handleDLQStats))
 	}
 
-	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/health", s.corsHandler(s.handleHealth))
+
+	// Serve dashboard static files if available
+	if s.dashboardFS != nil {
+		mux.Handle("/", http.FileServer(s.dashboardFS))
+	}
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -62,6 +85,22 @@ func (s *Server) Start() error {
 	}
 
 	return s.server.ListenAndServe()
+}
+
+// corsHandler wraps a handler with CORS headers
+func (s *Server) corsHandler(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 // Stop stops the API server
