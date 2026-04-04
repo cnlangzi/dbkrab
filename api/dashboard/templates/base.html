@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}} - dbkrab Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="flex min-h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-gray-900 text-white flex-shrink-0">
+            <div class="p-4 border-b border-gray-700">
+                <h1 class="text-xl font-bold">
+                    <a href="/" class="hover:text-blue-400">🦀 dbkrab</a>
+                </h1>
+            </div>
+            <nav class="mt-2">
+                <a href="/" 
+                   class="block px-4 py-3 {{if eq .activeTab "overview"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                    📊 Overview
+                </a>
+                <a href="/dlq" 
+                   class="block px-4 py-3 {{if eq .activeTab "dlq"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                    🗄️ Dead Letter Queue
+                </a>
+                <a href="/plugins" 
+                   class="block px-4 py-3 {{if eq .activeTab "plugins"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                    🔌 Plugins
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-8">
+            {{template "content" .}}
+        </main>
+    </div>
+</body>
+</html>

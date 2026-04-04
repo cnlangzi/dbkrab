@@ -1,24 +1,42 @@
 package api
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
 )
 
+//go:embed dashboard/templates/*.html
+var templatesFS embed.FS
+
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager    *plugin.Manager
-	dlq        *dlq.DLQ
-	port       int
-	server     *http.Server
-	dashboardFS http.FileSystem
+	manager   *plugin.Manager
+	dlq       *dlq.DLQ
+	port      int
+	server    *http.Server
+	templates *template.Template
+}
+
+// PageData holds template data
+type PageData struct {
+	Title     string
+	Stats     map[string]int
+	Plugins   plugin.APIResponse
+	Entries   []*dlq.DLQEntry
+	Health    string
+	ActiveTab string
+	Message   string
 }
 
 // NewServer creates a new API server
@@ -38,44 +56,29 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 	}
 }
 
-// WithDashboard sets the dashboard file system
-func (s *Server) WithDashboard(fs http.FileSystem) {
-	s.dashboardFS = fs
-}
-
 // Start starts the API server
 func (s *Server) Start() error {
+	// Parse templates
+	tmpl, err := template.New("").ParseFS(templatesFS, "dashboard/templates/*.html")
+	if err != nil {
+		return fmt.Errorf("parse templates: %w", err)
+	}
+	s.templates = tmpl
+
 	mux := http.NewServeMux()
 
-	// Enable CORS for all API endpoints
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// Dashboard pages (SSR)
+	mux.HandleFunc("/", s.handleDashboard)
+	mux.HandleFunc("/dlq", s.handleDLQPage)
+	mux.HandleFunc("/plugins", s.handlePluginsPage)
 
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-	})
-
-	// Plugin management endpoints
-	mux.HandleFunc("/api/plugins", s.corsHandler(s.handlePlugins))
-	mux.HandleFunc("/api/plugins/", s.corsHandler(s.handlePluginAction))
-
-	// DLQ endpoints
-	if s.dlq != nil {
-		mux.HandleFunc("/api/dlq/list", s.corsHandler(s.handleDLQList))
-		mux.HandleFunc("/api/dlq/", s.corsHandler(s.handleDLQAction))
-		mux.HandleFunc("/api/dlq/stats", s.corsHandler(s.handleDLQStats))
-	}
-
-	mux.HandleFunc("/health", s.corsHandler(s.handleHealth))
-
-	// Serve dashboard static files if available
-	if s.dashboardFS != nil {
-		mux.Handle("/", http.FileServer(s.dashboardFS))
-	}
+	// API endpoints
+	mux.HandleFunc("/api/plugins", s.handlePlugins)
+	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
+	mux.HandleFunc("/api/dlq/list", s.handleDLQList)
+	mux.HandleFunc("/api/dlq/", s.handleDLQAction)
+	mux.HandleFunc("/api/dlq/stats", s.handleDLQStats)
+	mux.HandleFunc("/health", s.handleHealth)
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -87,22 +90,6 @@ func (s *Server) Start() error {
 	return s.server.ListenAndServe()
 }
 
-// corsHandler wraps a handler with CORS headers
-func (s *Server) corsHandler(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next(w, r)
-	}
-}
-
 // Stop stops the API server
 func (s *Server) Stop() error {
 	if s.server != nil {
@@ -111,52 +98,99 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// handlePlugins handles GET /api/plugins (list) and POST /api/plugins (load)
-func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		// List plugins
-		resp := s.manager.HandleAPI("list", nil)
-		s.writeJSON(w, resp)
-
-	case "POST":
-		// Load a new plugin
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			s.writeJSON(w, plugin.APIResponse{Success: false, Error: "read body failed"})
-			return
-		}
-
-		var params map[string]interface{}
-		if err := json.Unmarshal(body, &params); err != nil {
-			s.writeJSON(w, plugin.APIResponse{Success: false, Error: "invalid json"})
-			return
-		}
-
-		resp := s.manager.HandleAPI("load", params)
-		s.writeJSON(w, resp)
-
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// renderTemplate renders a template with the given data
+func (s *Server) renderTemplate(w http.ResponseWriter, name string, data PageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl := s.templates.Lookup(name)
+	if tmpl == nil {
+		http.Error(w, "template not found: "+name, http.StatusInternalServerError)
+		return
+	}
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-// handlePluginAction handles plugin-specific actions
+// handleDashboard renders the main dashboard page
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	stats, _ := s.getDLQStats()
+	plugins := s.manager.HandleAPI("list", nil)
+
+	s.renderTemplate(w, "index.html", PageData{
+		Title:     "Dashboard",
+		Stats:     stats,
+		Plugins:   plugins,
+		Health:    "healthy",
+		ActiveTab: "overview",
+	})
+}
+
+// handleDLQPage renders the DLQ management page
+func (s *Server) handleDLQPage(w http.ResponseWriter, r *http.Request) {
+	if s.dlq == nil {
+		s.renderTemplate(w, "dlq.html", PageData{
+			Title:   "Error",
+			Message: "DLQ not initialized",
+		})
+		return
+	}
+
+	entries, err := s.dlq.List("")
+	if err != nil {
+		s.renderTemplate(w, "dlq.html", PageData{
+			Title:   "Error",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	s.renderTemplate(w, "dlq.html", PageData{
+		Title:     "Dead Letter Queue",
+		Entries:   entries,
+		ActiveTab: "dlq",
+	})
+}
+
+// handlePluginsPage renders the plugins management page
+func (s *Server) handlePluginsPage(w http.ResponseWriter, r *http.Request) {
+	plugins := s.manager.HandleAPI("list", nil)
+
+	s.renderTemplate(w, "plugins.html", PageData{
+		Title:     "Plugins",
+		Plugins:   plugins,
+		ActiveTab: "plugins",
+	})
+}
+
+// handlePlugins handles GET /api/plugins (list)
+func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := s.manager.HandleAPI("list", nil)
+	s.writeJSON(w, resp)
+}
+
+// handlePluginAction handles plugin actions
 func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
-	// Extract plugin name from path
-	path := r.URL.Path[len("/api/plugins/"):]
+	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	if path == "" {
 		http.Error(w, "plugin name required", http.StatusBadRequest)
 		return
 	}
 
-	// Check for sub-action
-	var action string
 	var name string
+	var action string
 
-	if len(path) > 8 && path[len(path)-7:] == "/reload" {
+	if strings.HasSuffix(path, "/reload") {
+		name = strings.TrimSuffix(path, "/reload")
 		action = "reload"
-		name = path[:len(path)-7]
 	} else {
 		name = path
 	}
@@ -165,7 +199,6 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		// Get single plugin info
 		resp := s.manager.HandleAPI("get", params)
 		if !resp.Success {
 			w.WriteHeader(http.StatusNotFound)
@@ -173,7 +206,6 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, resp)
 
 	case "DELETE":
-		// Unload plugin
 		resp := s.manager.HandleAPI("unload", params)
 		s.writeJSON(w, resp)
 
@@ -190,7 +222,7 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDLQList handles GET /api/dlq/list?status=pending
+// handleDLQList handles GET /api/dlq/list
 func (s *Server) handleDLQList(w http.ResponseWriter, r *http.Request) {
 	if s.dlq == nil {
 		s.writeJSON(w, map[string]interface{}{
@@ -222,11 +254,7 @@ func (s *Server) handleDLQList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDLQAction handles DLQ entry actions
-// GET /api/dlq/{id} - get entry
-// POST /api/dlq/{id}/replay - replay entry
-// POST /api/dlq/{id}/ignore - ignore entry
-// DELETE /api/dlq/{id} - delete entry
+// handleDLQAction handles DLQ actions
 func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 	if s.dlq == nil {
 		s.writeJSON(w, map[string]interface{}{
@@ -236,23 +264,21 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract ID and action from path
-	path := r.URL.Path[len("/api/dlq/"):]
+	path := strings.TrimPrefix(r.URL.Path, "/api/dlq/")
 	if path == "" {
 		http.Error(w, "entry ID required", http.StatusBadRequest)
 		return
 	}
 
-	// Check for sub-action
 	var action string
 	var idStr string
 
-	if len(path) > 7 && path[len(path)-7:] == "/replay" {
+	if strings.HasSuffix(path, "/replay") {
 		action = "replay"
-		idStr = path[:len(path)-7]
-	} else if len(path) > 7 && path[len(path)-7:] == "/ignore" {
+		idStr = strings.TrimSuffix(path, "/replay")
+	} else if strings.HasSuffix(path, "/ignore") {
 		action = "ignore"
-		idStr = path[:len(path)-7]
+		idStr = strings.TrimSuffix(path, "/ignore")
 	} else {
 		idStr = path
 	}
@@ -265,7 +291,6 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		// Get single entry
 		entry, err := s.dlq.Get(id)
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
@@ -282,10 +307,7 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 
 	case "POST":
 		if action == "replay" {
-			// Replay entry - for now just mark as resolved (actual replay requires handler)
 			err := s.dlq.Replay(r.Context(), id, func(entry *dlq.DLQEntry) error {
-				// In a real implementation, this would re-process the transaction
-				// For now, we just simulate success
 				return nil
 			})
 			if err != nil {
@@ -300,22 +322,11 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 				"message": "Entry replayed successfully",
 			})
 		} else if action == "ignore" {
-			// Read note from request body
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				s.writeJSON(w, map[string]interface{}{
-					"success": false,
-					"error":   "read body failed",
-				})
-				return
-			}
-
+			body, _ := io.ReadAll(r.Body)
 			var params struct {
 				Note string `json:"note"`
 			}
-			if err := json.Unmarshal(body, &params); err != nil {
-				params.Note = ""
-			}
+			json.Unmarshal(body, &params)
 
 			err = s.dlq.Ignore(id, params.Note)
 			if err != nil {
@@ -338,7 +349,6 @@ func (s *Server) handleDLQAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "DELETE":
-		// Delete entry
 		err := s.dlq.Delete(id)
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
@@ -373,7 +383,7 @@ func (s *Server) handleDLQStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := s.dlq.Stats()
+	stats, err := s.getDLQStats()
 	if err != nil {
 		s.writeJSON(w, map[string]interface{}{
 			"success": false,
@@ -382,37 +392,57 @@ func (s *Server) handleDLQStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert stats map to a more readable format
-	type StatEntry struct {
-		Status string `json:"status"`
-		Count  int    `json:"count"`
-	}
-	var result []StatEntry
-	for status, count := range stats {
-		result = append(result, StatEntry{
-			Status: string(status),
-			Count:  count,
-		})
-	}
-
 	s.writeJSON(w, map[string]interface{}{
 		"success": true,
-		"stats":   result,
+		"stats":   stats,
 	})
+}
+
+// getDLQStats returns formatted DLQ stats
+func (s *Server) getDLQStats() (map[string]int, error) {
+	if s.dlq == nil {
+		return map[string]int{"pending": 0, "resolved": 0, "ignored": 0}, nil
+	}
+
+	rawStats, err := s.dlq.Stats()
+	if err != nil {
+		return nil, err
+	}
+
+	stats := map[string]int{"pending": 0, "resolved": 0, "ignored": 0}
+	for status, count := range rawStats {
+		stats[string(status)] = count
+	}
+	return stats, nil
 }
 
 // handleHealth handles health check
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("OK")); err != nil {
-		http.Error(w, "write error", http.StatusInternalServerError)
-	}
+	w.Write([]byte("OK"))
 }
 
 // writeJSON writes JSON response
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "encode error", http.StatusInternalServerError)
+	json.NewEncoder(w).Encode(data)
+}
+
+// Helper functions for templates
+func add(a, b int) int { return a + b }
+func sub(a, b int) int { return a - b }
+func index(m map[string]int, key string) int { return m[key] }
+func lenSlice(v interface{}) int {
+	switch v := v.(type) {
+	case []any:
+		return len(v)
+	default:
+		return 0
 	}
+}
+func join(sep string, elems []string) string {
+	return strings.Join(elems, sep)
+}
+func base(v string) string {
+	return filepath.Base(v)
 }
