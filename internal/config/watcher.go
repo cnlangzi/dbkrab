@@ -99,13 +99,25 @@ func (w *Watcher) Start() {
 					w.cfg = newCfg
 					w.mu.Unlock()
 
-					// Signal reload via channel (non-blocking)
+					// Signal reload via channel, always keeping the most recent config.
+					// If a reload is already pending, drop the older one and enqueue the new config.
 					select {
 					case w.reloadCh <- newCfg:
 						slog.Info("config reload signaled")
 					default:
-						// Channel full, previous reload pending
-						slog.Warn("config reload already pending, skipping")
+						// Channel full: drain one pending reload (older config) and enqueue the latest.
+						select {
+						case <-w.reloadCh:
+							slog.Info("dropped pending reload in favor of newer config")
+						default:
+							// Nothing to drain
+						}
+						select {
+						case w.reloadCh <- newCfg:
+							slog.Info("config reload signaled with latest config")
+						default:
+							slog.Warn("config reload channel still full, latest config reload skipped")
+						}
 					}
 				}
 			case err, ok := <-errorsCh:

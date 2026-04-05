@@ -171,7 +171,7 @@ func (p *Poller) Start(ctx context.Context) error {
 					continue
 				}
 				// Buffer is empty, safe to apply config
-				if err := p.checkAndApplyConfig(&ticker); err != nil {
+				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
 				}
 				continue
@@ -196,7 +196,7 @@ func (p *Poller) Start(ctx context.Context) error {
 
 			// Check for pending config after successful poll (at transaction boundary)
 			if p.pendingCfg != nil {
-				if err := p.checkAndApplyConfig(&ticker); err != nil {
+				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
 				}
 			}
@@ -814,7 +814,7 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 }
 
 // checkAndApplyConfig checks if config can be applied and applies it at transaction boundary
-func (p *Poller) checkAndApplyConfig(ticker **time.Ticker) error {
+func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	if p.pendingCfg == nil {
 		return nil
 	}
@@ -845,7 +845,7 @@ func (p *Poller) checkAndApplyConfig(ticker **time.Ticker) error {
 		if err != nil {
 			slog.Warn("invalid polling_interval in new config", "error", err)
 		} else {
-			(*ticker).Reset(newInterval)
+			ticker.Reset(newInterval)
 			slog.Info("polling interval updated", "new_interval", newInterval)
 		}
 	}
