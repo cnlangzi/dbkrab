@@ -5,6 +5,22 @@
 USE master;
 GO
 
+-- Start SQL Server Agent (required for CDC capture jobs)
+-- In Docker containers, Agent may need manual start
+IF EXISTS (SELECT 1 FROM sys.services WHERE name = 'SQLServerAgent')
+BEGIN
+    EXEC xp_servicecontrol 'START', 'SQLServerAgent';
+END
+GO
+
+-- Alternative: Use sp_cdc_start_job if Agent is available
+-- This ensures the capture job is running
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = 'cdc.dbkrab_test_capture')
+BEGIN
+    EXEC msdb.dbo.sp_start_job 'cdc.dbkrab_test_capture';
+END
+GO
+
 -- Create test database
 IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'dbkrab_test')
 BEGIN
