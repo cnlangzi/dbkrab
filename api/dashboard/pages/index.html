@@ -3,47 +3,36 @@
 <div class="space-y-6">
     <h2 class="text-2xl font-bold text-gray-800">Overview</h2>
     
-    <!-- Health Status -->
-    <div class="bg-white rounded-lg shadow p-6">
+    <!-- Health Status - loaded via HTMX -->
+    <div class="bg-white rounded-lg shadow p-6" hx-get="/api/health" hx-trigger="load">
         <div class="flex items-center gap-3">
-            {{if eq .health "healthy"}}
-                <span class="text-4xl">✅</span>
-                <div>
-                    <h3 class="text-xl font-semibold text-green-600">System Healthy</h3>
-                    <p class="text-gray-600">All services are running normally</p>
-                </div>
-            {{else}}
-                <span class="text-4xl">❌</span>
-                <div>
-                    <h3 class="text-xl font-semibold text-red-600">System Unhealthy</h3>
-                    <p class="text-gray-600">Some services need attention</p>
-                </div>
-            {{end}}
+            <span class="text-4xl">✅</span>
+            <div>
+                <h3 class="text-xl font-semibold text-green-600">System Healthy</h3>
+                <p class="text-gray-600">All services are running normally</p>
+            </div>
         </div>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="bg-white rounded-lg shadow p-6">
-            <p class="text-gray-500 text-sm mb-1">DLQ Pending</p>
-            <p class="text-4xl font-bold {{if gt (index .stats "pending") 0}}text-red-600{{else}}text-green-600{{end}}">
-                {{index .stats "pending"}}
-            </p>
-        </div>
-
-        <div class="bg-white rounded-lg shadow p-6">
-            <p class="text-gray-500 text-sm mb-1">DLQ Resolved</p>
-            <p class="text-4xl font-bold text-green-600">{{index .stats "resolved"}}</p>
-        </div>
-
-        <div class="bg-white rounded-lg shadow p-6">
-            <p class="text-gray-500 text-sm mb-1">DLQ Ignored</p>
-            <p class="text-4xl font-bold text-gray-500">{{index .stats "ignored"}}</p>
-        </div>
-
-        <div class="bg-white rounded-lg shadow p-6">
-            <p class="text-gray-500 text-sm mb-1">Active Plugins</p>
-            <p class="text-4xl font-bold text-blue-600">{{len .plugins.Plugins}}</p>
+    <!-- Stats Cards - loaded via HTMX -->
+    <div hx-get="/api/dlq/stats" hx-trigger="load" hx-ext="json-enc">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500 text-sm mb-1">DLQ Pending</p>
+                <p class="text-4xl font-bold text-green-600" id="pending-count">0</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500 text-sm mb-1">DLQ Resolved</p>
+                <p class="text-4xl font-bold text-green-600" id="resolved-count">0</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500 text-sm mb-1">DLQ Ignored</p>
+                <p class="text-4xl font-bold text-gray-500" id="ignored-count">0</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500 text-sm mb-1">Active Plugins</p>
+                <p class="text-4xl font-bold text-blue-600" id="plugins-count">0</p>
+            </div>
         </div>
     </div>
 

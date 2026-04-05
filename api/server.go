@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"embed"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,8 +13,17 @@ import (
 	"github.com/yaitoo/xun"
 )
 
-//go:embed dashboard
+//go:embed all:dashboard
 var dashboardFS embed.FS
+
+// getDashboardFS returns a FS with pages/layouts at root for xun
+func getDashboardFS() fs.FS {
+	sub, err := fs.Sub(dashboardFS, "dashboard")
+	if err != nil {
+		return dashboardFS
+	}
+	return sub
+}
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
@@ -47,8 +57,10 @@ func (s *Server) Start() error {
 	s.mux = http.NewServeMux()
 
 	// Create xun app with our mux and template filesystem
+	// Use Sub FS so pages/layouts are at root level for xun
+	dashboardSubFS := getDashboardFS()
 	s.app = xun.New(
-		xun.WithFsys(dashboardFS),
+		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
 	)
 
