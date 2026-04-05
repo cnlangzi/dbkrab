@@ -47,7 +47,7 @@ func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
 	// atomic renames/rotations of the config file (new inode) are still observed.
 	dir := filepath.Dir(path)
 	if err := w.watcher.Add(dir); err != nil {
-		w.watcher.Close()
+		_ = w.watcher.Close()
 		return nil, fmt.Errorf("watch config dir %q: %w", dir, err)
 	}
 
