@@ -101,10 +101,10 @@ func TestCDCEnabled(t *testing.T) {
 	defer cancel()
 
 	// Check if CDC is enabled on database
-	var isCdcEnabled int
+	var isCdcEnabled bool
 	err := db.QueryRowContext(ctx, "SELECT is_cdc_enabled FROM sys.databases WHERE name = @p1", config.Database).Scan(&isCdcEnabled)
 	require.NoError(t, err, "Failed to query CDC status")
-	assert.Equal(t, 1, isCdcEnabled, "CDC should be enabled on test database")
+	assert.True(t, isCdcEnabled, "CDC should be enabled on test database")
 
 	// Check if CDC is enabled on test tables
 	tables := []string{"TestProducts", "TestOrders", "TestOrderItems"}
@@ -136,15 +136,13 @@ func TestChangeCapture(t *testing.T) {
 	require.NoError(t, err, "Failed to get current LSN")
 	t.Logf("Start LSN: %x", startLSN)
 
-	// Insert a test product
+	// Insert a test product with OUTPUT clause (MSSQL doesn't support LastInsertId)
 	productName := fmt.Sprintf("Integration Test Product %d", time.Now().UnixNano())
-	result, err := db.ExecContext(ctx,
-		"INSERT INTO TestProducts (ProductName, Price, Stock) VALUES (@p1, @p2, @p3)",
-		productName, 99.99, 10)
+	var productID int64
+	err = db.QueryRowContext(ctx,
+		"INSERT INTO TestProducts (ProductName, Price, Stock) OUTPUT INSERTED.ProductID VALUES (@p1, @p2, @p3)",
+		productName, 99.99, 10).Scan(&productID)
 	require.NoError(t, err, "Failed to insert test product")
-
-	productID, err := result.LastInsertId()
-	require.NoError(t, err, "Failed to get last insert ID")
 	t.Logf("Inserted product ID: %d", productID)
 
 	// Poll CDC change table for TestProducts with timeout to avoid flakiness
@@ -192,13 +190,11 @@ func TestCrossTableTransaction(t *testing.T) {
 	t.Logf("Start LSN: %x", startLSN)
 
 	// Create a product first to avoid FK dependency on existing data
-	productResult, err := db.ExecContext(ctx,
-		"INSERT INTO TestProducts (ProductName, Price, Stock) VALUES (@p1, @p2, @p3)",
-		"Cross-Test Product", 10.00, 100)
+	var productID int64
+	err = db.QueryRowContext(ctx,
+		"INSERT INTO TestProducts (ProductName, Price, Stock) OUTPUT INSERTED.ProductID VALUES (@p1, @p2, @p3)",
+		"Cross-Test Product", 10.00, 100).Scan(&productID)
 	require.NoError(t, err, "Failed to insert test product")
-
-	productID, err := productResult.LastInsertId()
-	require.NoError(t, err, "Failed to get product ID")
 	t.Logf("Created product ID: %d", productID)
 
 	// Begin transaction spanning multiple tables
@@ -206,13 +202,11 @@ func TestCrossTableTransaction(t *testing.T) {
 	require.NoError(t, err, "Failed to begin transaction")
 
 	// Insert order using the product we just created
-	result, err := tx.ExecContext(ctx,
-		"INSERT INTO TestOrders (ProductID, Quantity, TotalAmount) VALUES (@p1, @p2, @p3)",
-		productID, 2, 20.00)
+	var orderID int64
+	err = tx.QueryRowContext(ctx,
+		"INSERT INTO TestOrders (ProductID, Quantity, TotalAmount) OUTPUT INSERTED.OrderID VALUES (@p1, @p2, @p3)",
+		productID, 2, 20.00).Scan(&orderID)
 	require.NoError(t, err, "Failed to insert test order")
-
-	orderID, err := result.LastInsertId()
-	require.NoError(t, err, "Failed to get order ID")
 	t.Logf("Created order ID: %d", orderID)
 
 	// Insert order items
