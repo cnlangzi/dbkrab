@@ -41,6 +41,12 @@ type Poller struct {
 	// Graceful degradation fields
 	disconnectStart time.Time
 	disconnectMu    sync.RWMutex
+	
+	// Hot reload fields
+	reloadCh      <-chan *config.Config  // Channel for config reload signals
+	pendingCfg    *config.Config         // Pending config to apply
+	needDrain     bool                   // Signal to drain txBuffer before rebuild
+	needRebuildTx bool                   // Signal to rebuild txBuffer after drain
 }
 
 // Sink interface for storing changes
@@ -114,6 +120,11 @@ func (p *Poller) SetHandler(h Handler) {
 	p.handler = h
 }
 
+// SetReloadChan sets the config reload channel for hot reload
+func (p *Poller) SetReloadChan(ch <-chan *config.Config) {
+	p.reloadCh = ch
+}
+
 // Start begins polling
 func (p *Poller) Start(ctx context.Context) error {
 	// Load existing offsets
@@ -140,10 +151,32 @@ func (p *Poller) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush buffer before exit
+			p.flushBuffer(ctx)
 			return ctx.Err()
 		case <-p.stopCh:
+			// Flush buffer before stop
+			p.flushBuffer(ctx)
 			return nil
+		case newCfg := <-p.reloadCh:
+			// Config reload signal received
+			p.pendingCfg = newCfg
+			slog.Info("config reload pending, will apply at transaction boundary")
 		case <-ticker.C:
+			// Check if need to drain buffer before applying config
+			if p.needDrain {
+				if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
+					// Skip polling, wait for buffer to drain
+					slog.Debug("waiting for txBuffer to drain before applying config")
+					continue
+				}
+				// Buffer is empty, safe to apply config
+				if err := p.checkAndApplyConfig(&ticker); err != nil {
+					slog.Error("failed to apply config", "error", err)
+				}
+				continue
+			}
+
 			if err := p.poll(ctx); err != nil {
 				slog.Error("poll error", "error", err)
 
@@ -159,6 +192,13 @@ func (p *Poller) Start(ctx context.Context) error {
 				}
 
 				// Continue polling despite errors
+			}
+
+			// Check for pending config after successful poll (at transaction boundary)
+			if p.pendingCfg != nil {
+				if err := p.checkAndApplyConfig(&ticker); err != nil {
+					slog.Error("failed to apply config", "error", err)
+				}
 			}
 		}
 	}
@@ -771,4 +811,172 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 		"table", tableName,
 		"operation", operation,
 		"retries", retryCount)
+}
+
+// checkAndApplyConfig checks if config can be applied and applies it at transaction boundary
+func (p *Poller) checkAndApplyConfig(ticker **time.Ticker) error {
+	if p.pendingCfg == nil {
+		return nil
+	}
+
+	newCfg := p.pendingCfg
+
+	// Check if transaction_buffer change requires drain
+	if newCfg.TransactionBuffer.Enabled != p.cfg.TransactionBuffer.Enabled ||
+		newCfg.TransactionBuffer.MaxWaitTime != p.cfg.TransactionBuffer.MaxWaitTime ||
+		newCfg.TransactionBuffer.MaxTransactionsPerBatch != p.cfg.TransactionBuffer.MaxTransactionsPerBatch ||
+		newCfg.TransactionBuffer.MaxBatchBytes != p.cfg.TransactionBuffer.MaxBatchBytes {
+		// Need to drain buffer before applying
+		if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
+			slog.Info("transaction_buffer changed, waiting for buffer to drain")
+			p.needDrain = true
+			p.needRebuildTx = true
+			// Will apply on next cycle after drain
+			return nil
+		}
+	}
+
+	// Safe to apply config now
+	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.Interval)
+
+	// Apply polling_interval change
+	if newCfg.Interval != p.cfg.Interval {
+		newInterval, err := newCfg.PollingInterval()
+		if err != nil {
+			slog.Warn("invalid polling_interval in new config", "error", err)
+		} else {
+			(*ticker).Reset(newInterval)
+			slog.Info("polling interval updated", "new_interval", newInterval)
+		}
+	}
+
+	// Apply tables change (add/remove from polling list)
+	if !tablesEqual(p.cfg.Tables, newCfg.Tables) {
+		slog.Info("tables list changed", "old_count", len(p.cfg.Tables), "new_count", len(newCfg.Tables))
+		// Tables are read from p.cfg.Tables in poll(), so just update the reference
+	}
+
+	// Apply cdc_protection thresholds (safe to update immediately)
+	p.cfg.CDCProtection = newCfg.CDCProtection
+	slog.Debug("cdc_protection thresholds updated")
+
+	// Apply graceful_degradation params (safe to update immediately)
+	p.cfg.GracefulDegradation = newCfg.GracefulDegradation
+	slog.Debug("graceful_degradation params updated")
+
+	// Handle transaction_buffer rebuild if needed
+	if p.needRebuildTx {
+		if err := p.rebuildTxBuffer(newCfg); err != nil {
+			slog.Error("failed to rebuild txBuffer", "error", err)
+			return err
+		}
+		p.needRebuildTx = false
+		p.needDrain = false
+	}
+
+	// Update main config reference
+	p.cfg = newCfg
+	p.pendingCfg = nil
+
+	slog.Info("config reload complete")
+	return nil
+}
+
+// rebuildTxBuffer rebuilds the transaction buffer with new config
+func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
+	if !newCfg.TransactionBuffer.Enabled {
+		// Disable transaction buffer
+		if p.txBuffer != nil {
+			p.txBuffer.Close()
+			p.txBuffer = nil
+			slog.Info("transaction buffer disabled")
+		}
+		return nil
+	}
+
+	maxWaitTime, err := time.ParseDuration(newCfg.TransactionBuffer.MaxWaitTime)
+	if err != nil {
+		slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
+		maxWaitTime = 30 * time.Second
+	}
+
+	// Close old buffer
+	if p.txBuffer != nil {
+		p.txBuffer.Close()
+	}
+
+	// Create new buffer with updated config
+	p.txBuffer = NewTransactionBuffer(
+		maxWaitTime,
+		newCfg.TransactionBuffer.MaxTransactionsPerBatch,
+		newCfg.TransactionBuffer.MaxBatchBytes,
+	)
+
+	slog.Info("transaction buffer rebuilt",
+		"max_wait_time", maxWaitTime,
+		"max_transactions_per_batch", newCfg.TransactionBuffer.MaxTransactionsPerBatch,
+		"max_batch_bytes", newCfg.TransactionBuffer.MaxBatchBytes)
+
+	return nil
+}
+
+// flushBuffer forces flush all pending transactions (for shutdown)
+func (p *Poller) flushBuffer(ctx context.Context) {
+	if p.txBuffer == nil {
+		return
+	}
+
+	slog.Info("flushing transaction buffer", "pending_count", p.txBuffer.Size())
+
+	// Get all pending transactions
+	completeTxs := p.txBuffer.Flush()
+	if len(completeTxs) == 0 {
+		return
+	}
+
+	// Process each transaction
+	for _, tx := range completeTxs {
+		// Handler processing
+		if p.handler != nil {
+			err := retry.DoWithName(ctx, func() error {
+				return p.handler.Handle(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_handler_tx_%s", tx.ID))
+			if err != nil {
+				slog.Error("flush handler error",
+					"trace_id", tx.TraceID,
+					"tx_id", tx.ID,
+					"error", err)
+				p.writeToDLQ(tx, err, "flush_handler")
+			}
+		}
+
+		// Sink processing
+		if p.sink != nil {
+			err := retry.DoWithName(ctx, func() error {
+				return p.sink.Write(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_sink_tx_%s", tx.ID))
+			if err != nil {
+				slog.Error("flush sink error",
+					"trace_id", tx.TraceID,
+					"tx_id", tx.ID,
+					"error", err)
+				p.writeToDLQ(tx, err, "flush_sink")
+			}
+		}
+	}
+
+	slog.Info("transaction buffer flush complete", "flushed_count", len(completeTxs))
+}
+
+// tablesEqual checks if two table lists are equal
+func tablesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

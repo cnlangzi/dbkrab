@@ -9,11 +9,12 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// Watcher monitors config file changes and triggers safe reloads
+// Watcher monitors config file changes and signals safe reloads
 type Watcher struct {
 	path     string
 	cfg      *Config
 	watcher  *fsnotify.Watcher
+	reloadCh chan *Config // Channel to signal config reload
 	mu       sync.RWMutex
 	done     chan struct{}
 	stopOnce sync.Once
@@ -25,10 +26,14 @@ func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
 		return nil, fmt.Errorf("initialCfg cannot be nil")
 	}
 
+	// Create reload channel (buffered to avoid blocking on send)
+	reloadCh := make(chan *Config, 1)
+
 	w := Watcher{
-		path: path,
-		cfg:  initialCfg,
-		done: make(chan struct{}),
+		path:     path,
+		cfg:      initialCfg,
+		reloadCh: reloadCh,
+		done:     make(chan struct{}),
 	}
 
 	// Create fsnotify watcher
@@ -49,8 +54,14 @@ func NewWatcher(path string, initialCfg *Config) (*Watcher, error) {
 	return &w, nil
 }
 
+// ReloadChan returns the channel that signals config reload
+// Poller should listen on this channel and apply config at transaction boundary
+func (w *Watcher) ReloadChan() <-chan *Config {
+	return w.reloadCh
+}
+
 // Start begins watching for config changes
-func (w *Watcher) Start(onReload func(*Config)) {
+func (w *Watcher) Start() {
 	go func() {
 		defer func() {
 			slog.Info("config watcher stopped", "path", w.path)
@@ -80,8 +91,22 @@ func (w *Watcher) Start(onReload func(*Config)) {
 						continue
 					}
 
-					// Apply safe reloads
-					w.applySafeReload(newCfg, onReload)
+					// Log warnings for fields that require restart
+					w.logRestartWarnings(newCfg)
+
+					// Update internal config reference
+					w.mu.Lock()
+					w.cfg = newCfg
+					w.mu.Unlock()
+
+					// Signal reload via channel (non-blocking)
+					select {
+					case w.reloadCh <- newCfg:
+						slog.Info("config reload signaled")
+					default:
+						// Channel full, previous reload pending
+						slog.Warn("config reload already pending, skipping")
+					}
 				}
 			case err, ok := <-errorsCh:
 				if !ok {
@@ -98,39 +123,29 @@ func (w *Watcher) Start(onReload func(*Config)) {
 	slog.Info("config watcher started", "path", w.path)
 }
 
-// applySafeReload applies non-disruptive config changes
-func (w *Watcher) applySafeReload(newCfg *Config, onReload func(*Config)) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+// logRestartWarnings logs warnings for config changes that require restart
+func (w *Watcher) logRestartWarnings(newCfg *Config) {
+	w.mu.RLock()
+	oldCfg := w.cfg
+	w.mu.RUnlock()
 
-	// Check which fields changed and log warnings for changes that require restart
-	if w.cfg.Interval != newCfg.Interval {
-		slog.Warn("polling_interval changed, will apply on next cycle", "old", w.cfg.Interval, "new", newCfg.Interval)
+	if oldCfg.MSSQL.Host != newCfg.MSSQL.Host || oldCfg.MSSQL.Port != newCfg.MSSQL.Port || oldCfg.MSSQL.Database != newCfg.MSSQL.Database {
+		slog.Warn("MSSQL connection change requires restart",
+			"old", fmt.Sprintf("%s:%d/%s", oldCfg.MSSQL.Host, oldCfg.MSSQL.Port, oldCfg.MSSQL.Database),
+			"new", fmt.Sprintf("%s:%d/%s", newCfg.MSSQL.Host, newCfg.MSSQL.Port, newCfg.MSSQL.Database))
 	}
-	if w.cfg.APIPort != newCfg.APIPort {
-		slog.Warn("api_port change requires restart", "old", w.cfg.APIPort, "new", newCfg.APIPort)
+	if oldCfg.Sink.Path != newCfg.Sink.Path {
+		slog.Warn("sink path change requires restart", "old", oldCfg.Sink.Path, "new", newCfg.Sink.Path)
 	}
-	if w.cfg.MSSQL.Host != newCfg.MSSQL.Host || w.cfg.MSSQL.Port != newCfg.MSSQL.Port {
-		slog.Warn("MSSQL connection change requires restart", "old", fmt.Sprintf("%s:%d", w.cfg.MSSQL.Host, w.cfg.MSSQL.Port), "new", fmt.Sprintf("%s:%d", newCfg.MSSQL.Host, newCfg.MSSQL.Port))
+	if oldCfg.Offset.Type != newCfg.Offset.Type {
+		slog.Warn("offset type change requires restart", "old", oldCfg.Offset.Type, "new", newCfg.Offset.Type)
 	}
-	if w.cfg.Sink.Path != newCfg.Sink.Path {
-		slog.Warn("sink path change requires restart")
-	}
-	if w.cfg.Offset.Type != newCfg.Offset.Type {
-		slog.Warn("offset type change requires restart")
-	}
-
-	// Update config
-	w.cfg = newCfg
-
-	// Trigger callback with new config
-	if onReload != nil {
-		onReload(newCfg)
+	if oldCfg.APIPort != newCfg.APIPort {
+		slog.Warn("api_port change requires restart", "old", oldCfg.APIPort, "new", newCfg.APIPort)
 	}
 }
 
-// Get returns a copy of the current config
-// Callers must not modify the returned config; use config file edits and hot reload instead.
+// Get returns the current config (for external queries)
 func (w *Watcher) Get() *Config {
 	w.mu.RLock()
 	defer w.mu.RUnlock()

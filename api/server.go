@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"embed"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,8 +13,17 @@ import (
 	"github.com/yaitoo/xun"
 )
 
-//go:embed dashboard
+//go:embed all:dashboard
 var dashboardFS embed.FS
+
+// getDashboardFS returns a FS with pages/layouts at root for xun
+func getDashboardFS() fs.FS {
+	sub, err := fs.Sub(dashboardFS, "dashboard")
+	if err != nil {
+		return dashboardFS
+	}
+	return sub
+}
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
@@ -47,8 +57,10 @@ func (s *Server) Start() error {
 	s.mux = http.NewServeMux()
 
 	// Create xun app with our mux and template filesystem
+	// Use Sub FS so pages/layouts are at root level for xun
+	dashboardSubFS := getDashboardFS()
 	s.app = xun.New(
-		xun.WithFsys(dashboardFS),
+		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
 	)
 
@@ -261,4 +273,43 @@ func (s *Server) handleDLQIgnore(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{"success": true, "message": "Entry ignored"})
+}
+
+// handleIndexPage handles GET / (dashboard home)
+func (s *Server) handleIndexPage(c *xun.Context) error {
+	stats, _ := s.getDLQStats()
+	plugins := s.manager.HandleAPI("list", nil)
+	health := "healthy"
+	if stats["pending"] > 0 {
+		health = "unhealthy"
+	}
+	return c.View(map[string]any{
+		"health":  health,
+		"stats":   stats,
+		"plugins": plugins,
+	})
+}
+
+// handleDLQPage handles GET /dlq (DLQ management page)
+func (s *Server) handleDLQPage(c *xun.Context) error {
+	if s.dlq == nil {
+		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
+	}
+	status := c.Request.URL.Query().Get("status")
+	entries, err := s.dlq.List(status)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+	stats, _ := s.getDLQStats()
+	return c.View(map[string]any{
+		"success": true,
+		"entries": entries,
+		"stats":   stats,
+	})
+}
+
+// handlePluginsPage handles GET /plugins (plugins management page)
+func (s *Server) handlePluginsPage(c *xun.Context) error {
+	plugins := s.manager.HandleAPI("list", nil)
+	return c.View(map[string]any{"plugins": plugins})
 }

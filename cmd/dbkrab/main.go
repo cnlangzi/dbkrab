@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// Connect to MSSQL
-	connStr := fmt.Sprintf("server=%s;port=%d;user id=%s;password=%s;database=%s",
+	connStr := fmt.Sprintf("server=%s;port=%d;user id=%s;password=%s;database=%s;encrypt=disable",
 		cfg.MSSQL.Host,
 		cfg.MSSQL.Port,
 		cfg.MSSQL.User,
@@ -125,11 +125,26 @@ func main() {
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
 
+	// Create config watcher for hot reload
+	configWatcher, err := config.NewWatcher(*configPath, cfg)
+	if err != nil {
+		slog.Error("failed to create config watcher", "error", err)
+		os.Exit(1)
+	}
+	defer configWatcher.Stop()
+	slog.Info("config watcher initialized", "path", *configPath)
+
 	// Create poller with dynamic plugin support
 	poller := core.NewPoller(cfg, db, sink, offsetStore, dlqStore)
 	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
 		return pluginManager.Handle(tx)
 	}))
+	
+	// Set config reload channel for hot reload
+	poller.SetReloadChan(configWatcher.ReloadChan())
+
+	// Start config watcher
+	go configWatcher.Start()
 
 	// Handle shutdown
 	ctx, cancel := context.WithCancel(context.Background())
