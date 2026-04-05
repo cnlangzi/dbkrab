@@ -8,118 +8,43 @@
         </button>
     </div>
 
-    {{if .message}}
-    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-        {{.message}}
-    </div>
-    {{end}}
-
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Table</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">LSN</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                {{range .entries}}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-4 text-sm font-medium text-gray-900">{{.ID}}</td>
-                    <td class="px-6 py-4 text-sm text-gray-900">{{.TableName}}</td>
-                    <td class="px-6 py-4 text-sm text-gray-500 font-mono">{{.LSN}}</td>
-                    <td class="px-6 py-4 text-sm text-gray-500 truncate max-w-xs">{{.ErrorMessage}}</td>
-                    <td class="px-6 py-4 text-sm">
-                        {{if eq .Status "pending"}}
-                            <span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">pending</span>
-                        {{else if eq .Status "resolved"}}
-                            <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">resolved</span>
-                        {{else}}
-                            <span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">ignored</span>
-                        {{end}}
-                    </td>
-                    <td class="px-6 py-4 text-sm">
-                        <!-- View: opens read-only modal -->
-                        <button hx-get="/api/dlq/{{.ID}}"
-                           hx-target="#view-modal"
-                           hx-swap="innerHTML"
-                           onclick="document.getElementById('view-modal').classList.remove('hidden')"
-                           class="text-blue-600 hover:text-blue-800 mr-2">
-                            👁 View
-                        </button>
-
-                        {{if eq .Status "pending"}}
-                            <!-- Replay -->
-                            <button hx-post="/api/dlq/{{.ID}}/replay"
-                                hx-confirm="Replay this entry?"
-                                hx-swap="none"
-                                class="text-green-600 hover:text-green-800 mr-2">
-                                🔄 Replay
-                            </button>
-                            <!-- Ignore: opens ignore form modal -->
-                            <button onclick="document.getElementById('ignore-id').value='{{.ID}}';document.getElementById('ignore-modal').classList.remove('hidden')"
-                                class="text-orange-600 hover:text-orange-800 mr-2">
-                                ⏭ Ignore
-                            </button>
-                        {{end}}
-
-                        <!-- Delete -->
-                        <button hx-delete="/api/dlq/{{.ID}}"
-                            hx-confirm="Delete this entry?"
-                            hx-swap="none"
-                            class="text-red-600 hover:text-red-800">
-                            🗑 Delete
-                        </button>
-                    </td>
-                </tr>
-                {{else}}
-                <tr>
-                    <td colspan="6" class="px-6 py-8 text-center text-gray-500">
-                        No DLQ entries found
-                    </td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<!-- View Modal: Read-only entry details -->
-<div id="view-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto m-4 p-6">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-bold">View DLQ Entry</h3>
-            <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-        </div>
-        <div class="text-sm text-gray-500">Loading...</div>
-    </div>
-</div>
-
-<!-- Ignore Modal: Ignore form -->
-<div id="ignore-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto m-4 p-6">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-bold">Ignore DLQ Entry</h3>
-            <button onclick="document.getElementById('ignore-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-        </div>
-        <form hx-post="/api/dlq/ignore" hx-swap="none" 
-              hx-on="htmx:after-request: if(event.detail.successful) { document.getElementById('ignore-modal').classList.add('hidden'); window.location.reload(); }">
-            <input type="hidden" name="id" id="ignore-id" value="">
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Reason for ignoring:</label>
-                <textarea name="note" rows="3" required 
-                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+    <div class="bg-white rounded-lg shadow p-6" hx-get="/api/dlq/stats" hx-trigger="load">
+        <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="text-center">
+                <p class="text-gray-500 text-sm">Pending</p>
+                <p class="text-3xl font-bold text-red-600" id="dlq-pending">-</p>
             </div>
-            <div class="flex justify-end gap-2">
-                <button type="button" onclick="document.getElementById('ignore-modal').classList.add('hidden')"
-                    class="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
-                <button type="submit" class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">Ignore Entry</button>
+            <div class="text-center">
+                <p class="text-gray-500 text-sm">Resolved</p>
+                <p class="text-3xl font-bold text-green-600" id="dlq-resolved">-</p>
             </div>
-        </form>
+            <div class="text-center">
+                <p class="text-gray-500 text-sm">Ignored</p>
+                <p class="text-3xl font-bold text-gray-500" id="dlq-ignored">-</p>
+            </div>
+        </div>
+    </div>
+
+    <div hx-get="/api/dlq/list" hx-trigger="load">
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Table</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <tr>
+                        <td colspan="4" class="px-6 py-8 text-center text-gray-500">
+                            Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 {{ end }}

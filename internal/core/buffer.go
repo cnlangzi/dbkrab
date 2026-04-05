@@ -228,6 +228,32 @@ func (tb *TransactionBuffer) Size() int {
 	return len(tb.pending)
 }
 
+// IsEmpty returns true if there are no pending transactions
+func (tb *TransactionBuffer) IsEmpty() bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return len(tb.pending) == 0
+}
+
+// Flush returns all pending transactions immediately (for shutdown/rebuild)
+// Marks all as complete regardless of timeout status
+func (tb *TransactionBuffer) Flush() []*Transaction {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	var all []*Transaction
+	for txID, pending := range tb.pending {
+		tx := tb.buildTransaction(pending)
+		if tx != nil {
+			all = append(all, tx)
+			tb.estimatedBytes -= pending.estimatedSize
+		}
+		delete(tb.pending, txID)
+	}
+
+	return all
+}
+
 // SetOnComplete sets the callback for completed transactions
 func (tb *TransactionBuffer) SetOnComplete(fn func(*Transaction)) {
 	tb.mu.Lock()
