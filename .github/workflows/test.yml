@@ -88,24 +88,16 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Wait for SQL Server to be ready
-        run: |
-          echo "Waiting for SQL Server to start..."
-          for i in {1..30}; do
-            if /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q "SELECT 1" &>/dev/null; then
-              echo "SQL Server is ready!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 5
-          done
-
       - name: Setup test database and enable CDC
         run: |
           echo "Setting up test database with CDC..."
-          docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools18/bin/sqlcmd \
-            -S localhost -U sa -P 'Test1234!' \\n            -v TEST_USER_PASSWORD='Test1234!' \
-            -i /__w/dbkrab/dbkrab/tests/integration/setup.sql
+          # Copy SQL file to container
+          docker cp tests/integration/setup.sql $(docker ps -q -f name=mssql):/tmp/setup.sql
+          # Run setup script inside container
+          docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools/bin/sqlcmd \
+            -S localhost -U sa -P 'Test1234!' \
+            -v TEST_USER_PASSWORD='Test1234!' \
+            -i /tmp/setup.sql
           echo "CDC setup complete"
 
       - name: Run integration tests
