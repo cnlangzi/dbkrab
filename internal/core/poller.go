@@ -968,15 +968,21 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 	slog.Info("transaction buffer flush complete", "flushed_count", len(completeTxs))
 }
 
-// tablesEqual checks if two table lists are equal
+// tablesEqual checks if two table lists are equal (order-independent)
 func tablesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	// Use map as set for order-independent comparison
+	setA := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		setA[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, ok := setA[s]; !ok {
 			return false
 		}
 	}
 	return true
 }
+

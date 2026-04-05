@@ -18,15 +18,15 @@
             </div>
             <nav class="mt-2">
                 <a href="/" 
-                   class="block px-4 py-3 hover:bg-gray-800 transition">
+                   class="block px-4 py-3 {{if eq .activeTab "overview"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     📊 Overview
                 </a>
                 <a href="/dlq" 
-                   class="block px-4 py-3 hover:bg-gray-800 transition">
+                   class="block px-4 py-3 {{if eq .activeTab "dlq"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     🗄️ Dead Letter Queue
                 </a>
                 <a href="/plugins" 
-                   class="block px-4 py-3 hover:bg-gray-800 transition">
+                   class="block px-4 py-3 {{if eq .activeTab "plugins"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     🔌 Plugins
                 </a>
             </nav>

@@ -105,19 +105,15 @@ func (w *Watcher) Start() {
 					case w.reloadCh <- newCfg:
 						slog.Info("config reload signaled")
 					default:
-						// Channel full: drain one pending reload (older config) and enqueue the latest.
+						// Channel full: drain pending reload (older config) and send new one.
+						// Use blocking send after drain to guarantee new config is enqueued.
 						select {
 						case <-w.reloadCh:
 							slog.Info("dropped pending reload in favor of newer config")
 						default:
-							// Nothing to drain
 						}
-						select {
-						case w.reloadCh <- newCfg:
-							slog.Info("config reload signaled with latest config")
-						default:
-							slog.Warn("config reload channel still full, latest config reload skipped")
-						}
+						w.reloadCh <- newCfg // blocking send, guaranteed success after drain
+						slog.Info("config reload signaled (replaced pending)")
 					}
 				}
 			case err, ok := <-errorsCh:
@@ -145,6 +141,11 @@ func (w *Watcher) logRestartWarnings(newCfg *Config) {
 		slog.Warn("MSSQL connection change requires restart",
 			"old", fmt.Sprintf("%s:%d/%s", oldCfg.MSSQL.Host, oldCfg.MSSQL.Port, oldCfg.MSSQL.Database),
 			"new", fmt.Sprintf("%s:%d/%s", newCfg.MSSQL.Host, newCfg.MSSQL.Port, newCfg.MSSQL.Database))
+	}
+	if oldCfg.MSSQL.User != newCfg.MSSQL.User || oldCfg.MSSQL.Password != newCfg.MSSQL.Password {
+		slog.Warn("MSSQL credentials change requires restart",
+			"old_user", oldCfg.MSSQL.User,
+			"new_user", newCfg.MSSQL.User)
 	}
 	if oldCfg.Sink.Path != newCfg.Sink.Path {
 		slog.Warn("sink path change requires restart", "old", oldCfg.Sink.Path, "new", newCfg.Sink.Path)
