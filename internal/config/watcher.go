@@ -171,5 +171,9 @@ func (w *Watcher) Stop() error {
 	w.stopOnce.Do(func() {
 		close(w.done)
 	})
-	return w.watcher.Close()
+	if err := w.watcher.Close(); err != nil {
+		slog.Warn("error closing watcher", "error", err)
+		return err
+	}
+	return nil
 }

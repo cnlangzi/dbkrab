@@ -131,7 +131,11 @@ func main() {
 		slog.Error("failed to create config watcher", "error", err)
 		os.Exit(1)
 	}
-	defer configWatcher.Stop()
+	defer func() {
+		if err := configWatcher.Stop(); err != nil {
+			slog.Warn("error stopping config watcher", "error", err)
+			}
+	}()
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support

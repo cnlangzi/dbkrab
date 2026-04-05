@@ -95,7 +95,7 @@ func pollCDCWithTimeout(t *testing.T, db *sql.DB, ctx context.Context, startLSN 
 func TestCDCEnabled(t *testing.T) {
 	config := getTestConfig()
 	db := setupTestDB(t, config)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -125,7 +125,7 @@ func TestCDCEnabled(t *testing.T) {
 func TestChangeCapture(t *testing.T) {
 	config := getTestConfig()
 	db := setupTestDB(t, config)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -180,7 +180,7 @@ func TestChangeCapture(t *testing.T) {
 func TestCrossTableTransaction(t *testing.T) {
 	config := getTestConfig()
 	db := setupTestDB(t, config)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -247,7 +247,7 @@ func TestCrossTableTransaction(t *testing.T) {
 func TestLSNProgression(t *testing.T) {
 	config := getTestConfig()
 	db := setupTestDB(t, config)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -284,7 +284,7 @@ func TestLSNProgression(t *testing.T) {
 func TestConnectionRecovery(t *testing.T) {
 	config := getTestConfig()
 	db := setupTestDB(t, config)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
