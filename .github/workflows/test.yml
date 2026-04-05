@@ -93,8 +93,8 @@ jobs:
           echo "Setting up test database with CDC..."
           # Copy SQL file to container
           docker cp tests/integration/setup.sql $(docker ps -q -f name=mssql):/tmp/setup.sql
-          # Run setup script inside container
-          docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools/bin/sqlcmd \
+          # Run setup script inside container (MSSQL 2019 uses mssql-tools18)
+          docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools18/bin/sqlcmd \
             -S localhost -U sa -P 'Test1234!' \
             -v TEST_USER_PASSWORD='Test1234!' \
             -i /tmp/setup.sql
