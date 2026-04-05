@@ -72,11 +72,11 @@ jobs:
         ports:
           - 1433:1433
         options: >-
-          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Test1234!' -Q 'SELECT 1'"
+          --health-cmd="grep -q 'ready for client connections' /var/opt/mssql/log/errorlog"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=10
-          --health-start-period=30s
+          --health-retries=12
+          --health-start-period=60s
 
     steps:
       - name: Checkout code
