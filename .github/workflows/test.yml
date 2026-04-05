@@ -94,8 +94,9 @@ jobs:
           # Copy SQL file to container
           docker cp tests/integration/setup.sql $(docker ps -q -f name=mssql):/tmp/setup.sql
           # Run setup script inside container (MSSQL 2019 uses mssql-tools18)
+          # -N: No encryption, -C: Trust server certificate
           docker exec $(docker ps -q -f name=mssql) /opt/mssql-tools18/bin/sqlcmd \
-            -S localhost -U sa -P 'Test1234!' \
+            -S localhost -U sa -P 'Test1234!' -N -C \
             -v TEST_USER_PASSWORD='Test1234!' \
             -i /tmp/setup.sql
           echo "CDC setup complete"
