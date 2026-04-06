@@ -1,6 +1,6 @@
 # SQL Plugin Architecture
 
-**Version**: 1.1  
+**Version**: 1.2  
 **Status**: Draft  
 **Created**: 2026-04-06
 
@@ -114,6 +114,7 @@ on:
 sinks:
   insert:
     - name: sink_name
+      on: table_name         # Optional: filter by source table (required for multi-table plugins)
       sql: |
         SELECT ... FROM source_table WHERE id IN (@table_ids);
       output: target_table      # SQLite table name
@@ -121,6 +122,7 @@ sinks:
 
   update:
     - name: sink_name
+      on: table_name         # Optional: filter by source table
       sql: |
         SELECT ... FROM source_table WHERE id IN (@table_ids);
       output: target_table      # SQLite table name
@@ -128,6 +130,7 @@ sinks:
 
   delete:
     - name: sink_name
+      on: table_name         # Optional: filter by source table
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @id as id
       output: target_table      # SQLite table name
@@ -142,10 +145,17 @@ sinks:
 | `description` | No | Plugin description |
 | `on` | Yes | List of tables to monitor |
 | `sinks` | Yes | Sink configurations keyed by operation type |
+| `sinks[].on` | No | Filter sink to only process changes from specified table. Required when `on` contains multiple tables |
 | `sinks[].sql` | Yes | SQL template (SELECT only) |
 | `sinks[].sql_file` | No | Path to external SQL file (alternative to inline sql) |
 | `sinks[].output` | Yes | Target SQLite table name |
 | `sinks[].primary_key` | Yes | Primary key column name in target table |
+
+### Multi-Table Note
+
+When monitoring multiple tables via `on`, each sink should specify `on` to filter which table's CDC changes it handles. CDC parameters are table-specific:
+- When `orders` changes: only `@order_id`, `@amount`, `@status` are available
+- When `order_items` changes: only `@order_id`, `@product_id`, `@quantity` are available
 
 ---
 
@@ -682,12 +692,14 @@ stages:
 sinks:
   insert:
     - name: orders_sync
+      on: orders               # Only process orders table CDC changes
       sql: |
         SELECT * FROM orders_view;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
+      on: order_items         # Only process order_items table CDC changes
       sql: |
         SELECT * FROM order_items_view;
       output: order_items_enriched
@@ -695,12 +707,14 @@ sinks:
 
   update:
     - name: orders_sync
+      on: orders
       sql: |
         SELECT * FROM orders_view;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
+      on: order_items
       sql: |
         SELECT * FROM order_items_view;
       output: order_items_enriched
@@ -708,12 +722,14 @@ sinks:
 
   delete:
     - name: orders_sync
+      on: orders
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
+      on: order_items
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @id as id
       output: order_items_enriched
