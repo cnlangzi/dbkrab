@@ -155,7 +155,7 @@ func (a *Admin) DisableCDC(schema, table string) error {
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	query := `EXEC sys.sp_cdc_disable_table 
 		@source_schema = @p1, 
