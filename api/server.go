@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -79,6 +78,7 @@ func (s *Server) Start() error {
 	s.app = xun.New(
 		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
+		xun.WithHandlerViewers(&xun.JsonViewer{}, &xun.HtmlViewer{}),
 	)
 
 	// Register routes
@@ -135,33 +135,16 @@ func (s *Server) registerAPIRoutes() {
 
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
-	// Tables page
-	s.app.Get("/tables", s.handleTablesPage)
+	// Pages are auto-registered by xun from pages/ directory
+	// Manual registration for custom handlers if needed
 }
 
 // handleTablesPage handles GET /tables
 func (s *Server) handleTablesPage(c *xun.Context) error {
-	// Parse templates from embedded FS
-	tmpl, err := template.ParseFS(dashboardFS, "dashboard/layouts/dashboard.html", "dashboard/pages/tables.html")
-	if err != nil {
-		c.WriteStatus(http.StatusInternalServerError)
-		return c.View(map[string]any{"error": err.Error()})
-	}
-
-	data := map[string]any{
-		"title":     "CDC Tables",
+	return c.View(map[string]any{
+		"title":     "📋 Table CDC Configuration",
 		"activeTab": "tables",
-	}
-
-	// Get the underlying ResponseWriter to bypass xun's view wrapper
-	w, ok := c.Response.(http.ResponseWriter)
-	if !ok {
-		return c.View(map[string]any{"error": "failed to get ResponseWriter"})
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	return tmpl.Execute(w, data)
+	})
 }
 
 // handlePlugins handles GET /api/plugins

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{with .title}}{{.}} - {{end}}dbkrab Dashboard</title>
+    <title>{{with .Data.title}}{{.}} - {{end}}dbkrab Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
@@ -18,19 +18,19 @@
             </div>
             <nav class="mt-2">
                 <a href="/" 
-                   class="block px-4 py-3 {{if eq .activeTab "overview"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                   class="block px-4 py-3 {{if eq .Data.activeTab "overview"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     📊 Overview
                 </a>
                 <a href="/tables" 
-                   class="block px-4 py-3 {{if eq .activeTab "tables"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                   class="block px-4 py-3 {{if eq .Data.activeTab "tables"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     📋 CDC Tables
                 </a>
                 <a href="/dlq" 
-                   class="block px-4 py-3 {{if eq .activeTab "dlq"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                   class="block px-4 py-3 {{if eq .Data.activeTab "dlq"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     🗄️ Dead Letter Queue
                 </a>
                 <a href="/plugins" 
-                   class="block px-4 py-3 {{if eq .activeTab "plugins"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
+                   class="block px-4 py-3 {{if eq .Data.activeTab "plugins"}}bg-blue-600{{else}}hover:bg-gray-800{{end}} transition">
                     🔌 Plugins
                 </a>
             </nav>
