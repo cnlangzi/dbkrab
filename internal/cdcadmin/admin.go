@@ -51,7 +51,7 @@ func (a *Admin) ListTables() ([]TableInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	query := `
 		SELECT 
@@ -69,7 +69,7 @@ func (a *Admin) ListTables() ([]TableInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []TableInfo
 	for rows.Next() {
@@ -95,7 +95,7 @@ func (a *Admin) GetCDCStatus(schema, table string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("connect: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	query := `
 		SELECT is_tracked_by_cdc 
@@ -121,7 +121,7 @@ func (a *Admin) EnableCDC(schema, table string) error {
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Check if CDC is enabled at database level
 	var isCDCEnabled bool

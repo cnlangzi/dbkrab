@@ -139,14 +139,6 @@ func (s *Server) registerPageRoutes() {
 	// Manual registration for custom handlers if needed
 }
 
-// handleTablesPage handles GET /tables
-func (s *Server) handleTablesPage(c *xun.Context) error {
-	return c.View(map[string]any{
-		"title":     "📋 Table CDC Configuration",
-		"activeTab": "tables",
-	})
-}
-
 // handlePlugins handles GET /api/plugins
 func (s *Server) handlePlugins(c *xun.Context) error {
 	resp := s.manager.HandleAPI("list", nil)
@@ -342,7 +334,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 	if err != nil {
 		return c.View(map[string]any{"success": false, "error": "failed to read request body"})
 	}
-	defer c.Request.Body.Close()
+	defer func() { _ = c.Request.Body.Close() }()
 
 	if err := json.Unmarshal(body, &req); err != nil {
 		return c.View(map[string]any{"success": false, "error": "invalid request body"})
