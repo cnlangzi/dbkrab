@@ -1,0 +1,53 @@
+name: sync_order_flow
+description: "orders + order_items CDC with enrichment, fanout to separate tables"
+
+on:
+  - orders
+  - order_items
+
+stages:
+  - name: join
+    sql_file: join_all.sql
+
+  - name: fanout
+    sql_file: fanout.sql
+
+sinks:
+  insert:
+    - name: orders_sync
+      sql: |
+        SELECT * FROM orders_view;
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT * FROM order_items_view;
+      output: order_items_enriched
+      primary_key: id
+
+  update:
+    - name: orders_sync
+      sql: |
+        SELECT * FROM orders_view;
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT * FROM order_items_view;
+      output: order_items_enriched
+      primary_key: id
+
+  delete:
+    - name: orders_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @id as id
+      output: order_items_enriched
+      primary_key: id

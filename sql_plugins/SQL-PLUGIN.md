@@ -1,6 +1,6 @@
 # SQL Plugin Architecture
 
-**Version**: 1.0  
+**Version**: 1.1  
 **Status**: Draft  
 **Created**: 2026-04-06
 
@@ -379,6 +379,448 @@ sinks:
 ```
 
 ---
+
+---
+
+## Example: 1:N:1 (Single Table CDC, Join N Tables, Single Output)
+
+### Scenario
+
+Monitor `orders` table, JOIN `customers` and `products` tables to enrich data, output to single table `enriched_orders`.
+
+### Directory Structure
+
+```
+sql_plugins/
+└── enrich_orders/
+    ├── skill.yml
+    ├── step1_join_customers.sql
+    └── step2_join_products.sql
+```
+
+### skill.yml
+
+```yaml
+name: enrich_orders
+description: "orders CDC with customer and product enrichment"
+
+on:
+  - orders
+
+stages:
+  - name: join_customers
+    sql_file: step1_join_customers.sql
+    temp_table: customers_enriched
+    
+  - name: join_products
+    sql_file: step2_join_products.sql
+
+sinks:
+  insert:
+    - name: sync
+      sql: |
+        SELECT * FROM products_enriched;
+      output: enriched_orders
+      primary_key: order_id
+
+  update:
+    - name: sync
+      sql: |
+        SELECT * FROM products_enriched;
+      output: enriched_orders
+      primary_key: order_id
+
+  delete:
+    - name: sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+      output: enriched_orders
+      primary_key: order_id
+```
+
+### step1_join_customers.sql
+
+```sql
+-- Enrich with customer data, store in temp table
+SELECT 
+  @cdc_lsn as cdc_lsn,
+  @cdc_tx_id as cdc_transaction_id,
+  @cdc_table as cdc_source_table,
+  @cdc_operation as cdc_operation,
+  @order_id as order_id,
+  @customer_id as customer_id,
+  c.name as customer_name,
+  c.email as customer_email,
+  c.segment as customer_segment
+INTO #customers_enriched
+FROM (SELECT @customer_id as customer_id, @order_id as order_id) o
+LEFT JOIN customers c ON o.customer_id = c.id;
+```
+
+### step2_join_products.sql
+
+```sql
+-- Continue with products enrichment, final result to #products_enriched
+WITH base AS (
+  SELECT * FROM customers_enriched
+)
+SELECT 
+  b.cdc_lsn,
+  b.cdc_transaction_id,
+  b.cdc_source_table,
+  b.cdc_operation,
+  b.order_id,
+  b.customer_id,
+  b.customer_name,
+  b.customer_email,
+  b.customer_segment,
+  p.product_name,
+  p.category as product_category,
+  p.price as product_price
+INTO #products_enriched
+FROM base b
+LEFT JOIN products p ON b.order_id = p.order_id;
+```
+
+### Execution Flow
+
+```
+CDC [order_id: 123, customer_id: 456, product_id: 789]
+    ↓
+step1_join_customers.sql → #customers_enriched
+    ↓
+step2_join_products.sql → #products_enriched
+    ↓
+INSERT/UPDATE sink: SELECT * FROM products_enriched
+    ↓
+enriched_orders table
+```
+
+---
+
+## Example: 1:N:N (Single Table CDC, Join N Tables, Multiple Outputs)
+
+### Scenario
+
+Monitor `orders` table, JOIN `customers` and `products` tables, split into two outputs: `customers_sync` and `products_sync`.
+
+### Directory Structure
+
+```
+sql_plugins/
+└── sync_orders_split/
+    ├── skill.yml
+    ├── enrich.sql
+    └── fanout.sql
+```
+
+### skill.yml
+
+```yaml
+name: sync_orders_split
+description: "orders CDC enrich and fanout to two tables"
+
+on:
+  - orders
+
+stages:
+  - name: enrich
+    sql_file: enrich.sql
+
+  - name: fanout
+    sql_file: fanout.sql
+
+sinks:
+  insert:
+    - name: customers_sync
+      sql: |
+        SELECT * FROM customers_view;
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT * FROM products_view;
+      output: products_sync
+      primary_key: product_id
+
+  update:
+    - name: customers_sync
+      sql: |
+        SELECT * FROM customers_view;
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT * FROM products_view;
+      output: products_sync
+      primary_key: product_id
+
+  delete:
+    - name: customers_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @customer_id as customer_id
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @product_id as product_id
+      output: products_sync
+      primary_key: product_id
+```
+
+### enrich.sql
+
+```sql
+-- Enrichment: JOIN customers and products, result to #enriched
+SELECT 
+  @cdc_lsn as cdc_lsn,
+  @cdc_tx_id as cdc_transaction_id,
+  @cdc_table as cdc_source_table,
+  @cdc_operation as cdc_operation,
+  @order_id as order_id,
+  @customer_id as customer_id,
+  @product_id as product_id,
+  @amount as order_amount,
+  -- Customer fields
+  c.name as customer_name,
+  c.email as customer_email,
+  c.segment as customer_segment,
+  -- Product fields
+  p.product_name,
+  p.category as product_category,
+  p.price as product_price
+INTO #enriched
+FROM (SELECT @customer_id as customer_id, @product_id as product_id, @amount as amount) o
+LEFT JOIN customers c ON o.customer_id = c.id
+LEFT JOIN products p ON o.product_id = p.id;
+```
+
+### fanout.sql
+
+```sql
+-- Fanout: Create two views from enriched result
+
+-- View 1: customers_view
+SELECT 
+  cdc_lsn,
+  cdc_transaction_id,
+  cdc_source_table,
+  cdc_operation,
+  customer_id,
+  customer_name,
+  customer_email,
+  customer_segment
+FROM #enriched
+WHERE customer_id IS NOT NULL;
+
+-- View 2: products_view
+SELECT 
+  cdc_lsn,
+  cdc_transaction_id,
+  cdc_source_table,
+  cdc_operation,
+  product_id,
+  product_name,
+  product_category,
+  product_price
+FROM #enriched
+WHERE product_id IS NOT NULL;
+```
+
+### Execution Flow
+
+```
+CDC [order_id: 123, customer_id: 456, product_id: 789]
+    ↓
+enrich.sql → #enriched
+    ↓
+fanout.sql → #customers_view + #products_view
+    ↓
+INSERT/UPDATE:
+  - customers_sync sink → SELECT * FROM customers_view → customers_sync table
+  - products_sync sink → SELECT * FROM products_view → products_sync table
+```
+
+---
+
+## Example: N:N:N (Multiple Tables CDC, Join N Tables, Multiple Outputs)
+
+### Scenario
+
+Monitor `orders` and `order_items` tables (same transaction), JOIN `customers` and `products` tables, output to `orders_enriched` and `order_items_enriched` separately.
+
+### Directory Structure
+
+```
+sql_plugins/
+└── sync_order_flow/
+    ├── skill.yml
+    ├── join_all.sql
+    └── fanout.sql
+```
+
+### skill.yml
+
+```yaml
+name: sync_order_flow
+description: "orders + order_items CDC with enrichment, fanout to separate tables"
+
+on:
+  - orders
+  - order_items
+
+stages:
+  - name: join
+    sql_file: join_all.sql
+
+  - name: fanout
+    sql_file: fanout.sql
+
+sinks:
+  insert:
+    - name: orders_sync
+      sql: |
+        SELECT * FROM orders_view;
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT * FROM order_items_view;
+      output: order_items_enriched
+      primary_key: id
+
+  update:
+    - name: orders_sync
+      sql: |
+        SELECT * FROM orders_view;
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT * FROM order_items_view;
+      output: order_items_enriched
+      primary_key: id
+
+  delete:
+    - name: orders_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+      output: orders_enriched
+      primary_key: order_id
+
+    - name: order_items_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @id as id
+      output: order_items_enriched
+      primary_key: id
+```
+
+### join_all.sql
+
+```sql
+-- Handle CDC batch with multiple tables
+-- CDC batch data is written to #cdc_batch by Engine
+
+SELECT 
+  b.cdc_lsn,
+  b.cdc_transaction_id,
+  b.cdc_source_table,
+  b.cdc_operation,
+  b.order_id,
+  -- orders fields (NULL for order_items)
+  b.amount,
+  -- order_items fields (NULL for orders)
+  b.quantity,
+  -- Joined customer data
+  c.name as customer_name,
+  c.email as customer_email,
+  c.segment as customer_segment,
+  -- Joined product data
+  p.product_name,
+  p.category as product_category,
+  p.price as product_price,
+  -- Computed amount
+  CASE 
+    WHEN b.cdc_source_table = 'order_items' THEN p.price * b.quantity
+    ELSE b.amount
+  END as final_amount
+INTO #enriched_flow
+FROM #cdc_batch b
+LEFT JOIN customers c ON b.customer_id = c.id
+LEFT JOIN products p ON b.product_id = p.id;
+```
+
+### fanout.sql
+
+```sql
+-- Fanout: Route to appropriate table based on cdc_source_table
+
+-- View 1: orders
+SELECT 
+  cdc_lsn,
+  cdc_transaction_id,
+  cdc_source_table,
+  cdc_operation,
+  order_id,
+  amount as order_amount,
+  customer_name,
+  customer_email,
+  customer_segment,
+  final_amount
+FROM #enriched_flow
+WHERE cdc_source_table = 'orders';
+
+-- View 2: order_items
+SELECT 
+  cdc_lsn,
+  cdc_transaction_id,
+  cdc_source_table,
+  cdc_operation,
+  order_id,
+  quantity,
+  product_name,
+  product_category,
+  product_price,
+  final_amount
+FROM #enriched_flow
+WHERE cdc_source_table = 'order_items';
+```
+
+### CDC Batch Structure for N:N:N
+
+```
+#cdc_batch (written by Engine):
+
+| cdc_lsn | cdc_tx_id | cdc_source_table | cdc_operation | order_id | customer_id | amount | product_id | quantity |
+|---------|-----------|------------------|---------------|----------|-------------|--------|------------|----------|
+| 0x001   | T1        | orders           | 2             | 123      | 456         | 5000   | NULL       | NULL    |
+| 0x002   | T1        | order_items      | 2             | 123      | NULL        | NULL   | 789        | 2        |
+```
+
+### Execution Flow
+
+```
+Transaction T1 CDC batch:
+  orders: {order_id: 123, customer_id: 456, amount: 5000}
+  order_items: {order_id: 123, product_id: 789, quantity: 2}
+    ↓
+Engine writes to #cdc_batch
+    ↓
+join_all.sql → #enriched_flow
+    ↓
+fanout.sql:
+  - orders_view → SELECT ... WHERE cdc_source_table = 'orders'
+  - order_items_view → SELECT ... WHERE cdc_source_table = 'order_items'
+    ↓
+INSERT/UPDATE:
+  - orders_sync sink → orders_enriched table
+  - order_items_sync sink → order_items_enriched table
+```
 
 ---
 
