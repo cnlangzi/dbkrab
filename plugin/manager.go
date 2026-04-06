@@ -2,21 +2,35 @@ package plugin
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/sqlplugin"
 )
 
-// Manager manages WASM plugins with hot-reload support
+// SQLPlugin represents a loaded SQL plugin
+type SQLPlugin struct {
+	Name     string
+	Skill    *sqlplugin.Skill
+	Loader   *sqlplugin.Loader
+	Executor *sqlplugin.Executor
+	Router   *sqlplugin.Router
+	Writer   *sqlplugin.Writer
+}
+
+// Manager manages SQL plugins and WASM plugins with hot-reload support
 type Manager struct {
-	plugins map[string]*Plugin
-	mu      sync.RWMutex
+	plugins      map[string]*Plugin
+	sqlPlugins   map[string]*SQLPlugin
+	mu           sync.RWMutex
+	mssqlDB      *sql.DB
+	sqliteWriter *sqlplugin.Writer
 }
 
 // Plugin represents a loaded WASM plugin
@@ -31,8 +45,41 @@ type Plugin struct {
 // NewManager creates a new plugin manager
 func NewManager() *Manager {
 	return &Manager{
-		plugins: make(map[string]*Plugin),
+		plugins:    make(map[string]*Plugin),
+		sqlPlugins: make(map[string]*SQLPlugin),
 	}
+}
+
+// InitSQLPlugins initializes SQL plugins with database connections
+func (m *Manager) InitSQLPlugins(mssqlDB *sql.DB, sqliteWriter *sqlplugin.Writer, sqlPluginsDir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.mssqlDB = mssqlDB
+	m.sqliteWriter = sqliteWriter
+
+	// Load all SQL plugins
+	loader := sqlplugin.NewLoader(sqlPluginsDir)
+	plugins, err := loader.LoadAll()
+	if err != nil {
+		return fmt.Errorf("load SQL plugins: %w", err)
+	}
+
+	for name, skill := range plugins {
+		executor := sqlplugin.NewExecutor(mssqlDB)
+		router := sqlplugin.NewRouter()
+
+		m.sqlPlugins[name] = &SQLPlugin{
+			Name:     name,
+			Skill:    skill,
+			Loader:   loader,
+			Executor: executor,
+			Router:   router,
+			Writer:   sqliteWriter,
+		}
+	}
+
+	return nil
 }
 
 // Load loads a plugin from the given path
@@ -45,6 +92,11 @@ func (m *Manager) Load(name, path string, config string) error {
 		return fmt.Errorf("plugin %s already loaded", name)
 	}
 
+	// Check if there's a SQL plugin with the same name (SQL plugin takes priority)
+	if _, exists := m.sqlPlugins[name]; exists {
+		return fmt.Errorf("plugin %s is a SQL plugin", name)
+	}
+
 	// Load WASM instance
 	instance, err := NewWasmInstance(path)
 	if err != nil {
@@ -54,7 +106,7 @@ func (m *Manager) Load(name, path string, config string) error {
 	// Call Init
 	if err := instance.Init(config); err != nil {
 		if closeErr := instance.Close(); closeErr != nil {
-			slog.Warn("instance.Close error", "error", closeErr)
+			fmt.Printf("Warning: instance.Close error: %v\n", closeErr)
 		}
 		return fmt.Errorf("plugin init: %w", err)
 	}
@@ -75,6 +127,12 @@ func (m *Manager) Load(name, path string, config string) error {
 func (m *Manager) Unload(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Check if it's a SQL plugin
+	if _, exists := m.sqlPlugins[name]; exists {
+		delete(m.sqlPlugins, name)
+		return nil
+	}
 
 	plugin, exists := m.plugins[name]
 	if !exists {
@@ -109,31 +167,171 @@ func (m *Manager) Reload(name string) error {
 }
 
 // Handle processes a transaction through all loaded plugins
+// SQL plugins take priority over WASM plugins
 func (m *Manager) Handle(tx *core.Transaction) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// First, process through SQL plugins
+	for name, sqlPlugin := range m.sqlPlugins {
+		if err := m.handleSQLPlugin(sqlPlugin, tx); err != nil {
+			return fmt.Errorf("SQL plugin %s handle: %w", name, err)
+		}
+	}
+
+	// Then, process through WASM plugins
 	for name, plugin := range m.plugins {
 		if err := plugin.instance.Handle(tx); err != nil {
 			return fmt.Errorf("plugin %s handle: %w", name, err)
 		}
 	}
+
 	return nil
 }
 
-// List returns all loaded plugins
+// handleSQLPlugin processes a transaction through a SQL plugin
+func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
+	skill := p.Skill
+
+	// Group changes by table and operation
+	changesByTable := make(map[string][]sqlplugin.ChangeItem)
+	for _, change := range tx.Changes {
+		opType := toOperation(change.Operation)
+		item := sqlplugin.ChangeItem{
+			Table:     change.Table,
+			LSN:       fmt.Sprintf("%x", change.LSN),
+			TxID:      change.TransactionID,
+			Operation: opType,
+			Data:      change.Data,
+		}
+
+		// Extract primary key from data
+		for k, v := range change.Data {
+			item.TableID = v
+			break // Use first field as table ID for simplicity
+		}
+
+		changesByTable[change.Table] = append(changesByTable[change.Table], item)
+	}
+
+	// Process each table
+	for tableName, changes := range changesByTable {
+		for _, change := range changes {
+			opType := toOperation(change.Operation)
+			sinkType := sqlplugin.OperationToSinkType(opType)
+
+			// Get sinks for this operation type
+			sinks := skill.GetSinks(opType)
+			if len(sinks) == 0 {
+				continue
+			}
+
+			// Filter sinks by table if multi-table
+			sinks = sqlplugin.FilterSinks(sinks, tableName)
+			if len(sinks) == 0 {
+				continue
+			}
+
+			// Build CDC parameters
+			params := sqlplugin.CDCParameters{
+				CDCLSN:       change.LSN,
+				CDCTxID:      change.TransactionID,
+				CDCTable:     tableName,
+				CDCOperation: int(opType),
+				Fields:       change.Data,
+			}
+
+			// Extract table IDs from data
+			for _, v := range change.Data {
+				params.TableIDs = append(params.TableIDs, v)
+				break
+			}
+
+			// Execute stages if present
+			var stageResults map[string]*sqlplugin.DataSet
+			if len(skill.Stages) > 0 {
+				var err error
+				stageResults, err = p.Executor.ExecuteStages(skill, params)
+				if err != nil {
+					return fmt.Errorf("execute stages: %w", err)
+				}
+			}
+
+			// Execute sink SQL and write results
+			for _, sink := range sinks {
+				var ds *sqlplugin.DataSet
+
+				// If stages were executed, query the stage results
+				if sink.SQL != "" {
+					var err error
+					ds, err = p.Executor.ExecuteInline(sink.SQL)
+					if err != nil {
+						return fmt.Errorf("execute sink SQL: %w", err)
+					}
+				}
+
+				// Write to SQLite
+				if ds != nil && len(ds.Rows) > 0 {
+					if sinkType == "delete" {
+						if err := p.Writer.WriteDelete(sink.Output, sink.PrimaryKey, ds); err != nil {
+							return fmt.Errorf("write delete: %w", err)
+						}
+					} else {
+						if err := p.Writer.WriteUpsert(sink.Output, sink.PrimaryKey, ds); err != nil {
+							return fmt.Errorf("write upsert: %w", err)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// toOperation converts core.Operation to sqlplugin.Operation
+func toOperation(op core.Operation) sqlplugin.Operation {
+	switch op {
+	case core.OpDelete:
+		return sqlplugin.OpDelete
+	case core.OpInsert:
+		return sqlplugin.OpInsert
+	case core.OpUpdateBefore:
+		return sqlplugin.OpUpdateBefore
+	case core.OpUpdateAfter:
+		return sqlplugin.OpUpdateAfter
+	default:
+		return sqlplugin.OpInsert
+	}
+}
+
+// List returns all loaded plugins (both SQL and WASM)
 func (m *Manager) List() []PluginInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var list []PluginInfo
+
+	// List SQL plugins
+	for name, p := range m.sqlPlugins {
+		list = append(list, PluginInfo{
+			Name:     name,
+			Path:     "sql_plugins/" + name,
+			LoadedAt: time.Now(),
+			Type:     "sql",
+		})
+	}
+
+	// List WASM plugins
 	for name, p := range m.plugins {
 		list = append(list, PluginInfo{
 			Name:     name,
 			Path:     p.Path,
 			LoadedAt: p.LoadedAt,
+			Type:     "wasm",
 		})
 	}
+
 	return list
 }
 
@@ -142,11 +340,23 @@ type PluginInfo struct {
 	Name     string    `json:"name"`
 	Path     string    `json:"path"`
 	LoadedAt time.Time `json:"loaded_at"`
+	Type     string    `json:"type"` // "sql" or "wasm"
 }
 
 // Watch watches a directory for new plugins and auto-loads them
 func (m *Manager) Watch(ctx context.Context, dir string) error {
-	// Initial scan
+	// First, check for SQL plugins
+	sqlPluginsDir := filepath.Join(dir, "..", "sql_plugins")
+	if _, err := os.Stat(sqlPluginsDir); err == nil {
+		// SQL plugins directory exists, load all SQL plugins
+		if m.mssqlDB != nil && m.sqliteWriter != nil {
+			if err := m.InitSQLPlugins(m.mssqlDB, m.sqliteWriter, sqlPluginsDir); err != nil {
+				fmt.Printf("Warning: failed to load SQL plugins: %v\n", err)
+			}
+		}
+	}
+
+	// Then watch for WASM plugins
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read plugin dir: %w", err)
@@ -237,15 +447,25 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 			return APIResponse{Success: false, Error: "name required"}
 		}
 		m.mu.RLock()
-		plugin, ok := m.plugins[name]
+		sqlPlugin, sqlOK := m.sqlPlugins[name]
+		plugin, wasmOK := m.plugins[name]
 		m.mu.RUnlock()
-		if !ok {
+		if !sqlOK && !wasmOK {
 			return APIResponse{Success: false, Error: "plugin not found"}
+		}
+		if sqlOK {
+			return APIResponse{Success: true, Data: PluginInfo{
+				Name:     sqlPlugin.Name,
+				Path:     "sql_plugins/" + sqlPlugin.Name,
+				LoadedAt: time.Now(),
+				Type:     "sql",
+			}}
 		}
 		return APIResponse{Success: true, Data: PluginInfo{
 			Name:     plugin.Name,
 			Path:     plugin.Path,
 			LoadedAt: plugin.LoadedAt,
+			Type:     "wasm",
 		}}
 
 	case "load":
@@ -266,6 +486,7 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 			Name:     plugin.Name,
 			Path:     plugin.Path,
 			LoadedAt: plugin.LoadedAt,
+			Type:     "wasm",
 		}}
 
 	case "unload":
@@ -299,5 +520,6 @@ func (p *Plugin) MarshalJSON() ([]byte, error) {
 		Name:     p.Name,
 		Path:     p.Path,
 		LoadedAt: p.LoadedAt,
+		Type:     "wasm",
 	})
 }
