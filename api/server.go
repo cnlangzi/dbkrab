@@ -153,9 +153,15 @@ func (s *Server) handleTablesPage(c *xun.Context) error {
 		"activeTab": "tables",
 	}
 
-	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
-	c.WriteStatus(http.StatusOK)
-	return tmpl.Execute(c.Response, data)
+	// Get the underlying ResponseWriter to bypass xun's view wrapper
+	w, ok := c.Response.(http.ResponseWriter)
+	if !ok {
+		return c.View(map[string]any{"error": "failed to get ResponseWriter"})
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	return tmpl.Execute(w, data)
 }
 
 // handlePlugins handles GET /api/plugins
