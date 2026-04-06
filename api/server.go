@@ -5,8 +5,9 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
+	"html/template"
 	"io"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -140,10 +141,21 @@ func (s *Server) registerPageRoutes() {
 
 // handleTablesPage handles GET /tables
 func (s *Server) handleTablesPage(c *xun.Context) error {
-	return c.View(map[string]any{
+	// Parse templates from embedded FS
+	tmpl, err := template.ParseFS(dashboardFS, "dashboard/layouts/dashboard.html", "dashboard/pages/tables.html")
+	if err != nil {
+		c.WriteStatus(http.StatusInternalServerError)
+		return c.View(map[string]any{"error": err.Error()})
+	}
+
+	data := map[string]any{
 		"title":     "CDC Tables",
 		"activeTab": "tables",
-	})
+	}
+
+	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
+	c.WriteStatus(http.StatusOK)
+	return tmpl.Execute(c.Response, data)
 }
 
 // handlePlugins handles GET /api/plugins
