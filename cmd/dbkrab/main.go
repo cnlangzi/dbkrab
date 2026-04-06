@@ -91,7 +91,7 @@ func main() {
 	slog.Info("offset store initialized", "type", cfg.Offset.Type)
 
 	// Create sink
-	var sink *sqlite.Sink
+	var sink core.Sink
 	switch cfg.Sink.Type {
 	case "sqlite":
 		sink, err = sqlite.NewSink(cfg.Sink.Path)
@@ -163,7 +163,7 @@ func main() {
 	slog.Info("CDC admin initialized")
 
 	// Start API/Dashboard server
-	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, sink, *apiPort)
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, *apiPort)
 	go func() {
 		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
 		if err := apiServer.Start(); err != nil {
