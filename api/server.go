@@ -3,11 +3,16 @@ package api
 import (
 	"context"
 	"embed"
+	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/yaitoo/xun"
@@ -29,6 +34,7 @@ func getDashboardFS() fs.FS {
 type Server struct {
 	manager *plugin.Manager
 	dlq     *dlq.DLQ
+	cdcAdmin *cdcadmin.Admin
 	port    int
 	app     *xun.App
 	mux     *http.ServeMux
@@ -51,6 +57,16 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 	}
 }
 
+// NewServerWithCDC creates a new API server with CDC admin support
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, port int) *Server {
+	return &Server{
+		manager: manager,
+		dlq:     dlqStore,
+		cdcAdmin: cdcAdmin,
+		port:    port,
+	}
+}
+
 // Start starts the API server with xun framework
 func (s *Server) Start() error {
 	// Create a mux to use with xun
@@ -62,10 +78,12 @@ func (s *Server) Start() error {
 	s.app = xun.New(
 		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
+		xun.WithHandlerViewers(&xun.JsonViewer{}, &xun.HtmlViewer{}),
 	)
 
-	// Register API routes
+	// Register routes
 	s.registerAPIRoutes()
+	s.registerPageRoutes()
 
 	// Start xun (this finalizes route registration)
 	s.app.Start()
@@ -106,7 +124,19 @@ func (s *Server) registerAPIRoutes() {
 		api.Delete("/dlq/:id", s.handleDLQDelete, xun.WithViewer(&xun.JsonViewer{}))
 	}
 
+	// CDC administration routes
+	if s.cdcAdmin != nil {
+		api.Get("/cdc/tables", s.handleCDCTables, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/cdc/config", s.handleCDCConfig, xun.WithViewer(&xun.JsonViewer{}))
+	}
+
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
+}
+
+// registerPageRoutes registers page routes
+func (s *Server) registerPageRoutes() {
+	// Pages are auto-registered by xun from pages/ directory
+	// Manual registration for custom handlers if needed
 }
 
 // handlePlugins handles GET /api/plugins
@@ -273,4 +303,92 @@ func (s *Server) handleDLQIgnore(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{"success": true, "message": "Entry ignored"})
+}
+
+// handleCDCTables handles GET /api/cdc/tables
+func (s *Server) handleCDCTables(c *xun.Context) error {
+	if s.cdcAdmin == nil {
+		return c.View(map[string]any{"success": false, "error": "CDC admin not initialized"})
+	}
+
+	tables, err := s.cdcAdmin.ListTables()
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "count": len(tables), "tables": tables})
+}
+
+// handleCDCConfig handles POST /api/cdc/config
+func (s *Server) handleCDCConfig(c *xun.Context) error {
+	if s.cdcAdmin == nil {
+		return c.View(map[string]any{"success": false, "error": "CDC admin not initialized"})
+	}
+
+	// Parse request body
+	var req struct {
+		Tables []string `json:"tables"`
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": "failed to read request body"})
+	}
+	defer func() { _ = c.Request.Body.Close() }()
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		return c.View(map[string]any{"success": false, "error": "invalid request body"})
+	}
+
+	// For each table, check CDC status and enable if needed
+	var enabled []string
+	var skipped []string
+	var errors []string
+
+	for _, table := range req.Tables {
+		// Parse schema.table format
+		parts := strings.SplitN(table, ".", 2)
+		if len(parts) != 2 {
+			errors = append(errors, fmt.Sprintf("invalid table format: %s (expected schema.table)", table))
+			continue
+		}
+		schema, name := parts[0], parts[1]
+
+		// Check if CDC is already enabled
+		cdcEnabled, err := s.cdcAdmin.GetCDCStatus(schema, name)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("check CDC status for %s: %v", table, err))
+			continue
+		}
+
+		if !cdcEnabled {
+			// Enable CDC
+			if err := s.cdcAdmin.EnableCDC(schema, name); err != nil {
+				errors = append(errors, fmt.Sprintf("enable CDC for %s: %v", table, err))
+				continue
+			}
+			enabled = append(enabled, table)
+		} else {
+			skipped = append(skipped, table)
+		}
+	}
+
+	// Write to config file and trigger reload
+	// This will be handled by config watcher
+	if len(errors) > 0 {
+		return c.View(map[string]any{
+			"success": false,
+			"error": strings.Join(errors, "; "),
+			"enabled": enabled,
+			"skipped": skipped,
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": "CDC configuration updated",
+		"enabled": enabled,
+		"skipped": skipped,
+		"tables": req.Tables,
+	})
 }
