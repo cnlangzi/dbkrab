@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
+	"github.com/cnlangzi/dbkrab/sink/sqlite"
 	"github.com/yaitoo/xun"
 )
 
@@ -32,12 +34,13 @@ func getDashboardFS() fs.FS {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager *plugin.Manager
-	dlq     *dlq.DLQ
+	manager  *plugin.Manager
+	dlq      *dlq.DLQ
 	cdcAdmin *cdcadmin.Admin
-	port    int
-	app     *xun.App
-	mux     *http.ServeMux
+	sink     *sqlite.Sink
+	port     int
+	app      *xun.App
+	mux      *http.ServeMux
 }
 
 // NewServer creates a new API server
@@ -58,12 +61,13 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, port int) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, sink *sqlite.Sink, port int) *Server {
 	return &Server{
-		manager: manager,
-		dlq:     dlqStore,
+		manager:  manager,
+		dlq:      dlqStore,
 		cdcAdmin: cdcAdmin,
-		port:    port,
+		sink:     sink,
+		port:     port,
 	}
 }
 
@@ -128,6 +132,14 @@ func (s *Server) registerAPIRoutes() {
 	if s.cdcAdmin != nil {
 		api.Get("/cdc/tables", s.handleCDCTables, xun.WithViewer(&xun.JsonViewer{}))
 		api.Post("/cdc/config", s.handleCDCConfig, xun.WithViewer(&xun.JsonViewer{}))
+	}
+
+	// CDC logs routes
+	if s.sink != nil {
+		api.Get("/cdc/logs", s.handleCDCLogs, xun.WithViewer(&xun.JsonViewer{}))
+		slog.Debug("CDC logs route registered")
+	} else {
+		slog.Debug("CDC logs route skipped - sink is nil")
 	}
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
@@ -390,5 +402,34 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		"enabled": enabled,
 		"skipped": skipped,
 		"tables": req.Tables,
+	})
+}
+
+// handleCDCLogs handles GET /api/cdc/logs
+// Query params: limit (default 100), table, operation, transaction_id
+func (s *Server) handleCDCLogs(c *xun.Context) error {
+	limit := 100
+	if l := c.Request.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	tableName := c.Request.URL.Query().Get("table")
+	operation := c.Request.URL.Query().Get("operation")
+	txID := c.Request.URL.Query().Get("transaction_id")
+
+	logs, err := s.sink.GetChangesWithFilter(limit, tableName, operation, txID)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"count":   len(logs),
+		"logs":    logs,
 	})
 }

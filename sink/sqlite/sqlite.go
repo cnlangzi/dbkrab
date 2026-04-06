@@ -119,12 +119,34 @@ func (s *Sink) Close() error {
 
 // GetChanges retrieves changes from the database
 func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, created_at FROM transactions ORDER BY id DESC`
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+	return s.GetChangesWithFilter(limit, "", "", "")
+}
+
+// GetChangesWithFilter retrieves changes with optional filters
+func (s *Sink) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+	query := `SELECT id, transaction_id, table_name, operation, data, created_at FROM transactions WHERE 1=1`
+	args := []interface{}{}
+
+	if tableName != "" {
+		query += " AND table_name = ?"
+		args = append(args, tableName)
+	}
+	if operation != "" {
+		query += " AND operation = ?"
+		args = append(args, operation)
+	}
+	if txID != "" {
+		query += " AND transaction_id = ?"
+		args = append(args, txID)
 	}
 
-	rows, err := s.db.Query(query)
+	query += " ORDER BY id DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -137,10 +159,10 @@ func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id int
-		var txID, tableName, operation, dataStr string
+		var resultTxID, resultTableName, resultOperation, dataStr string
 		var createdAt interface{}
 
-		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &createdAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &createdAt); err != nil {
 			return nil, err
 		}
 
@@ -150,12 +172,12 @@ func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
 		}
 
 		results = append(results, map[string]interface{}{
-			"id":            id,
-			"transaction_id": txID,
-			"table_name":    tableName,
-			"operation":     operation,
-			"data":          data,
-			"created_at":    createdAt,
+			"id":             id,
+			"transaction_id": resultTxID,
+			"table_name":     resultTableName,
+			"operation":      resultOperation,
+			"data":           data,
+			"created_at":     createdAt,
 		})
 	}
 
