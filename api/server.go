@@ -137,6 +137,7 @@ func (s *Server) registerAPIRoutes() {
 	// CDC logs routes
 	if s.sink != nil {
 		api.Get("/cdc/logs", s.handleCDCLogs, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Debug("CDC logs route registered")
 	} else {
 		slog.Debug("CDC logs route skipped - sink is nil")
@@ -431,5 +432,29 @@ func (s *Server) handleCDCLogs(c *xun.Context) error {
 		"success": true,
 		"count":   len(logs),
 		"logs":    logs,
+	})
+}
+
+// handleCDCStatus handles GET /api/cdc/status
+// Returns poller state: last_poll_time, last_lsn, total_changes
+func (s *Server) handleCDCStatus(c *xun.Context) error {
+	if s.sink == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink not initialized",
+		})
+	}
+
+	state, err := s.sink.GetPollerState()
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"state":   state,
 	})
 }

@@ -40,7 +40,16 @@ func NewSink(path string) (*Sink, error) {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
-	return &Sink{db: db, path: path}, nil
+	sink := &Sink{db: db, path: path}
+	// Initialize poller state
+	if err := sink.initPollerState(); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			slog.Warn("db.Close error", "error", closeErr)
+		}
+		return nil, fmt.Errorf("init poller state: %w", err)
+	}
+
+	return sink, nil
 }
 
 // createTables creates the necessary tables
@@ -54,12 +63,82 @@ func createTables(db *sql.DB) error {
 			data TEXT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
+
+		CREATE TABLE IF NOT EXISTS poller_state (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			last_poll_time TIMESTAMP,
+			last_lsn TEXT,
+			total_changes INTEGER DEFAULT 0,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
 		
 		CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
 		CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name);
 		CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
 	`)
 	return err
+}
+
+// initPollerState initializes the poller state row
+func (s *Sink) initPollerState() error {
+	_, err := s.db.Exec(`
+		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
+		VALUES (1, NULL, NULL, 0)
+	`)
+	return err
+}
+
+// UpdatePollerState updates the poller state after successful poll
+func (s *Sink) UpdatePollerState(lastLSN string, changeCount int) error {
+	_, err := s.db.Exec(`
+		UPDATE poller_state 
+		SET last_poll_time = CURRENT_TIMESTAMP,
+			last_lsn = ?,
+			total_changes = total_changes + ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, lastLSN, changeCount)
+	return err
+}
+
+// GetPollerState returns the current poller state
+func (s *Sink) GetPollerState() (map[string]interface{}, error) {
+	row := s.db.QueryRow(`
+		SELECT last_poll_time, last_lsn, total_changes, updated_at
+		FROM poller_state
+		WHERE id = 1
+	`)
+
+	var lastPollTime, lastLSN, updatedAt sql.NullString
+	var totalChanges int
+
+	if err := row.Scan(&lastPollTime, &lastLSN, &totalChanges, &updatedAt); err != nil {
+		return nil, err
+	}
+
+	state := map[string]interface{}{
+		"total_changes": totalChanges,
+	}
+
+	if lastPollTime.Valid {
+		state["last_poll_time"] = lastPollTime.String
+	} else {
+		state["last_poll_time"] = nil
+	}
+
+	if lastLSN.Valid {
+		state["last_lsn"] = lastLSN.String
+	} else {
+		state["last_lsn"] = nil
+	}
+
+	if updatedAt.Valid {
+		state["updated_at"] = updatedAt.String
+	} else {
+		state["updated_at"] = nil
+	}
+
+	return state, nil
 }
 
 // Write writes a transaction to SQLite

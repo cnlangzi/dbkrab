@@ -398,7 +398,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	}
 
 	// Update offsets (same logic as processDirect)
-	return p.updateOffsets(results)
+	return p.updateOffsets(results, allChanges)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
@@ -445,11 +445,11 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	}
 
 	// All transactions successfully written - now update offsets
-	return p.updateOffsets(results)
+	return p.updateOffsets(results, allChanges)
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
-func (p *Poller) updateOffsets(results []tablePollResult) error {
+func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) error {
 	// Build set of successfully polled tables
 	successfulTables := make(map[string]bool)
 	for _, r := range results {
@@ -484,6 +484,13 @@ func (p *Poller) updateOffsets(results []tablePollResult) error {
 		slog.Info("advanced global checkpoint",
 			"lsn", minLSN.String(),
 			"tables", len(successfulTables))
+
+		// Update poller state in sink for observability
+		if sqliteSink, ok := p.sink.(interface{ UpdatePollerState(string, int) error }); ok {
+			if err := sqliteSink.UpdatePollerState(minLSN.String(), len(allChanges)); err != nil {
+				slog.Warn("failed to update poller state", "error", err)
+			}
+		}
 	}
 
 	return nil
