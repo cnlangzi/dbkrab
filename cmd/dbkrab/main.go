@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/api"
+	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
@@ -157,8 +158,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Create CDC admin
+	cdcAdmin := cdcadmin.NewAdmin(&cfg.MSSQL)
+	slog.Info("CDC admin initialized")
+
 	// Start API/Dashboard server
-	apiServer := api.NewServerWithDLQ(pluginManager, dlqStore, *apiPort)
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, *apiPort)
 	go func() {
 		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
 		if err := apiServer.Start(); err != nil {
