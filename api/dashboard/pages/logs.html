@@ -1,0 +1,168 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-gray-800">📜 CDC Change Logs</h2>
+        <button onclick="loadLogs()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+            🔄 Refresh
+        </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Table</label>
+                <input type="text" id="filter-table" placeholder="schema.table" 
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Operation</label>
+                <select id="filter-operation" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">All</option>
+                    <option value="INSERT">INSERT</option>
+                    <option value="UPDATE_BEFORE">UPDATE_BEFORE</option>
+                    <option value="UPDATE_AFTER">UPDATE_AFTER</option>
+                    <option value="DELETE">DELETE</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Transaction ID</label>
+                <input type="text" id="filter-txid" placeholder="Transaction ID" 
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div class="flex items-end">
+                <button onclick="applyFilters()" class="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">
+                    🔍 Apply Filters
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500 text-sm">Showing <span id="log-count" class="font-bold text-blue-600">0</span> logs</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="setLimit(50)" class="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300">50</button>
+                <button onclick="setLimit(100)" class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">100</button>
+                <button onclick="setLimit(500)" class="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300">500</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Table</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Operation</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transaction ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Data</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200" id="logs-container">
+                <tr>
+                    <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                        Loading logs...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+let currentLimit = 100;
+
+function setLimit(limit) {
+    currentLimit = limit;
+    // Update button styles
+    document.querySelectorAll('button[onclick^="setLimit"]').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('bg-gray-200');
+    });
+    event.target.classList.remove('bg-gray-200');
+    event.target.classList.add('bg-blue-600', 'text-white');
+    loadLogs();
+}
+
+function applyFilters() {
+    loadLogs();
+}
+
+function loadLogs() {
+    const table = document.getElementById('filter-table').value;
+    const operation = document.getElementById('filter-operation').value;
+    const txid = document.getElementById('filter-txid').value;
+    
+    const params = new URLSearchParams({
+        limit: currentLimit.toString()
+    });
+    if (table) params.append('table', table);
+    if (operation) params.append('operation', operation);
+    if (txid) params.append('transaction_id', txid);
+
+    fetch('/api/cdc/logs?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('logs-container');
+            const countEl = document.getElementById('log-count');
+            
+            countEl.textContent = data.count || 0;
+            
+            if (!data.logs || data.logs.length === 0) {
+                container.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">No logs found</td></tr>';
+                return;
+            }
+            
+            container.innerHTML = data.logs.map(log => {
+                const operationClass = {
+                    'INSERT': 'text-green-600 bg-green-50',
+                    'UPDATE_BEFORE': 'text-yellow-600 bg-yellow-50',
+                    'UPDATE_AFTER': 'text-orange-600 bg-orange-50',
+                    'DELETE': 'text-red-600 bg-red-50'
+                }[log.operation] || 'text-gray-600 bg-gray-50';
+                
+                const dataPreview = JSON.stringify(log.data).substring(0, 200);
+                const dataFull = JSON.stringify(log.data, null, 2);
+                
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm text-gray-500">${log.id}</td>
+                        <td class="px-6 py-4 text-sm font-medium text-gray-900">${log.table_name}</td>
+                        <td class="px-6 py-4">
+                            <span class="px-2 py-1 text-xs font-semibold rounded ${operationClass}">
+                                ${log.operation}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-500 font-mono">${log.transaction_id}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">${log.created_at || '-'}</td>
+                        <td class="px-6 py-4 text-sm">
+                            <details class="group">
+                                <summary class="cursor-pointer text-blue-600 hover:text-blue-800 truncate max-w-xs">
+                                    ${dataPreview}${dataFull.length > 200 ? '...' : ''}
+                                </summary>
+                                <pre class="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto max-w-md"><code>${dataFull}</code></pre>
+                            </details>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        })
+        .catch(err => {
+            console.error('Failed to load logs:', err);
+            document.getElementById('logs-container').innerHTML = 
+                '<tr><td colspan="6" class="px-6 py-8 text-center text-red-500">Failed to load logs</td></tr>';
+        });
+}
+
+// Load on page load
+loadLogs();
+</script>
+{{ end }}
