@@ -1,0 +1,52 @@
+name: sync_orders_split
+description: "orders CDC enrich and fanout to two tables"
+
+on:
+  - orders
+
+stages:
+  - name: enrich
+    sql_file: enrich.sql
+
+  - name: fanout
+    sql_file: fanout.sql
+
+sinks:
+  insert:
+    - name: customers_sync
+      sql: |
+        SELECT * FROM customers_view;
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT * FROM products_view;
+      output: products_sync
+      primary_key: product_id
+
+  update:
+    - name: customers_sync
+      sql: |
+        SELECT * FROM customers_view;
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT * FROM products_view;
+      output: products_sync
+      primary_key: product_id
+
+  delete:
+    - name: customers_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @customer_id as customer_id
+      output: customers_sync
+      primary_key: customer_id
+
+    - name: products_sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @product_id as product_id
+      output: products_sync
+      primary_key: product_id

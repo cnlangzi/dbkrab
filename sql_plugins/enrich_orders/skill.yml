@@ -1,0 +1,35 @@
+name: enrich_orders
+description: "orders CDC with customer and product enrichment"
+
+on:
+  - orders
+
+stages:
+  - name: join_customers
+    sql_file: step1_join_customers.sql
+    temp_table: customers_enriched
+    
+  - name: join_products
+    sql_file: step2_join_products.sql
+
+sinks:
+  insert:
+    - name: sync
+      sql: |
+        SELECT * FROM products_enriched;
+      output: enriched_orders
+      primary_key: order_id
+
+  update:
+    - name: sync
+      sql: |
+        SELECT * FROM products_enriched;
+      output: enriched_orders
+      primary_key: order_id
+
+  delete:
+    - name: sync
+      sql: |
+        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+      output: enriched_orders
+      primary_key: order_id
