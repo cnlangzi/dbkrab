@@ -19,7 +19,7 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id IN (@order_ids);
-      output: order_sync_db
+      output: order_sync
       primary_key: order_id
 
   update:
@@ -36,12 +36,12 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id IN (@order_ids);
-      output: order_sync_db
+      output: order_sync
       primary_key: order_id
 
   delete:
     - name: sync
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
-      output: order_sync_db
+      output: order_sync
       primary_key: order_id
