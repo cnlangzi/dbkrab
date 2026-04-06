@@ -330,18 +330,21 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 	}
 
-	// Nothing to process
-	if len(allChanges) == 0 {
-		return nil
-	}
-
 	// If transaction buffer is enabled, use it for cross-table integrity
 	if p.txBuffer != nil {
-		return p.processWithBuffer(ctx, allChanges, results)
+		if len(allChanges) > 0 {
+			return p.processWithBuffer(ctx, allChanges, results)
+		}
+		// No changes but still update offsets for observability
+		return p.updateOffsets(results, allChanges)
 	}
 
 	// Otherwise, use legacy direct processing
-	return p.processDirect(ctx, allChanges, results)
+	if len(allChanges) > 0 {
+		return p.processDirect(ctx, allChanges, results)
+	}
+	// No changes but still update offsets for observability
+	return p.updateOffsets(results, allChanges)
 }
 
 // processWithBuffer processes changes using transaction buffer for cross-table integrity
@@ -466,6 +469,8 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 		}
 	}
 
+	// Update poller state in sink for observability (even if no changes)
+	var lastLSN string
 	if len(validResults) > 0 {
 		minLSN := validResults[0].lastLSN
 		for _, r := range validResults[1:] {
@@ -485,12 +490,17 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 			"lsn", minLSN.String(),
 			"tables", len(successfulTables))
 
-		// Update poller state in sink for observability
-		if sqliteSink, ok := p.sink.(interface{ UpdatePollerState(string, int) error }); ok {
-			if err := sqliteSink.UpdatePollerState(minLSN.String(), len(allChanges)); err != nil {
-				slog.Warn("failed to update poller state", "error", err)
-			}
+		lastLSN = minLSN.String()
+	}
+
+	// Always update poller state for observability
+	if sqliteSink, ok := p.sink.(interface{ UpdatePollerState(string, int) error }); ok {
+		slog.Debug("updating poller state", "lastLSN", lastLSN, "changes", len(allChanges))
+		if err := sqliteSink.UpdatePollerState(lastLSN, len(allChanges)); err != nil {
+			slog.Warn("failed to update poller state", "error", err)
 		}
+	} else {
+		slog.Debug("sink does not support UpdatePollerState")
 	}
 
 	return nil

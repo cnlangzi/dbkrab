@@ -138,9 +138,9 @@ func (s *Server) registerAPIRoutes() {
 	if s.sink != nil {
 		api.Get("/cdc/logs", s.handleCDCLogs, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
-		slog.Debug("CDC logs route registered")
+		slog.Info("CDC logs/status routes registered")
 	} else {
-		slog.Debug("CDC logs route skipped - sink is nil")
+		slog.Warn("CDC logs/status routes skipped - sink is nil")
 	}
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))

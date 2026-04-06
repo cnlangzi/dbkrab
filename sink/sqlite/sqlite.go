@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,18 +20,34 @@ type Sink struct {
 	path string
 }
 
-// NewSink creates a new SQLite sink
+// NewSink creates a new SQLite sink with WAL mode and optimized settings
 func NewSink(path string) (*Sink, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
+	// Build DSN with WAL mode and optimized parameters
+	params := url.Values{}
+	params.Add("_journal_mode", "WAL")           // WAL mode for concurrent read/write
+	params.Add("_synchronous", "NORMAL")          // Balance between safety and performance
+	params.Add("_busy_timeout", "5000")           // Wait 5s for locks
+	params.Add("_pragma", "temp_store(MEMORY)")   // Temp tables in memory
+	params.Add("_pragma", "cache_size(-100000)")  // ~100MB cache
+	params.Add("_pragma", "mmap_size(1000000000)") // 1GB mmap for faster reads
+	params.Add("cache", "shared")                 // Shared cache for concurrency
+
+	dsn := path + "?" + params.Encode()
+
 	// Open database
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// Set connection pool - writer needs single connection to avoid SQLITE_BUSY
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Create tables
 	if err := createTables(db); err != nil {
@@ -90,10 +107,11 @@ func (s *Sink) initPollerState() error {
 
 // UpdatePollerState updates the poller state after successful poll
 func (s *Sink) UpdatePollerState(lastLSN string, changeCount int) error {
+	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
 		UPDATE poller_state 
 		SET last_poll_time = CURRENT_TIMESTAMP,
-			last_lsn = ?,
+			last_lsn = COALESCE(NULLIF(?, ''), last_lsn),
 			total_changes = total_changes + ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = 1
