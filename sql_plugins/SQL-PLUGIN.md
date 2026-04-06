@@ -42,10 +42,10 @@ Core Poller (Transaction-based batch collection)
 │     Batch write with transaction boundary     │
 └─────────────────────────────────────────────┘
     ↓
-┌────────┐  ┌─────────┐  ┌──────────┐
-│ SQLite │  │  File   │  │  Kafka   │
-│  Sink  │  │  Sink   │  │  Sink    │
-└────────┘  └─────────┘  └──────────┘
+┌────────┐
+│ SQLite │
+│  Sink  │
+└────────┘
 ```
 
 ---
@@ -116,21 +116,21 @@ sinks:
     - name: sink_name
       sql: |
         SELECT ... FROM source_table WHERE id IN (@table_ids);
-      output: target_sink_name
+      output: target_table      # SQLite table name
       primary_key: id
 
   update:
     - name: sink_name
       sql: |
         SELECT ... FROM source_table WHERE id IN (@table_ids);
-      output: target_sink_name
+      output: target_table      # SQLite table name
       primary_key: id
 
   delete:
     - name: sink_name
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @id as id
-      output: target_sink_name
+      output: target_table      # SQLite table name
       primary_key: id
 ```
 
@@ -188,7 +188,7 @@ delete:
   - name: sync
     sql: |
       SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
-    output: order_sync_db
+    output: order_sync
     primary_key: order_id
 ```
 
@@ -202,7 +202,7 @@ delete:
     sql: |
       -- Query target database to find mapped primary key
       SELECT id as target_id FROM order_sync WHERE source_order_id IN (@order_ids);
-    output: order_sync_db
+    output: order_sync
     primary_key: id
 ```
 
