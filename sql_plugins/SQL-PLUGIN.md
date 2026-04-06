@@ -82,7 +82,7 @@ When executing SQL, CDC captured data is injected as parameters:
 
 ### Output Configuration
 
-Each sink defines a `primary_key` which specifies the target table's primary key column name. The Engine uses this to:
+`output` specifies the target **SQLite table name** directly. The Engine uses `primary_key` to:
 - For INSERT/UPDATE: Determine if record exists (for upsert logic)
 - For DELETE: Construct the WHERE clause
 
@@ -144,7 +144,7 @@ sinks:
 | `sinks` | Yes | Sink configurations keyed by operation type |
 | `sinks[].sql` | Yes | SQL template (SELECT only) |
 | `sinks[].sql_file` | No | Path to external SQL file (alternative to inline sql) |
-| `sinks[].output` | Yes | Target sink name |
+| `sinks[].output` | Yes | Target SQLite table name |
 | `sinks[].primary_key` | Yes | Primary key column name in target table |
 
 ---
@@ -350,7 +350,7 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id IN (@order_ids);
-      output: order_sync_db
+      output: order_sync        # SQLite table name
       primary_key: order_id
 
   update:
@@ -367,26 +367,18 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id IN (@order_ids);
-      output: order_sync_db
+      output: order_sync        # SQLite table name
       primary_key: order_id
 
   delete:
     - name: sync
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
-      output: order_sync_db
+      output: order_sync        # SQLite table name
       primary_key: order_id
 ```
 
 ---
-
-## Open Questions
-
-1. **Upsert Strategy**: Should we use "先查后插" (check-then-insert) or "尝试插冲突则更新" (try-insert-on-conflict-update)? Different databases have different mechanisms (SQLite: INSERT OR REPLACE, MSSQL: MERGE, etc.)
-
-2. **Target Sink Registration**: How does the Engine map `output: order_sync_db` to an actual Sink implementation? Need a Sink registry mechanism.
-
-3. **CDC Operation Mapping**: How does the Engine know which CDC operation maps to which sink key? (Currently: 2=INSERT, 4=UPDATE, 1=DELETE)
 
 ---
 
