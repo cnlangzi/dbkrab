@@ -84,6 +84,15 @@ func (s *Server) Start() error {
 	// Create a mux to use with xun
 	s.mux = http.NewServeMux()
 
+	// Static files from public/ directory
+	publicFS, err := fs.Sub(dashboardFS, "dashboard/public")
+	if err != nil {
+		return fmt.Errorf("create public FS: %w", err)
+	}
+	fileServer := http.FileServer(http.FS(publicFS))
+	s.mux.Handle("/public/", http.StripPrefix("/public/", fileServer))
+
+
 	// Create xun app with our mux and template filesystem
 	// Use Sub FS so pages/layouts are at root level for xun
 	dashboardSubFS := getDashboardFS()
@@ -166,7 +175,6 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	// Manual registration for custom handlers if needed
 }
 
 // handlePlugins handles GET /api/plugins

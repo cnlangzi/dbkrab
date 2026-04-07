@@ -175,25 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('filters-container').classList.add('hidden');
     }
 });
-
-// Convert UTC time string to local timezone
-function formatLocalTime(utcString) {
-    if (!utcString || utcString === 'null' || utcString === '-') return '-';
-    // Add 'Z' suffix if not present to indicate UTC
-    const utcDate = utcString.endsWith('Z') ? utcString : utcString + 'Z';
-    try {
-        const date = new Date(utcDate);
-        return date.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        });
-    } catch (e) {
-        return utcString;
     }
 }
 
