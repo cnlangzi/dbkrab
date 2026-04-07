@@ -163,7 +163,7 @@ func main() {
 	slog.Info("CDC admin initialized")
 
 	// Start API/Dashboard server
-	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, sink, *apiPort)
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, sink, *apiPort, *configPath, cfg, configWatcher)
 	go func() {
 		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
 		if err := apiServer.Start(); err != nil {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -181,6 +182,20 @@ func (c *Config) CriticalLagDuration() (time.Duration, error) {
 		return 6 * time.Hour, nil
 	}
 	return time.ParseDuration(c.CDCProtection.CriticalLagDuration)
+}
+
+// Save writes the config to a YAML file
+func Save(path string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+
+	return nil
 }
 
 // MaxDisconnectDuration returns the maximum disconnect duration before alerting.
