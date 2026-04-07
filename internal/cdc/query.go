@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// numericPattern matches numeric strings (integers, decimals, scientific notation)
+// Examples: "123", "999.99", "700.0000", "-123.45", "1.23e10"
+var numericPattern = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][+-]?\d+)?$`)
+
 // validCaptureInstance validates capture instance name to prevent SQL injection
 var validCaptureInstance = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
@@ -144,8 +148,13 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			if strings.HasPrefix(col, "__$") {
 				continue
 			}
+			
+			// Convert MSSQL numeric bytes to string to avoid Base64 encoding in JSON
+			// MSSQL driver returns DECIMAL/NUMERIC as []byte which gets Base64 encoded
+			val := convertMSSQLValue(values[i])
+			
 			// Convert column name to lowercase for consistency
-			data[strings.ToLower(col)] = values[i]
+			data[strings.ToLower(col)] = val
 		}
 
 		changes = append(changes, Change{
@@ -216,4 +225,30 @@ func formatMSSQLGUID(b []byte) string {
 		b[7], b[6],             // Next 2 bytes (LE)
 		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15], // Last 8 bytes (BE)
 	)
+}
+
+// convertMSSQLValue converts MSSQL driver returned values to appropriate types
+// MSSQL driver returns DECIMAL/NUMERIC/FLOAT as []byte which would be Base64 encoded in JSON
+// This function converts numeric []byte to string to preserve precision
+func convertMSSQLValue(val interface{}) interface{} {
+	// Check if value is []byte
+	bytesVal, ok := val.([]byte)
+	if !ok {
+		// Not []byte, return as-is (string, int64, nil, etc.)
+		return val
+	}
+	
+	// Convert []byte to string
+	strVal := string(bytesVal)
+	
+	// Check if it looks like a numeric value
+	if numericPattern.MatchString(strVal) {
+		// It's a numeric string, return as string to preserve precision
+		// Example: "999.99", "700.0000", "824.000"
+		return strVal
+	}
+	
+	// Not numeric, return original []byte
+	// (could be GUID, binary data, etc. which will be Base64 encoded as intended)
+	return bytesVal
 }
