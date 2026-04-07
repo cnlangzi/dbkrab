@@ -548,16 +548,17 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 		}
 	}
 
-	// Get database connection from sink
-	db := s.sink.GetDB()
-	if db == nil {
+	// Get MSSQL database connection from cdcAdmin (GapDetector requires MSSQL for CDC functions)
+	db, err := s.cdcAdmin.Connect()
+	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "database connection not available",
+			"error":   fmt.Sprintf("connect to MSSQL: %v", err),
 		})
 	}
+	defer db.Close()
 
-	// Create gap detector
+	// Create gap detector with MSSQL connection
 	gapDetector := cdc.NewGapDetector(db)
 	ctx := context.Background()
 
