@@ -192,22 +192,6 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	return p.Engine.Handle(tx)
 }
 
-// toOperation converts core.Operation to sqlplugin.Operation
-func toOperation(op core.Operation) sqlplugin.Operation {
-	switch op {
-	case core.OpDelete:
-		return sqlplugin.Delete
-	case core.OpInsert:
-		return sqlplugin.Insert
-	case core.OpUpdateBefore:
-		return sqlplugin.Update
-	case core.OpUpdateAfter:
-		return sqlplugin.Update
-	default:
-		return sqlplugin.Insert
-	}
-}
-
 // List returns all loaded plugins (both SQL and WASM)
 func (m *Manager) List() []PluginInfo {
 	m.mu.RLock()
