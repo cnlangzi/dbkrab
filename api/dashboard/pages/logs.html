@@ -21,8 +21,7 @@
                 <select id="filter-operation" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
                     <option value="">All</option>
                     <option value="INSERT">INSERT</option>
-                    <option value="UPDATE_BEFORE">UPDATE_BEFORE</option>
-                    <option value="UPDATE_AFTER">UPDATE_AFTER</option>
+                    <option value="UPDATE_AFTER">Update After</option>
                     <option value="DELETE">DELETE</option>
                 </select>
             </div>
@@ -160,7 +159,6 @@ function loadLogs() {
             container.innerHTML = data.logs.map(log => {
                 const operationClass = {
                     'INSERT': 'text-green-600 bg-green-50',
-                    'UPDATE_BEFORE': 'text-yellow-600 bg-yellow-50',
                     'UPDATE_AFTER': 'text-orange-600 bg-orange-50',
                     'DELETE': 'text-red-600 bg-red-50'
                 }[log.operation] || 'text-gray-600 bg-gray-50';
