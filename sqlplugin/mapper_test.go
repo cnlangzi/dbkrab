@@ -35,10 +35,10 @@ func TestShortTableName(t *testing.T) {
 
 func TestGetChangesByTable(t *testing.T) {
 	changes := []ChangeItem{
-		{Table: "dbo.orders", LSN: "1", TxID: "tx1", Operation: Insert, TableID: 1},
-		{Table: "dbo.orders", LSN: "2", TxID: "tx1", Operation: Insert, TableID: 2},
-		{Table: "dbo.order_items", LSN: "1", TxID: "tx1", Operation: Insert, TableID: 10},
-		{Table: "dbo.order_items", LSN: "2", TxID: "tx1", Operation: Insert, TableID: 11},
+		{Table: "dbo.orders", LSN: "1", TxID: "tx1", Operation: Insert, Data: map[string]interface{}{"order_id": 1}},
+		{Table: "dbo.orders", LSN: "2", TxID: "tx1", Operation: Insert, Data: map[string]interface{}{"order_id": 2}},
+		{Table: "dbo.order_items", LSN: "1", TxID: "tx1", Operation: Insert, Data: map[string]interface{}{"order_id": 10}},
+		{Table: "dbo.order_items", LSN: "2", TxID: "tx1", Operation: Insert, Data: map[string]interface{}{"order_id": 11}},
 	}
 
 	result := GetChangesByTable(changes)
@@ -62,7 +62,6 @@ func TestBuildParams_Basic(t *testing.T) {
 		LSN:       "0x00001abc",
 		TxID:      "tx_12345",
 		Operation: Insert,
-		TableID:   100,
 		Data: map[string]interface{}{
 			"order_id": 100,
 			"amount":   50.00,
@@ -89,7 +88,7 @@ func TestBuildParams_Basic(t *testing.T) {
 		t.Errorf("cdc_operation = %v, want %d", params["cdc_operation"], Insert)
 	}
 
-	// Data fields prefixed with table name
+	// Data fields prefixed with table name: {table_name}_{column_name}
 	if params["orders_order_id"] != 100 {
 		t.Errorf("orders_order_id = %v, want 100", params["orders_order_id"])
 	}
@@ -110,7 +109,6 @@ func TestBuildParams_MultiTableWithSameFieldName(t *testing.T) {
 		LSN:       "0x001",
 		TxID:      "tx1",
 		Operation: Insert,
-		TableID:   1,
 		Data: map[string]interface{}{
 			"order_id": 100,
 		},
@@ -121,7 +119,6 @@ func TestBuildParams_MultiTableWithSameFieldName(t *testing.T) {
 		LSN:       "0x002",
 		TxID:      "tx1",
 		Operation: Insert,
-		TableID:   10,
 		Data: map[string]interface{}{
 			"order_id": 200, // Same field name, different value
 		},
@@ -152,7 +149,6 @@ func TestBuildParams_ComplexSchema(t *testing.T) {
 		LSN:       "0x001",
 		TxID:      "tx1",
 		Operation: Update,
-		TableID:   500,
 		Data: map[string]interface{}{
 			"product_id":    500,
 			"name":          "Widget",
@@ -169,15 +165,15 @@ func TestBuildParams_ComplexSchema(t *testing.T) {
 
 	// Verify all fields are prefixed with "products" (short table name)
 	expectedParams := map[string]interface{}{
-		"cdc_lsn":              "0x001",
-		"cdc_tx_id":            "tx1",
-		"cdc_table":            "inventory.dbo.products",
-		"cdc_operation":        int(Update),
-		"products_product_id":   500,
-		"products_name":        "Widget",
+		"cdc_lsn":               "0x001",
+		"cdc_tx_id":             "tx1",
+		"cdc_table":             "inventory.dbo.products",
+		"cdc_operation":         int(Update),
+		"products_product_id":    500,
+		"products_name":          "Widget",
 		"products_price":        29.99,
-		"products_category_id":  10,
-		"products_updated_at":   "2026-04-07 08:00:00",
+		"products_category_id":   10,
+		"products_updated_at":    "2026-04-07 08:00:00",
 	}
 
 	for key, expectedValue := range expectedParams {

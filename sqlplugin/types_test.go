@@ -110,7 +110,6 @@ func TestCDCParameters(t *testing.T) {
 		CDCTxID:      "tx123",
 		CDCTable:     "dbo.orders",
 		CDCOperation: 1,
-		TableIDs:     []interface{}{1, 2, 3},
 		Fields:       map[string]interface{}{"order_id": 1, "amount": 100.50},
 	}
 
@@ -123,10 +122,7 @@ func TestCDCParameters(t *testing.T) {
 	if params.CDCOperation != 1 {
 		t.Errorf("expected CDCOperation 1, got %d", params.CDCOperation)
 	}
-	if len(params.TableIDs) != 3 {
-		t.Errorf("expected 3 TableIDs, got %d", len(params.TableIDs))
 	}
-}
 
 func TestDataSet(t *testing.T) {
 	ds := DataSet{

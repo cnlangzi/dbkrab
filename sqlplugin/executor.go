@@ -37,7 +37,6 @@ func (e *Executor) Execute(sqlTmpl string, params CDCParameters) (*DataSet, erro
 			"cdc_tx_id": params.CDCTxID,
 			"cdc_table": params.CDCTable,
 			"cdc_operation": params.CDCOperation,
-			"table_ids": params.TableIDs,
 			"fields": params.Fields,
 		}, err)
 	}
