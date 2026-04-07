@@ -46,7 +46,7 @@ func (e *Executor) Execute(sqlTmpl string, params CDCParameters) (*DataSet, erro
 	if err != nil {
 		return nil, NewExecutionError(sqlTmpl, nil, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Scan results
 	ds, err := e.scanRows(rows)
@@ -93,7 +93,7 @@ func (e *Executor) ExecuteStages(skill *Skill, params CDCParameters) (map[string
 				// Table might not exist, skip
 				continue
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 
 			ds, err := e.scanRows(rows)
 			if err != nil {
@@ -197,7 +197,7 @@ func (e *Executor) ExecuteInline(sql string) (*DataSet, error) {
 	if err != nil {
 		return nil, NewExecutionError(sql, nil, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return e.scanRows(rows)
 }
