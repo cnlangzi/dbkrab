@@ -6,44 +6,180 @@
     <title>{{with .Data}}{{with .title}}{{.}} - {{end}}{{end}}dbkrab Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#F97316',    // orange-500 - 珊瑚橙
+                        primaryHover: '#EA580C', // orange-600
+                        surface: '#334155',    // slate-700 - 卡片背景
+                        surfaceHover: '#475569', // slate-600
+                        bg: '#1E293B',         // slate-800 - 页面背景
+                        sidebar: '#0F172A',    // slate-900 - 侧边栏
+                        border: '#475569',     // slate-600 - 边框
+                        text: '#F1F5F9',       // slate-100 - 主文字
+                        textMuted: '#94A3B8',  // slate-400 - 次文字
+                        success: '#14B8A6',    // teal-500
+                        error: '#F43F5E',      // rose-500
+                        warning: '#F59E0B',    // amber-500
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 移动端侧边栏过渡动画 */
+        .sidebar-transition {
+            transition: transform 0.3s ease-in-out;
+        }
+        /* 遮罩层过渡 */
+        .overlay-transition {
+            transition: opacity 0.3s ease-in-out;
+        }
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1E293B;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748B;
+        }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-bg text-text min-h-screen">
+    <!-- 移动端遮罩层 -->
+    <div id="sidebar-overlay" 
+         class="fixed inset-0 bg-black/50 z-40 lg:hidden opacity-0 pointer-events-none overlay-transition"
+         onclick="toggleSidebar()"></div>
+
+    <!-- 移动端顶部导航栏 -->
+    <header class="lg:hidden fixed top-0 left-0 right-0 h-16 bg-sidebar border-b border-border z-30 flex items-center justify-between px-4">
+        <div class="flex items-center gap-3">
+            <button onclick="toggleSidebar()" 
+                    class="p-2 hover:bg-surface rounded-lg transition-colors"
+                    aria-label="Toggle menu">
+                <!-- Hamburger Icon -->
+                <svg class="w-6 h-6 text-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
+            <a href="/" class="flex items-center gap-2">
+                <span class="text-xl font-bold text-primary">🦀 dbkrab</span>
+            </a>
+        </div>
+    </header>
+
     <div class="flex min-h-screen">
         <!-- Sidebar -->
-        <aside class="w-64 bg-gray-900 text-white flex-shrink-0">
-            <div class="p-4 border-b border-gray-700">
-                <h1 class="text-xl font-bold">
-                    <a href="/" class="hover:text-blue-400">🦀 dbkrab</a>
-                </h1>
+        <aside id="sidebar" 
+               class="fixed lg:static inset-y-0 left-0 w-64 bg-sidebar border-r border-border z-50 transform -translate-x-full lg:translate-x-0 sidebar-transition flex flex-col">
+            <!-- Desktop Logo -->
+            <div class="hidden lg:flex items-center justify-between h-16 px-4 border-b border-border">
+                <a href="/" class="flex items-center gap-2">
+                    <span class="text-xl font-bold text-primary">🦀 dbkrab</span>
+                </a>
+                <button onclick="toggleSidebar()" class="lg:hidden p-2 hover:bg-surface rounded-lg transition-colors">
+                    <!-- Close Icon -->
+                    <svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
             </div>
-            <nav class="mt-2">
+
+            <!-- Mobile Logo (inside sidebar) -->
+            <div class="lg:hidden flex items-center justify-between h-16 px-4 border-b border-border">
+                <a href="/" class="flex items-center gap-2">
+                    <span class="text-xl font-bold text-primary">🦀 dbkrab</span>
+                </a>
+                <button onclick="toggleSidebar()" class="p-2 hover:bg-surface rounded-lg transition-colors">
+                    <svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <nav class="flex-1 py-4 overflow-y-auto">
                 <a href="/" 
-                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "overview"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
-                    📊 Overview
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "overview"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- Overview Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Overview</span>
                 </a>
                 <a href="/tables" 
-                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "tables"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
-                    📋 CDC Tables
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "tables"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- Tables Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    <span>CDC Tables</span>
                 </a>
                 <a href="/logs" 
-                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "logs"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
-                    📜 CDC Logs
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "logs"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- Logs Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span>CDC Logs</span>
                 </a>
                 <a href="/dlq" 
-                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "dlq"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
-                    🗄️ Dead Letter Queue
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "dlq"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- DLQ Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+                    </svg>
+                    <span>Dead Letter Queue</span>
                 </a>
                 <a href="/plugins" 
-                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "plugins"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
-                    🔌 Plugins
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "plugins"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- Plugins Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    <span>Plugins</span>
                 </a>
             </nav>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-border">
+                <div class="flex items-center gap-3 text-textMuted text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>dbkrab v1.0</span>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 p-8">
+        <main class="flex-1 pt-16 lg:pt-0 p-4 md:p-8">
             {{ block "content" . }}{{ end }}
         </main>
     </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            const isClosed = sidebar.classList.contains('-translate-x-full');
+            
+            if (isClosed) {
+                sidebar.classList.remove('-translate-x-full');
+                overlay.classList.remove('opacity-0', 'pointer-events-none');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                overlay.classList.add('opacity-0', 'pointer-events-none');
+            }
+        }
+    </script>
 </body>
 </html>
