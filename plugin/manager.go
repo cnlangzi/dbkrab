@@ -196,11 +196,11 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	// Group changes by table and operation
 	changesByTable := make(map[string][]sqlplugin.ChangeItem)
 	for _, change := range tx.Changes {
-		opType := toOperation(change.Operation)
+		opType := change.Operation
 		item := sqlplugin.ChangeItem{
 			Table:     change.Table,
 			LSN:       fmt.Sprintf("%x", change.LSN),
-			TxID:      change.TransactionID,
+			TxID:      change.TxID,
 			Operation: opType,
 			Data:      change.Data,
 		}
@@ -212,7 +212,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	// Process each table
 	for tableName, changes := range changesByTable {
 		for _, change := range changes {
-			opType := toOperation(change.Operation)
+			opType := change.Operation
 			sinkType := sqlplugin.OperationToSinkType(opType)
 
 			// Get sinks for this operation type
@@ -230,7 +230,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 			// Build CDC parameters
 			params := sqlplugin.CDCParameters{
 				CDCLSN:       change.LSN,
-				CDCTxID:      change.TransactionID,
+				CDCTxID:      change.TxID,
 				CDCTable:     tableName,
 				CDCOperation: int(opType),
 				Fields:       change.Data,
@@ -242,8 +242,8 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 
 			// Execute stages if present
 			if len(skill.Stages) > 0 {
-				var err error
-				_, err = p.Executor.ExecuteStages(skill, params)
+				
+				err = p.Executor.ExecuteStages(skill, params)
 				if err != nil {
 					return fmt.Errorf("execute stages: %w", err)
 				}
@@ -255,7 +255,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 
 				// If stages were executed, query the stage results
 				if sink.SQL != "" {
-					var err error
+					
 					ds, err = p.Executor.ExecuteInline(sink.SQL)
 					if err != nil {
 						return fmt.Errorf("execute sink SQL: %w", err)
