@@ -1,91 +1,113 @@
 <!--layout:dashboard-->
 {{ define "content" }}
-<div class="space-y-6">
-    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h2 class="text-2xl font-bold text-text">CDC Change Logs</h2>
-        <button onclick="loadLogs()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
+<div class="space-y-4 sm:space-y-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+            <h2 class="text-2xl sm:text-3xl font-bold text-text">CDC Change Logs</h2>
+            <p class="text-sm text-textMuted mt-1">View and filter database change events</p>
+        </div>
+        <button onclick="loadLogs()" class="flex items-center justify-center gap-2 px-4 py-2.5 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200 min-h-[44px]">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
             </svg>
-            Refresh
+            <span class="hidden sm:inline">Refresh</span>
         </button>
     </div>
 
-    <!-- Filters -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Table</label>
-                <input type="text" id="filter-table" placeholder="schema.table" 
-                       class="w-full px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-text placeholder-textMuted focus:ring-2 focus:ring-primary focus:border-transparent transition-all">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Operation</label>
-                <select id="filter-operation" class="w-full px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-text focus:ring-2 focus:ring-primary focus:border-transparent transition-all">
-                    <option value="">All</option>
-                    <option value="INSERT">INSERT</option>
-                    <option value="UPDATE_AFTER">Update After</option>
-                    <option value="DELETE">DELETE</option>
-                </select>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Transaction ID</label>
-                <input type="text" id="filter-txid" placeholder="Transaction ID" 
-                       class="w-full px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-text placeholder-textMuted focus:ring-2 focus:ring-primary focus:border-transparent transition-all">
-            </div>
-            <div class="flex items-end">
-                <button onclick="applyFilters()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-success hover:bg-success/80 text-white font-medium rounded-lg transition-all duration-200">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                    </svg>
-                    Apply Filters
-                </button>
+    <!-- Filters - Collapsible on Mobile -->
+    <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
+        <div class="flex items-center justify-between mb-4 sm:hidden">
+            <h3 class="text-sm font-semibold text-text">Filters</h3>
+            <button id="toggle-filters" onclick="toggleFilters()" class="p-2 hover:bg-surfaceHover rounded-lg transition-colors min-w-[44px] min-h-[44px]" aria-label="Toggle filters">
+                <svg id="filter-chevron" class="w-5 h-5 text-textMuted transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+        </div>
+        <div id="filters-container" class="space-y-3 sm:space-y-0">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-textMuted mb-1.5 sm:mb-2">Table</label>
+                    <input type="text" id="filter-table" placeholder="schema.table" 
+                           class="w-full px-3 sm:px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-sm sm:text-base text-text placeholder-textMuted focus:ring-2 focus:ring-primary focus:border-transparent transition-all min-h-[44px]">
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-textMuted mb-1.5 sm:mb-2">Operation</label>
+                    <select id="filter-operation" class="w-full px-3 sm:px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-sm sm:text-base text-text focus:ring-2 focus:ring-primary focus:border-transparent transition-all min-h-[44px]">
+                        <option value="">All</option>
+                        <option value="INSERT">INSERT</option>
+                        <option value="UPDATE_AFTER">Update After</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-textMuted mb-1.5 sm:mb-2">Transaction ID</label>
+                    <input type="text" id="filter-txid" placeholder="Transaction ID" 
+                           class="w-full px-3 sm:px-4 py-2.5 bg-surfaceHover border border-border rounded-lg text-sm sm:text-base text-text placeholder-textMuted focus:ring-2 focus:ring-primary focus:border-transparent transition-all min-h-[44px]">
+                </div>
+                <div class="flex items-end gap-2">
+                    <button onclick="applyFilters()" class="flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-success hover:bg-success/80 text-white font-medium rounded-lg transition-all duration-200 min-h-[44px] text-sm sm:text-base">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <span class="hidden sm:inline">Apply</span>
+                        <span class="sm:hidden">Filter</span>
+                    </button>
+                    <button onclick="clearFilters()" class="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-surfaceHover hover:bg-border text-textMuted hover:text-text font-medium rounded-lg transition-all duration-200 min-h-[44px]" aria-label="Clear filters">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Poller Status -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
-        <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2">
+    <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
+        <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
             <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
             </svg>
             Poller Status
         </h3>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div class="p-4 rounded-xl bg-primary/10 border border-primary/20">
-                <p class="text-textMuted text-sm mb-1">Last Poll Time</p>
-                <p id="last-poll-time" class="text-lg font-bold text-primary">-</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <div class="p-3 sm:p-4 rounded-xl bg-primary/10 border border-primary/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Last Poll Time</p>
+                <p id="last-poll-time" class="text-base sm:text-lg font-bold text-primary truncate">-</p>
             </div>
-            <div class="p-4 rounded-xl bg-success/10 border border-success/20">
-                <p class="text-textMuted text-sm mb-1">Last LSN</p>
-                <p id="last-lsn" class="text-lg font-bold text-success font-mono text-sm">-</p>
+            <div class="p-3 sm:p-4 rounded-xl bg-success/10 border border-success/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Last LSN</p>
+                <p id="last-lsn" class="text-sm sm:text-lg font-bold text-success font-mono truncate">-</p>
             </div>
-            <div class="p-4 rounded-xl bg-warning/10 border border-warning/20">
-                <p class="text-textMuted text-sm mb-1">Total Changes Captured</p>
-                <p id="total-changes" class="text-lg font-bold text-warning">0</p>
+            <div class="p-3 sm:p-4 rounded-xl bg-warning/10 border border-warning/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Total Changes</p>
+                <p id="total-changes" class="text-base sm:text-lg font-bold text-warning">0</p>
             </div>
         </div>
     </div>
 
     <!-- Logs Stats -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <p class="text-textMuted text-sm">Showing <span id="log-count" class="font-bold text-primary">0</span> logs</p>
+                <p id="log-range" class="text-textMuted text-xs mt-0.5"></p>
             </div>
             <div class="flex gap-2">
-                <button onclick="setLimit(50)" class="px-3 py-1.5 text-sm bg-surfaceHover hover:bg-border text-textMuted hover:text-text font-medium rounded-lg transition-all">50</button>
-                <button onclick="setLimit(100)" class="px-3 py-1.5 text-sm bg-primary text-white font-medium rounded-lg">100</button>
-                <button onclick="setLimit(500)" class="px-3 py-1.5 text-sm bg-surfaceHover hover:bg-border text-textMuted hover:text-text font-medium rounded-lg transition-all">500</button>
+                <button onclick="setLimit(50)" class="px-3 py-1.5 text-xs sm:text-sm bg-surfaceHover hover:bg-border text-textMuted hover:text-text font-medium rounded-lg transition-all min-h-[36px]">50</button>
+                <button onclick="setLimit(100)" class="px-3 py-1.5 text-xs sm:text-sm bg-primary text-white font-medium rounded-lg min-h-[36px]">100</button>
+                <button onclick="setLimit(500)" class="px-3 py-1.5 text-xs sm:text-sm bg-surfaceHover hover:bg-border text-textMuted hover:text-text font-medium rounded-lg transition-all min-h-[36px]">500</button>
             </div>
         </div>
     </div>
 
-    <!-- Logs Table -->
+    <!-- Logs Container -->
     <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
-        <div class="overflow-x-auto">
+        <!-- Desktop Table -->
+        <div class="hidden sm:block overflow-x-auto">
             <table class="min-w-full divide-y divide-border">
                 <thead class="bg-surfaceHover">
                     <tr>
@@ -97,20 +119,62 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Data</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-border" id="logs-container">
+                <tbody class="divide-y divide-border" id="logs-container-desktop">
                     <tr>
                         <td colspan="6" class="px-6 py-8 text-center text-textMuted">
-                            Loading logs...
+                            <div class="flex items-center justify-center gap-2">
+                                <svg class="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>Loading logs...</span>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Mobile Cards -->
+        <div class="sm:hidden divide-y divide-border" id="logs-container-mobile">
+            <div class="p-6 text-center text-textMuted">
+                <div class="flex items-center justify-center gap-2">
+                    <svg class="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Loading logs...</span>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
 let currentLimit = 100;
+let filtersExpanded = false;
+
+// Toggle filters on mobile
+function toggleFilters() {
+    filtersExpanded = !filtersExpanded;
+    const container = document.getElementById('filters-container');
+    const chevron = document.getElementById('filter-chevron');
+    
+    if (filtersExpanded) {
+        container.classList.remove('hidden');
+        chevron.classList.add('rotate-180');
+    } else {
+        container.classList.add('hidden');
+        chevron.classList.remove('rotate-180');
+    }
+}
+
+// Initialize filters hidden on mobile
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.innerWidth < 640) {
+        document.getElementById('filters-container').classList.add('hidden');
+    }
+});
 
 function loadPollerStatus() {
     fetch('/api/cdc/status')
@@ -141,6 +205,17 @@ function setLimit(limit) {
 
 function applyFilters() {
     loadLogs();
+    // Collapse filters on mobile after applying
+    if (window.innerWidth < 640) {
+        toggleFilters();
+    }
+}
+
+function clearFilters() {
+    document.getElementById('filter-table').value = '';
+    document.getElementById('filter-operation').value = '';
+    document.getElementById('filter-txid').value = '';
+    loadLogs();
 }
 
 function loadLogs() {
@@ -158,56 +233,187 @@ function loadLogs() {
     fetch('/api/cdc/logs?' + params.toString())
         .then(r => r.json())
         .then(data => {
-            const container = document.getElementById('logs-container');
             const countEl = document.getElementById('log-count');
+            const rangeEl = document.getElementById('log-range');
             
-            countEl.textContent = data.count || 0;
+            const count = data.count || 0;
+            countEl.textContent = count;
             
-            if (!data.logs || data.logs.length === 0) {
-                container.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-textMuted">No logs found</td></tr>';
-                return;
+            // Update range display
+            if (count > 0) {
+                rangeEl.textContent = `1-${count} of ${count}`;
+            } else {
+                rangeEl.textContent = '';
             }
             
-            container.innerHTML = data.logs.map(log => {
-                const opStyle = {
-                    'INSERT': 'bg-success/20 text-success border-success/30',
-                    'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
-                    'DELETE': 'bg-error/20 text-error border-error/30'
-                }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
-                
-                const dataPreview = JSON.stringify(log.data).substring(0, 200);
-                const dataFull = JSON.stringify(log.data, null, 2);
-                
-                return `
-                    <tr class="hover:bg-surfaceHover transition-colors">
-                        <td class="px-6 py-4 text-sm text-textMuted font-mono">${log.id}</td>
-                        <td class="px-6 py-4 text-sm text-text font-medium">${log.table_name}</td>
-                        <td class="px-6 py-4">
-                            <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
-                                ${log.operation}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 text-sm text-textMuted font-mono">${log.transaction_id}</td>
-                        <td class="px-6 py-4 text-sm text-textMuted">${log.created_at || '-'}</td>
-                        <td class="px-6 py-4 text-sm">
-                            <details class="group">
-                                <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-xs">
-                                    ${dataPreview}${dataFull.length > 200 ? '...' : ''}
-                                </summary>
-                                <pre class="mt-2 p-3 bg-surfaceHover rounded-lg text-xs overflow-auto max-w-md text-text border border-border"><code>${dataFull}</code></pre>
-                            </details>
+            const logs = data.logs || [];
+            
+            if (logs.length === 0) {
+                document.getElementById('logs-container-desktop').innerHTML = `
+                    <tr>
+                        <td colspan="6" class="px-6 py-8 text-center">
+                            <svg class="mx-auto h-12 w-12 text-textMuted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <p class="text-textMuted">No logs found</p>
+                            ${table || operation || txid ? '<p class="text-textMuted text-sm mt-1">Try adjusting your filters</p>' : ''}
                         </td>
                     </tr>
                 `;
-            }).join('');
+                document.getElementById('logs-container-mobile').innerHTML = `
+                    <div class="p-8 text-center">
+                        <svg class="mx-auto h-12 w-12 text-textMuted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p class="text-textMuted">No logs found</p>
+                        ${table || operation || txid ? '<p class="text-textMuted text-sm mt-1">Try adjusting your filters</p>' : ''}
+                    </div>
+                `;
+                return;
+            }
+            
+            // Render desktop table
+            document.getElementById('logs-container-desktop').innerHTML = logs.map(log => renderDesktopRow(log)).join('');
+            
+            // Render mobile cards
+            document.getElementById('logs-container-mobile').innerHTML = logs.map(log => renderMobileCard(log)).join('');
         })
         .catch(err => {
             console.error('Failed to load logs:', err);
-            document.getElementById('logs-container').innerHTML = 
-                '<tr><td colspan="6" class="px-6 py-8 text-center text-error">Failed to load logs</td></tr>';
+            const errorMsg = `
+                <tr>
+                    <td colspan="6" class="px-6 py-8 text-center text-error">
+                        <svg class="mx-auto h-12 w-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Failed to load logs
+                    </td>
+                </tr>
+            `;
+            document.getElementById('logs-container-desktop').innerHTML = errorMsg;
+            document.getElementById('logs-container-mobile').innerHTML = `
+                <div class="p-8 text-center text-error">
+                    <svg class="mx-auto h-12 w-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Failed to load logs
+                </div>
+            `;
         });
 }
 
+function renderDesktopRow(log) {
+    const opStyle = {
+        'INSERT': 'bg-success/20 text-success border-success/30',
+        'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
+        'DELETE': 'bg-error/20 text-error border-error/30'
+    }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
+    
+    const dataPreview = JSON.stringify(log.data).substring(0, 150);
+    const dataFull = JSON.stringify(log.data, null, 2);
+    const isTruncated = dataFull.length > 150;
+    
+    return `
+        <tr class="hover:bg-surfaceHover transition-colors">
+            <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[120px]">${escapeHtml(log.id)}</td>
+            <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(log.table_name)}</td>
+            <td class="px-6 py-4">
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
+                    ${log.operation}
+                </span>
+            </td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${log.created_at || '-'}</td>
+            <td class="px-6 py-4 text-xs">
+                <details class="group">
+                    <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
+                        ${escapeHtml(dataPreview)}${isTruncated ? '...' : ''}
+                    </summary>
+                    <div class="mt-2 relative">
+                        <pre class="p-3 bg-surfaceHover rounded-lg text-xs overflow-auto max-w-md text-text border border-border"><code>${escapeHtml(dataFull)}</code></pre>
+                        <button onclick="copyJson(this)" class="absolute top-2 right-2 p-1.5 bg-surfaceHover hover:bg-border rounded text-textMuted hover:text-text transition-colors" aria-label="Copy JSON">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </details>
+            </td>
+        </tr>
+    `;
+}
+
+function renderMobileCard(log) {
+    const opStyle = {
+        'INSERT': 'bg-success/20 text-success border-success/30',
+        'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
+        'DELETE': 'bg-error/20 text-error border-error/30'
+    }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
+    
+    const dataFull = JSON.stringify(log.data, null, 2);
+    
+    return `
+        <div class="p-4 hover:bg-surfaceHover transition-colors">
+            <div class="flex items-start justify-between gap-3 mb-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full border ${opStyle}">
+                            ${log.operation}
+                        </span>
+                        <span class="font-medium text-text truncate">${escapeHtml(log.table_name)}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-textMuted">
+                        <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
+                        <span class="text-border">•</span>
+                        <span class="whitespace-nowrap">${log.created_at || '-'}</span>
+                    </div>
+                </div>
+            </div>
+            <details class="group">
+                <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors text-sm list-none flex items-center gap-2">
+                    <svg class="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                    View Data
+                </summary>
+                <div class="mt-2 relative">
+                    <pre class="p-3 bg-surfaceHover rounded-lg text-xs overflow-auto text-text border border-border"><code>${escapeHtml(dataFull)}</code></pre>
+                    <button onclick="copyJson(this)" class="absolute top-2 right-2 p-1.5 bg-surfaceHover hover:bg-border rounded text-textMuted hover:text-text transition-colors" aria-label="Copy JSON">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </details>
+        </div>
+    `;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function copyJson(button) {
+    const code = button.parentElement.querySelector('code');
+    if (code) {
+        navigator.clipboard.writeText(code.textContent).then(() => {
+            // Show feedback
+            const originalHtml = button.innerHTML;
+            button.innerHTML = `
+                <svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+            `;
+            setTimeout(() => {
+                button.innerHTML = originalHtml;
+            }, 2000);
+        });
+    }
+}
+
+// Initial load
 loadLogs();
 loadPollerStatus();
 setInterval(loadPollerStatus, 5000);

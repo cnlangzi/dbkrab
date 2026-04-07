@@ -1,31 +1,35 @@
 <!--layout:dashboard-->
 {{define "content"}}
 <div class="max-w-7xl mx-auto">
-    <h2 class="text-3xl font-bold text-text mb-6">CDC Table Configuration</h2>
+    <!-- Page Header -->
+    <div class="mb-6">
+        <h2 class="text-2xl sm:text-3xl font-bold text-text mb-2">CDC Table Configuration</h2>
+        <p class="text-sm text-textMuted">Enable or disable CDC monitoring for database tables</p>
+    </div>
     
     <!-- Database Info -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 mb-6 border border-border">
-        <h3 class="text-xl font-semibold text-text mb-4">Current Database</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 mb-6 border border-border">
+        <h3 class="text-base sm:text-xl font-semibold text-text mb-4">Current Database</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
                     <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
                     </svg>
                 </div>
                 <div>
-                    <span class="text-textMuted text-sm">Database:</span>
+                    <span class="text-textMuted text-xs sm:text-sm">Database:</span>
                     <span class="ml-2 font-medium text-text" id="db-name">Loading...</span>
                 </div>
             </div>
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg bg-success/20 flex items-center justify-center">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-success/20 flex items-center justify-center flex-shrink-0">
                     <svg class="w-5 h-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
                 </div>
                 <div>
-                    <span class="text-textMuted text-sm">Tables:</span>
+                    <span class="text-textMuted text-xs sm:text-sm">Tables:</span>
                     <span class="ml-2 font-medium text-text" id="table-count">0</span>
                 </div>
             </div>
@@ -34,48 +38,63 @@
 
     <!-- Tables List -->
     <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
-        <div class="p-6 border-b border-border">
-            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                <h3 class="text-xl font-semibold text-text">Available Tables</h3>
-                <button id="refresh-btn" class="flex items-center justify-center gap-2 px-4 py-2 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200">
+        <!-- Header -->
+        <div class="p-4 sm:p-6 border-b border-border">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h3 class="text-base sm:text-xl font-semibold text-text">Available Tables</h3>
+                <button id="refresh-btn" class="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200 min-h-[44px]">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
                     </svg>
-                    Refresh
+                    <span class="hidden sm:inline">Refresh</span>
                 </button>
             </div>
         </div>
         
-        <div class="p-6">
-            <div class="mb-4 flex flex-wrap gap-3">
-                <button id="select-all-btn" class="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
+        <!-- Action Buttons -->
+        <div class="p-4 sm:p-6 border-b border-border">
+            <div class="flex flex-wrap gap-2 sm:gap-3">
+                <button id="select-all-btn" class="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200 min-h-[44px] text-sm sm:text-base">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
-                    Select All
+                    <span class="hidden sm:inline">Select All</span>
+                    <span class="sm:hidden">All</span>
                 </button>
-                <button id="deselect-all-btn" class="flex items-center gap-2 px-4 py-2 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200">
+                <button id="deselect-all-btn" class="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200 min-h-[44px] text-sm sm:text-base">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
                     </svg>
-                    Deselect All
+                    <span class="hidden sm:inline">Deselect All</span>
+                    <span class="sm:hidden">None</span>
                 </button>
-                <button id="save-btn" class="flex items-center gap-2 px-4 py-2 bg-success hover:bg-success/80 text-white font-medium rounded-lg transition-all duration-200 shadow-md">
+                <button id="save-btn" class="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-success hover:bg-success/80 text-white font-medium rounded-lg transition-all duration-200 shadow-md min-h-[44px] text-sm sm:text-base">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
                     </svg>
-                    Save Configuration
+                    <span class="hidden sm:inline">Save Configuration</span>
+                    <span class="sm:hidden">Save</span>
                 </button>
             </div>
+        </div>
 
-            <div id="tables-container" class="space-y-2">
-                <div class="text-center text-textMuted py-8">Loading tables...</div>
+        <!-- Tables Container -->
+        <div id="tables-container" class="p-0">
+            <!-- Skeleton Loader -->
+            <div class="p-4 sm:p-6 space-y-3">
+                <div class="animate-pulse space-y-2">
+                    <div class="h-12 sm:h-14 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-12 sm:h-14 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-12 sm:h-14 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-12 sm:h-14 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-12 sm:h-14 bg-surfaceHover rounded-lg"></div>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Status Message -->
-    <div id="status-message" class="hidden mt-6 p-4 rounded-xl border"></div>
+    <div id="status-message" class="hidden mt-6 p-4 rounded-xl border" role="alert" aria-live="polite"></div>
 </div>
 
 <script>
@@ -114,7 +133,15 @@ function renderTables(tables) {
     container.innerHTML = '';
 
     if (tables.length === 0) {
-        container.innerHTML = '<div class="text-center text-textMuted py-8">No tables found</div>';
+        container.innerHTML = `
+            <div class="p-8 text-center">
+                <svg class="mx-auto h-12 w-12 text-textMuted mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+                </svg>
+                <p class="text-textMuted">No tables found</p>
+                <p class="text-textMuted text-sm mt-1">Make sure CDC is enabled on your database</p>
+            </div>
+        `;
         return;
     }
 
@@ -127,16 +154,20 @@ function renderTables(tables) {
         return nameA.localeCompare(nameB);
     });
 
+    // Mobile Card View (default) + Desktop Table View
     const wrapper = document.createElement('div');
-    wrapper.className = 'overflow-x-auto';
+    
+    // Desktop Table (hidden on mobile)
+    const tableWrapper = document.createElement('div');
+    tableWrapper.className = 'hidden sm:block overflow-x-auto';
     
     const table = document.createElement('table');
     table.className = 'min-w-full divide-y divide-border';
     table.innerHTML = `
         <thead class="bg-surfaceHover">
             <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">
-                    <input type="checkbox" id="select-all-checkbox" class="rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0">
+                <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider w-12">
+                    <input type="checkbox" id="select-all-checkbox" class="rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0" aria-label="Select all tables">
                 </th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Schema</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table Name</th>
@@ -144,40 +175,85 @@ function renderTables(tables) {
             </tr>
         </thead>
         <tbody class="divide-y divide-border">
-            ${sortedTables.map(t => `
-                <tr class="${t.cdc_enabled ? 'bg-success/5' : ''} hover:bg-surfaceHover transition-colors">
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        <input type="checkbox" 
-                               class="table-checkbox rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0" 
-                               data-schema="${t.schema}" 
-                               data-name="${t.name}"
-                               ${t.tracked ? 'checked' : ''}>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-text">${t.schema}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-text font-medium">${t.name}</td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        ${t.cdc_enabled 
-                            ? '<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-success/20 text-success border border-success/30"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>Enabled</span>'
-                            : '<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted border border-border"><span class="w-1.5 h-1.5 rounded-full bg-textMuted"></span>Disabled</span>'}
-                    </td>
-                </tr>
-            `).join('')}
+            ${sortedTables.map(t => renderDesktopRow(t)).join('')}
         </tbody>
     `;
     
-    wrapper.appendChild(table);
+    tableWrapper.appendChild(table);
+    wrapper.appendChild(tableWrapper);
+
+    // Mobile Cards (visible on mobile, hidden on desktop)
+    const mobileContainer = document.createElement('div');
+    mobileContainer.className = 'sm:hidden divide-y divide-border';
+    mobileContainer.innerHTML = sortedTables.map(t => renderMobileCard(t)).join('');
+    wrapper.appendChild(mobileContainer);
+    
     container.appendChild(wrapper);
 
-    document.getElementById('select-all-checkbox').addEventListener('change', (e) => {
-        document.querySelectorAll('.table-checkbox').forEach(cb => {
-            cb.checked = e.target.checked;
+    // Event listeners for desktop
+    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', (e) => {
+            document.querySelectorAll('.table-checkbox').forEach(cb => {
+                cb.checked = e.target.checked;
+            });
+            updateSelectedTables();
         });
-        updateSelectedTables();
-    });
+    }
 
+    // Event listeners for all checkboxes (mobile + desktop)
     document.querySelectorAll('.table-checkbox').forEach(cb => {
         cb.addEventListener('change', updateSelectedTables);
     });
+}
+
+function renderDesktopRow(t) {
+    return `
+        <tr class="${t.cdc_enabled ? 'bg-success/5' : ''} hover:bg-surfaceHover transition-colors">
+            <td class="px-6 py-4 whitespace-nowrap">
+                <input type="checkbox" 
+                       class="table-checkbox rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0" 
+                       data-schema="${t.schema}" 
+                       data-name="${t.name}"
+                       ${t.tracked ? 'checked' : ''}
+                       aria-label="Select table ${t.schema}.${t.name}">
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-text">${t.schema}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-text font-medium">${t.name}</td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                ${t.cdc_enabled 
+                    ? '<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-success/20 text-success border border-success/30"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>Enabled</span>'
+                    : '<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted border border-border"><span class="w-1.5 h-1.5 rounded-full bg-textMuted"></span>Disabled</span>'}
+            </td>
+        </tr>
+    `;
+}
+
+function renderMobileCard(t) {
+    return `
+        <div class="p-4 hover:bg-surfaceHover transition-colors ${t.cdc_enabled ? 'bg-success/5' : ''}">
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-2">
+                        <input type="checkbox" 
+                               class="table-checkbox rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0 min-w-[20px] min-h-[20px]" 
+                               data-schema="${t.schema}" 
+                               data-name="${t.name}"
+                               ${t.tracked ? 'checked' : ''}
+                               aria-label="Select table ${t.schema}.${t.name}">
+                        <span class="font-medium text-text truncate">${t.name}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="text-textMuted">${t.schema}</span>
+                        <span class="text-border">•</span>
+                        ${t.cdc_enabled 
+                            ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-success/20 text-success border border-success/30"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>Enabled</span>'
+                            : '<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted border border-border"><span class="w-1.5 h-1.5 rounded-full bg-textMuted"></span>Disabled</span>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function selectAll() {
@@ -206,13 +282,15 @@ async function saveConfiguration() {
     const tables = Array.from(selectedTables);
     
     const saveBtn = document.getElementById('save-btn');
+    const originalContent = saveBtn.innerHTML;
     saveBtn.disabled = true;
     saveBtn.innerHTML = `
         <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        Saving...
+        <span class="hidden sm:inline">Saving...</span>
+        <span class="sm:hidden">...</span>
     `;
 
     try {
@@ -226,8 +304,15 @@ async function saveConfiguration() {
         
         if (data.success) {
             showSuccess(`
-                <strong class="font-semibold">Configuration saved!</strong><br>
-                <span class="text-sm">Tables enabled: ${data.enabled.length} | Already enabled: ${data.skipped.length}</span>
+                <div class="flex items-start gap-3">
+                    <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div>
+                        <strong class="font-semibold">Configuration saved!</strong><br>
+                        <span class="text-sm">Tables enabled: ${data.enabled.length} | Already enabled: ${data.skipped.length}</span>
+                    </div>
+                </div>
             `);
             setTimeout(loadTables, 1000);
         } else {
@@ -237,12 +322,7 @@ async function saveConfiguration() {
         showError('Error saving configuration: ' + err.message);
     } finally {
         saveBtn.disabled = false;
-        saveBtn.innerHTML = `
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
-            </svg>
-            Save Configuration
-        `;
+        saveBtn.innerHTML = originalContent;
     }
 }
 
@@ -256,8 +336,13 @@ function showSuccess(message) {
 
 function showError(message) {
     const statusDiv = document.getElementById('status-message');
-    statusDiv.className = 'mt-6 p-4 rounded-xl border bg-error/10 border-error/30 text-error';
-    statusDiv.textContent = message;
+    statusDiv.className = 'mt-6 p-4 rounded-xl border bg-error/10 border-error/30 text-error flex items-start gap-3';
+    statusDiv.innerHTML = `
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span>${message}</span>
+    `;
     statusDiv.classList.remove('hidden');
     setTimeout(() => statusDiv.classList.add('hidden'), 5000);
 }
