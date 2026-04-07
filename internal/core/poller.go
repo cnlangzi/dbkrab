@@ -330,6 +330,7 @@ func (p *Poller) poll(ctx context.Context) error {
 				LSN:           c.LSN,
 				Operation:     Operation(c.Operation),
 				Data:          c.Data,
+				CommitTime:    c.CommitTime,
 			}
 		}
 
