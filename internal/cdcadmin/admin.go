@@ -3,6 +3,7 @@ package cdcadmin
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -205,6 +206,13 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 		return nil, fmt.Errorf("check database CDC status: %w", err)
 	}
 
+	// Check if user has db_owner role
+	var isDBOwner bool
+	err = db.QueryRow("SELECT IS_MEMBER('db_owner')").Scan(&isDBOwner)
+	if err != nil {
+		slog.Warn("failed to check db_owner role", "error", err)
+	}
+
 	if !isCDCEnabled {
 		// Enable CDC at database level
 		_, err = db.Exec("EXEC sys.sp_cdc_enable_db")
@@ -247,12 +255,12 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 		if status.NeedsEnable {
 			enableQuery := `
 				EXEC sys.sp_cdc_enable_table
-					@source_schema = @p1,
-					@source_name = @p2,
+					@source_schema = @schema,
+					@source_name = @table,
 					@role_name = NULL,
 					@supports_net_changes = 0
 			`
-			_, err = db.Exec(enableQuery, schema, tableName)
+			_, err = db.Exec(enableQuery, sql.Named("schema", schema), sql.Named("table", tableName))
 			if err != nil {
 				// Record error but continue checking other tables
 				enableErrors = append(enableErrors, fmt.Sprintf("%s.%s: %v", schema, tableName, err))
@@ -264,6 +272,13 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 		}
 
 		statuses = append(statuses, status)
+	}
+
+	// Log permission status
+	if len(enableErrors) > 0 && !isDBOwner {
+		slog.Warn("CDC auto-enable failed - user does not have db_owner role", 
+			"is_db_owner", isDBOwner,
+			"errors", strings.Join(enableErrors, "; "))
 	}
 
 	// If there were enable errors, return them as a combined message
