@@ -178,8 +178,8 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT INTO transactions (transaction_id, table_name, operation, data)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO transactions (transaction_id, table_name, operation, data, created_at)
+		VALUES (?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
@@ -196,11 +196,17 @@ func (s *Store) Write(tx *core.Transaction) error {
 			dataJSON = []byte("{}")
 		}
 
+		var createdAt interface{}
+		if !change.CommitTime.IsZero() {
+			createdAt = change.CommitTime
+		}
+
 		_, err = stmt.Exec(
 			tx.ID,
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
+			createdAt,
 		)
 		if err != nil {
 			return fmt.Errorf("insert change: %w", err)
