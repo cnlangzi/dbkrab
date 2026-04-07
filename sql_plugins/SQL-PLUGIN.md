@@ -54,7 +54,7 @@ Core Poller (Transaction-based batch collection)
 
 ### Transaction as Processing Unit
 
-CDC changes are grouped by transaction. All changes within the same transaction are processed together:
+CDC changes are grouped by transaction, but **each change (row) is processed individually**:
 
 ```
 Transaction T1:
@@ -64,23 +64,29 @@ Transaction T1:
   
     ↓
     
-All changes in T1 are processed as one batch
+For each change (row):
+  1. Build fresh params for this single change
+  2. Execute sink SQL once with those params
+  
+Result: Sink executed 4 times, each with independent parameters
 ```
+
+**Key principle**: Each change gets its own independent execution context. Parameters are NOT shared between changes.
 
 ### CDC Parameters
 
-When executing SQL, CDC captured data is injected as parameters:
+When executing SQL, CDC captured data is injected as parameters. **Parameters are built fresh for each change (row)**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `@cdc_lsn` | string | LSN of the last change in this transaction |
+| `@cdc_lsn` | string | LSN of this specific change |
 | `@cdc_tx_id` | string | Transaction ID |
 | `@cdc_table` | string | Source table name |
 | `@cdc_operation` | int | Operation type (1=DELETE, 2=INSERT, 4=UPDATE) |
-| `@{table}_{field}` | any | Data field value, prefixed with table name (e.g., `@orders_order_id`, `@orders_amount`) |
+| `@{table}_{field}` | any | Data field value, prefixed with table name (e.g., `@orders_order_id`) |
+| `@{table}_id` | any | The `id` field value (if present in Data), prefixed with table name |
 
-
-| Note | | CDC metadata (`@cdc_lsn`, `@cdc_tx_id`, `@cdc_table`, `@cdc_operation`) keep original names |
+**Per-Change Execution**: Each change is processed independently. If a transaction has 3 row changes, the sink SQL executes 3 times, each with its own fresh parameter set.
 ### Output Configuration
 
 `output` specifies the target **SQLite table name** directly. The Engine uses `primary_key` to:
