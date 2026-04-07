@@ -1,6 +1,9 @@
 package sqlplugin
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Operation represents the CDC operation type
 type Operation int
@@ -10,6 +13,44 @@ const (
 	Update
 	Delete
 )
+
+// OnConflictStrategy defines how to handle conflicts on insert/update
+type OnConflictStrategy int
+
+const (
+	// ConflictOverwrite replaces existing record (INSERT OR REPLACE, direct UPDATE)
+	ConflictOverwrite OnConflictStrategy = iota
+	// ConflictSkip ignores the operation if record exists (INSERT OR IGNORE, conditional UPDATE)
+	ConflictSkip
+	// ConflictError returns an error if record exists (INSERT with check, conditional UPDATE)
+	ConflictError
+)
+
+// String returns the strategy name
+func (s OnConflictStrategy) String() string {
+	switch s {
+	case ConflictOverwrite:
+		return "overwrite"
+	case ConflictSkip:
+		return "skip"
+	case ConflictError:
+		return "error"
+	default:
+		return "skip"
+	}
+}
+
+// ParseOnConflictStrategy parses string to OnConflictStrategy
+func ParseOnConflictStrategy(s string) OnConflictStrategy {
+	switch strings.ToLower(s) {
+	case "overwrite":
+		return ConflictOverwrite
+	case "error":
+		return ConflictError
+	default:
+		return ConflictSkip
+	}
+}
 
 // String returns the operation name
 func (o Operation) String() string {
@@ -51,12 +92,18 @@ type SinksConfig struct {
 
 // SinkConfig represents a single sink configuration
 type SinkConfig struct {
-	Name       string `yaml:"name"`        // Sink name
-	On         string `yaml:"on"`          // Table filter (required for multi-table)
-	SQL        string `yaml:"sql"`         // Inline SQL
-	SQLFile    string `yaml:"sql_file"`    // External SQL file path
-	Output     string `yaml:"output"`      // Target table name
-	PrimaryKey string `yaml:"primary_key"` // Primary key column
+	Name        string `yaml:"name"`          // Sink name
+	On          string `yaml:"on"`            // Table filter (required for multi-table)
+	SQL         string `yaml:"sql"`           // Inline SQL
+	SQLFile     string `yaml:"sql_file"`      // External SQL file path
+	Output      string `yaml:"output"`        // Target table name
+	PrimaryKey  string `yaml:"primary_key"`   // Primary key column
+	OnConflict  string `yaml:"on_conflict"`   // Conflict strategy: overwrite | skip | error (default: skip)
+}
+
+// GetOnConflict returns the OnConflictStrategy for this sink
+func (s *SinkConfig) GetOnConflict() OnConflictStrategy {
+	return ParseOnConflictStrategy(s.OnConflict)
 }
 
 // CDCParameters represents CDC data mapped to SQL parameters
