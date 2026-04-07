@@ -8,7 +8,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
-func TestNewSink(t *testing.T) {
+func TestNewStore(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "dbkrab-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -20,13 +20,13 @@ func TestNewSink(t *testing.T) {
 	}()
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	sink, err := NewSink(dbPath)
+	store, err := NewStore(dbPath)
 	if err != nil {
-		t.Fatalf("NewSink() error = %v", err)
+		t.Fatalf("NewStore() error = %v", err)
 	}
 	defer func() {
-		if err := sink.Close(); err != nil {
-			t.Logf("sink.Close error: %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error: %v", err)
 		}
 	}()
 
@@ -47,13 +47,13 @@ func TestWrite(t *testing.T) {
 		}
 	}()
 
-	sink, err := NewSink(filepath.Join(tmpDir, "test.db"))
+	store, err := NewStore(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
-		t.Fatalf("NewSink() error = %v", err)
+		t.Fatalf("NewStore() error = %v", err)
 	}
 	defer func() {
-		if err := sink.Close(); err != nil {
-			t.Logf("sink.Close error: %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error: %v", err)
 		}
 	}()
 
@@ -71,12 +71,12 @@ func TestWrite(t *testing.T) {
 	})
 
 	// Write
-	if err := sink.Write(tx); err != nil {
+	if err := store.Write(tx); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
 	// Read back
-	changes, err := sink.GetChanges(10)
+	changes, err := store.GetChanges(10)
 	if err != nil {
 		t.Fatalf("GetChanges() error = %v", err)
 	}
@@ -106,13 +106,13 @@ func TestWriteMultipleTransactions(t *testing.T) {
 		}
 	}()
 
-	sink, err := NewSink(filepath.Join(tmpDir, "test.db"))
+	store, err := NewStore(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
-		t.Fatalf("NewSink() error = %v", err)
+		t.Fatalf("NewStore() error = %v", err)
 	}
 	defer func() {
-		if err := sink.Close(); err != nil {
-			t.Logf("sink.Close error: %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error: %v", err)
 		}
 	}()
 
@@ -124,12 +124,12 @@ func TestWriteMultipleTransactions(t *testing.T) {
 			Operation: core.OpInsert,
 			Data:      map[string]interface{}{"id": i},
 		})
-		if err := sink.Write(tx); err != nil {
+		if err := store.Write(tx); err != nil {
 			t.Fatalf("Write() error = %v", err)
 		}
 	}
 
-	changes, err := sink.GetChanges(0)
+	changes, err := store.GetChanges(0)
 	if err != nil {
 		t.Fatalf("GetChanges() error = %v", err)
 	}

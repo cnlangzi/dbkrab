@@ -27,14 +27,14 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 
 // Handle processes a core.Transaction through the SQL Plugin
 // It extracts CDC changes, executes jobs and sinks against MSSQL
-// Returns all operations (jobs + sinks) as []core.SinkOp for the caller to write
-func (e *Engine) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
+// Returns all operations (jobs + sinks) as []core.Sink for the caller to write
+func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
 	}
 
 	// Collect all operations (jobs + sinks)
-	var allOps []core.SinkOp
+	var allOps []core.Sink
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
@@ -58,8 +58,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
 
 		// Convert job results to sink operations
 		for _, jr := range jobResults {
-			jobSinkOp := core.SinkOp{
-				Config: core.SinkOpConfig{
+			jobSinkOp := core.Sink{
+				Config: core.SinkConfig{
 					Name:       jr.Name,
 					Output:     jr.Output,
 					PrimaryKey: e.inferPrimaryKey(jr.DataSet),
@@ -89,8 +89,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
 				}
 
 				// Collect sink operation
-				sinkOp := core.SinkOp{
-					Config: core.SinkOpConfig{
+				sinkOp := core.Sink{
+					Config: core.SinkConfig{
 						Name:       sink.Name,
 						Output:     sink.Output,
 						PrimaryKey: sink.PrimaryKey,

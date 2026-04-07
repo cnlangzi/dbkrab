@@ -160,12 +160,12 @@ func (m *Manager) Reload(name string) error {
 }
 
 // Handle processes a transaction through all plugins
-// Returns transformed operations for the caller to write via Sink
-func (m *Manager) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
+// Returns transformed operations for the caller to write via Store
+func (m *Manager) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var allOps []core.SinkOp
+	var allOps []core.Sink
 
 	// First, process through SQL plugins
 	for name, sqlPlugin := range m.sqlPlugins {
@@ -187,7 +187,7 @@ func (m *Manager) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
 }
 
 // handleSQLPlugin processes a transaction through a SQL plugin
-func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) ([]core.SinkOp, error) {
+func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) ([]core.Sink, error) {
 	return p.Engine.Handle(tx)
 }
 

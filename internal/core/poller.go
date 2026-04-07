@@ -29,7 +29,7 @@ type Poller struct {
 	gapDetector   *cdc.GapDetector
 	alertManager  *alert.AlertManager
 	offsets       offset.StoreInterface
-	sink          Sink
+	store        Store
 	handler       Handler
 	dlq           *dlq.DLQ
 	stopCh        chan struct{}
@@ -51,24 +51,24 @@ type Poller struct {
 	needRebuildTx bool                   // Signal to rebuild txBuffer after drain
 }
 
-// Sink interface for storing changes
-type Sink interface {
+// Store interface for storing changes
+type Store interface {
 	Write(tx *Transaction) error
-	WriteOps(ops []SinkOp) error
+	WriteOps(ops []Sink) error
 	Close() error
 }
 
 // Handler interface for custom processing
-// Handle returns transformed operations for the caller to write via Sink
+// Handle returns transformed operations for the caller to write via Store
 type Handler interface {
-	Handle(tx *Transaction) ([]SinkOp, error)
+	Handle(tx *Transaction) ([]Sink, error)
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(tx *Transaction) ([]SinkOp, error)
+type PluginHandler func(tx *Transaction) ([]Sink, error)
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(tx *Transaction) ([]SinkOp, error) {
+func (h PluginHandler) Handle(tx *Transaction) ([]Sink, error) {
 	return h(tx)
 }
 
@@ -80,14 +80,14 @@ type tablePollResult struct {
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
 		querier:  cdc.NewQuerier(db),
 		cdcAdmin: cdcadmin.NewAdmin(&cfg.MSSQL),
 		offsets:  offsetStore,
-		sink:     sink,
+		store:    store,
 		dlq:      dlqStore,
 		stopCh:   make(chan struct{}),
 	}
@@ -246,7 +246,7 @@ func (p *Poller) Stop() {
 }
 
 // poll performs one polling cycle
-// P0 fix: offset is only updated after sink successfully writes
+// P0 fix: offset is only updated after store successfully writes
 // P0 fix: multi-table sync via min LSN checkpoint
 // P0-6 fix: CDC queries have timeout to prevent blocking
 func (p *Poller) poll(ctx context.Context) error {
@@ -394,7 +394,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	// Process complete transactions
 	var processErrors []error
 	for _, tx := range completeTxs {
-		var sinkOps []SinkOp
+		var sinkOps []Sink
 
 		// Handler processing with retry
 		if p.handler != nil {
@@ -412,32 +412,32 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 			}
 		}
 
-		// Sink processing with retry
-		if p.sink != nil {
+		// Store processing with retry
+		if p.store != nil {
 			err := retry.DoWithName(ctx, func() error {
-				return p.sink.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
+				return p.store.Write(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
 			if err != nil {
-				slog.Error("sink error",
+				slog.Error("store error",
 					"trace_id", tx.TraceID,
 					"tx_id", tx.ID,
 					"error", err)
-				p.writeToDLQ(tx, err, "sink")
-				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
+				p.writeToDLQ(tx, err, "store")
+				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
 			}
 
 			// Write transformed DataSets from handler
 			if len(sinkOps) > 0 {
 				err := retry.DoWithName(ctx, func() error {
-					return p.sink.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_ops_tx_%s", tx.ID))
+					return p.store.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("store_ops_tx_%s", tx.ID))
 				if err != nil {
-					slog.Error("sink ops error",
+					slog.Error("store ops error",
 						"trace_id", tx.TraceID,
 						"tx_id", tx.ID,
 						"error", err)
-					p.writeToDLQ(tx, err, "sink_ops")
-					processErrors = append(processErrors, fmt.Errorf("sink ops tx %s: %w", tx.ID, err))
+					p.writeToDLQ(tx, err, "store_ops")
+					processErrors = append(processErrors, fmt.Errorf("store ops tx %s: %w", tx.ID, err))
 				}
 			}
 		}
@@ -445,7 +445,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 
 	// Update offsets only if all transactions succeeded
 	if len(processErrors) > 0 {
-		return fmt.Errorf("sink errors: %v", processErrors)
+		return fmt.Errorf("store errors: %v", processErrors)
 	}
 
 	// Update offsets (same logic as processDirect)
@@ -461,7 +461,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
-		var sinkOps []SinkOp
+		var sinkOps []Sink
 
 		// Handler processing with retry (non-blocking: continue even if handler fails)
 		if p.handler != nil {
@@ -478,38 +478,38 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			}
 		}
 
-		// Sink processing with retry (blocking: must succeed for offset advancement)
-		if p.sink != nil {
+		// Store processing with retry (blocking: must succeed for offset advancement)
+		if p.store != nil {
 			err := retry.DoWithName(ctx, func() error {
-				return p.sink.Write(&tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_tx_%s", tx.ID))
+				return p.store.Write(&tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
 			if err != nil {
-				slog.Error("sink error",
+				slog.Error("store error",
 					"tx_id", tx.ID,
 					"error", err)
-				p.writeToDLQ(&tx, err, "sink")
-				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
+				p.writeToDLQ(&tx, err, "store")
+				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
 			}
 
 			// Write transformed DataSets from handler
 			if len(sinkOps) > 0 {
 				err := retry.DoWithName(ctx, func() error {
-					return p.sink.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_ops_tx_%s", tx.ID))
+					return p.store.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("store_ops_tx_%s", tx.ID))
 				if err != nil {
-					slog.Error("sink ops error",
+					slog.Error("store ops error",
 						"tx_id", tx.ID,
 						"error", err)
-					p.writeToDLQ(&tx, err, "sink_ops")
-					processErrors = append(processErrors, fmt.Errorf("sink ops tx %s: %w", tx.ID, err))
+					p.writeToDLQ(&tx, err, "store_ops")
+					processErrors = append(processErrors, fmt.Errorf("store ops tx %s: %w", tx.ID, err))
 				}
 			}
 		}
 	}
 
-	// P0 fix: Only update offsets after successful sink write
+	// P0 fix: Only update offsets after successful store write
 	if len(processErrors) > 0 {
-		return fmt.Errorf("sink errors: %v", processErrors)
+		return fmt.Errorf("store errors: %v", processErrors)
 	}
 
 	// All transactions successfully written - now update offsets
@@ -534,7 +534,7 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 		}
 	}
 
-	// Update poller state in sink for observability (even if no changes)
+	// Update poller state in store for observability (even if no changes)
 	var lastLSN string
 	if len(validResults) > 0 {
 		minLSN := validResults[0].lastLSN
@@ -559,13 +559,13 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 	}
 
 	// Always update poller state for observability
-	if sqliteSink, ok := p.sink.(interface{ UpdatePollerState(string, int) error }); ok {
+	if sqliteStore, ok := p.store.(interface{ UpdatePollerState(string, int) error }); ok {
 		slog.Debug("updating poller state", "lastLSN", lastLSN, "changes", len(allChanges))
-		if err := sqliteSink.UpdatePollerState(lastLSN, len(allChanges)); err != nil {
+		if err := sqliteStore.UpdatePollerState(lastLSN, len(allChanges)); err != nil {
 			slog.Warn("failed to update poller state", "error", err)
 		}
 	} else {
-		slog.Debug("sink does not support UpdatePollerState")
+		slog.Debug("store does not support UpdatePollerState")
 	}
 
 	return nil
@@ -1018,7 +1018,7 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 
 	// Process each transaction
 	for _, tx := range completeTxs {
-		var sinkOps []SinkOp
+		var sinkOps []Sink
 
 		// Handler processing
 		if p.handler != nil {
@@ -1036,30 +1036,30 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 			}
 		}
 
-		// Sink processing
-		if p.sink != nil {
+		// Store processing
+		if p.store != nil {
 			err := retry.DoWithName(ctx, func() error {
-				return p.sink.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_sink_tx_%s", tx.ID))
+				return p.store.Write(tx)
+			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_store_tx_%s", tx.ID))
 			if err != nil {
-				slog.Error("flush sink error",
+				slog.Error("flush store error",
 					"trace_id", tx.TraceID,
 					"tx_id", tx.ID,
 					"error", err)
-				p.writeToDLQ(tx, err, "flush_sink")
+				p.writeToDLQ(tx, err, "flush_store")
 			}
 
 			// Write transformed DataSets from handler
 			if len(sinkOps) > 0 {
 				err := retry.DoWithName(ctx, func() error {
-					return p.sink.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_sink_ops_tx_%s", tx.ID))
+					return p.store.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_store_ops_tx_%s", tx.ID))
 				if err != nil {
-					slog.Error("flush sink ops error",
+					slog.Error("flush store ops error",
 						"trace_id", tx.TraceID,
 						"tx_id", tx.ID,
 						"error", err)
-					p.writeToDLQ(tx, err, "flush_sink_ops")
+					p.writeToDLQ(tx, err, "flush_store_ops")
 				}
 			}
 		}
