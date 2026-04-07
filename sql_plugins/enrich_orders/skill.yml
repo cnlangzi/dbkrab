@@ -30,6 +30,6 @@ sinks:
   delete:
     - name: sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: enriched_orders
       primary_key: order_id
