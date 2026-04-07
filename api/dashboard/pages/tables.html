@@ -92,11 +92,11 @@ function renderTables(tables) {
         return;
     }
 
-    // Sort: CDC disabled first, then by schema.table name
+    // Sort: CDC enabled first, then disabled, each group sorted alphabetically
     const sortedTables = [...tables].sort((a, b) => {
-        // CDC disabled comes first
+        // CDC enabled comes first
         if (a.cdc_enabled !== b.cdc_enabled) {
-            return a.cdc_enabled ? 1 : -1;
+            return a.cdc_enabled ? -1 : 1;
         }
         // Then sort by schema.table name
         const nameA = `${a.schema}.${a.name}`;

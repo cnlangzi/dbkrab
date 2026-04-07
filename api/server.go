@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
+	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
@@ -34,13 +35,16 @@ func getDashboardFS() fs.FS {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager  *plugin.Manager
-	dlq      *dlq.DLQ
-	cdcAdmin *cdcadmin.Admin
-	sink     *sqlite.Sink
-	port     int
-	app      *xun.App
-	mux      *http.ServeMux
+	manager     *plugin.Manager
+	dlq         *dlq.DLQ
+	cdcAdmin    *cdcadmin.Admin
+	sink        *sqlite.Sink
+	port        int
+	app         *xun.App
+	mux         *http.ServeMux
+	configPath  string
+	config      *config.Config
+	configWatcher *config.Watcher
 }
 
 // NewServer creates a new API server
@@ -61,13 +65,16 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, sink *sqlite.Sink, port int) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, sink *sqlite.Sink, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
 	return &Server{
-		manager:  manager,
-		dlq:      dlqStore,
-		cdcAdmin: cdcAdmin,
-		sink:     sink,
-		port:     port,
+		manager:       manager,
+		dlq:           dlqStore,
+		cdcAdmin:      cdcAdmin,
+		sink:          sink,
+		port:          port,
+		configPath:    configPath,
+		config:        cfg,
+		configWatcher: watcher,
 	}
 }
 
@@ -386,12 +393,25 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		}
 	}
 
-	// Write to config file and trigger reload
-	// This will be handled by config watcher
+	// Save tables to config file if we have config access
+	if s.config != nil && s.configPath != "" {
+		// Update config Tables field
+		(*s.config).Tables = req.Tables
+
+		// Save to config file
+		if err := config.Save(s.configPath, s.config); err != nil {
+			slog.Error("failed to save config file", "error", err, "path", s.configPath)
+			// Don't fail the request, just log the error
+		} else {
+			slog.Info("config saved", "path", s.configPath, "tables", req.Tables)
+		}
+	}
+
+	// If there were enable errors, return them as a combined message
 	if len(errors) > 0 {
 		return c.View(map[string]any{
 			"success": false,
-			"error": strings.Join(errors, "; "),
+			"error":   strings.Join(errors, "; "),
 			"enabled": enabled,
 			"skipped": skipped,
 		})
@@ -402,7 +422,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		"message": "CDC configuration updated",
 		"enabled": enabled,
 		"skipped": skipped,
-		"tables": req.Tables,
+		"tables":  req.Tables,
 	})
 }
 
