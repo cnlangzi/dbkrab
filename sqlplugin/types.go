@@ -68,19 +68,19 @@ func (o Operation) String() string {
 
 // Skill represents a SQL plugin configuration
 type Skill struct {
-	Name        string     `yaml:"name"`
-	Description string     `yaml:"description"`
-	On          []string   `yaml:"on"`           // Tables to monitor
-	Stages      []Stage    `yaml:"stages"`       // Optional multi-step SQL
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description"`
+	On          []string    `yaml:"on"`           // Tables to monitor
+	Jobs        []Job       `yaml:"jobs"`         // Optional parallel SQL jobs (executed before sinks)
 	Sinks       SinksConfig `yaml:"sinks"`        // Sink configuration
 }
 
-// Stage represents a SQL stage
-type Stage struct {
-	Name     string `yaml:"name"`     // Optional stage name (temp table name)
-	SQL      string `yaml:"sql"`      // Inline SQL
-	SQLFile  string `yaml:"sql_file"` // External SQL file path
-	TempTable string `yaml:"temp_table"` // Temp table name (optional, for compatibility)
+// Job represents a SQL job that executes in parallel with other jobs
+type Job struct {
+	Name    string `yaml:"name"`      // Job name, used as identifier
+	SQL     string `yaml:"sql"`       // Inline SQL template
+	SQLFile string `yaml:"sql_file"`  // External SQL file path
+	Output  string `yaml:"output"`    // Target table name in SQLite
 }
 
 // SinksConfig represents sink configuration

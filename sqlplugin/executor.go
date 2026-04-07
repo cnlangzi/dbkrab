@@ -68,53 +68,58 @@ func (e *Executor) ExecuteDriver(sqlTmpl string, params map[string]interface{}) 
 	return e.driver.Execute(sqlTmpl, params)
 }
 
-// ExecuteStages executes multi-step SQL stages
-func (e *Executor) ExecuteStages(skill *Skill, params CDCParameters) (map[string]*DataSet, error) {
-	results := make(map[string]*DataSet)
+// ExecuteJobs executes all jobs in parallel and returns their results
+// Each job executes independently without referencing other job results
+func (e *Executor) ExecuteJobs(skill *Skill, params CDCParameters) ([]*JobResult, error) {
+	if len(skill.Jobs) == 0 {
+		return nil, nil
+	}
 
-	for _, stage := range skill.Stages {
-		if stage.SQL == "" {
+	// Execute all jobs - they are independent and can run in parallel
+	var results []*JobResult
+	for _, job := range skill.Jobs {
+		if job.SQL == "" {
 			continue
 		}
 
 		// Substitute parameters
-		sql, err := e.substituteParams(stage.SQL, params)
+		sql, err := e.substituteParams(job.SQL, params)
 		if err != nil {
-			return nil, NewExecutionError(stage.SQL, nil, err)
+			return nil, NewExecutionError(job.SQL, nil, err)
 		}
 
-		// Execute the stage SQL
-		_, err = e.db.Exec(sql)
+		// Execute the job SQL
+		ds, err := e.executeQuery(sql)
 		if err != nil {
-			return nil, NewExecutionError(stage.SQL, nil, err)
+			return nil, NewExecutionError(job.SQL, nil, err)
 		}
 
-		// If stage has a name/temp_table, it's a temporary table we can query
-		stageName := stage.Name
-		if stageName == "" && stage.TempTable != "" {
-			stageName = stage.TempTable
-		}
-
-		// Query the temp table to get results for the next stage
-		if stageName != "" {
-			// Check if the temp table exists and has data
-			query := fmt.Sprintf("SELECT * FROM %s", stageName)
-			rows, err := e.db.Query(query)
-			if err != nil {
-				// Table might not exist, skip
-				continue
-			}
-			defer func() { _ = rows.Close() }()
-
-			ds, err := e.scanRows(rows)
-			if err != nil {
-				return nil, err
-			}
-			results[stageName] = ds
-		}
+		results = append(results, &JobResult{
+			Name:    job.Name,
+			Output:  job.Output,
+			DataSet: ds,
+		})
 	}
 
 	return results, nil
+}
+
+// JobResult represents the result of a job execution
+type JobResult struct {
+	Name    string   // Job name
+	Output  string   // Target table name in SQLite
+	DataSet *DataSet // Query results
+}
+
+// executeQuery executes a SELECT query and returns DataSet
+func (e *Executor) executeQuery(sql string) (*DataSet, error) {
+	rows, err := e.db.Query(sql)
+	if err != nil {
+		return nil, NewExecutionError(sql, nil, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return e.scanRows(rows)
 }
 
 // substituteParams replaces parameter placeholders with actual values
@@ -202,7 +207,7 @@ func (e *Executor) scanRows(rows *sql.Rows) (*DataSet, error) {
 	}, nil
 }
 
-// ExecuteInline executes inline SQL (without template substitution for stages)
+// ExecuteInline executes inline SQL (without parameter substitution)
 func (e *Executor) ExecuteInline(sql string) (*DataSet, error) {
 	rows, err := e.db.Query(sql)
 	if err != nil {
