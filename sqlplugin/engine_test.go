@@ -86,12 +86,12 @@ func TestEngine_Handle(t *testing.T) {
 			t.Errorf("expected cdc_tx_id = tx-123, got %v", params["cdc_tx_id"])
 		}
 
-		if params["orders_order_id"] != 100 {
-			t.Errorf("expected orders_order_id = 100, got %v", params["orders_order_id"])
+		if params["orders_order_id"] != 101 {
+			t.Errorf("expected orders_order_id = 101 (last change), got %v", params["orders_order_id"])
 		}
 
-		if params["orders_amount"] != 500 {
-			t.Errorf("expected orders_amount = 500, got %v", params["orders_amount"])
+		if params["orders_amount"] != 300 {
+			t.Errorf("expected orders_amount = 300 (last change), got %v", params["orders_amount"])
 		}
 
 		ids, ok := params["orders_ids"].([]interface{})
