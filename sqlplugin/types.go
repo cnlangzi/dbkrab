@@ -61,12 +61,11 @@ type SinkConfig struct {
 
 // CDCParameters represents CDC data mapped to SQL parameters
 type CDCParameters struct {
-	CDCLSN      string
-	CDCTxID     string
-	CDCTable    string
+	CDCLSN       string
+	CDCTxID      string
+	CDCTable     string
 	CDCOperation int
-	TableIDs    []interface{}
-	Fields      map[string]interface{}
+	Fields       map[string]interface{}
 }
 
 // DataSet represents query results

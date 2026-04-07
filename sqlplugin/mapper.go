@@ -55,13 +55,13 @@ func (m *Mapper) shortTableName(table string) string {
 }
 
 // ChangeItem represents a single change in CDC data
+// All Data fields use {table_name}_{column_name} format for parameter naming
 type ChangeItem struct {
-	Table     string
-	LSN       string
-	TxID      string
-	Operation Operation
-	TableID   interface{}
-	Data      map[string]interface{}
+	Table     string                  // Table name (e.g., "orders")
+	LSN       string                  // LSN of the change
+	TxID      string                  // Transaction ID
+	Operation Operation               // Operation type (Insert/Update/Delete)
+	Data      map[string]interface{}  // Data fields, key = {table_name}_{column_name}
 }
 
 // GetChangesByTable groups changes by table name
