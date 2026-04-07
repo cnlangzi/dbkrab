@@ -114,7 +114,7 @@ func TestEngine_Handle(t *testing.T) {
 			{core.OpInsert, Insert, false},
 			{core.OpUpdateAfter, Update, false},
 			{core.OpDelete, Delete, false},
-			{core.OpUpdateBefore, "", true}, // Should be skipped
+			{core.OpUpdateBefore, 0, true}, // Should be skipped
 		}
 
 		for _, tt := range tests {
@@ -149,7 +149,7 @@ func TestEngine_Handle(t *testing.T) {
 	})
 }
 
-func TestShortTableName(t *testing.T) {
+func TestEngine_ShortTableName(t *testing.T) {
 	tests := []struct {
 		input string
 		want string
