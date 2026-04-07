@@ -3,6 +3,7 @@ package cdcadmin
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	_ "github.com/denisenkom/go-mssqldb"
@@ -176,4 +177,108 @@ func (a *Admin) UpdateTrackedTables(tables []string) error {
 	// This will be handled by config hotreload
 	// The API will write to config file and trigger reload
 	return nil
+}
+
+// CDCStatus represents the CDC status of a table
+type CDCStatus struct {
+	Schema          string
+	Table           string
+	CaptureInstance string
+	CDCEnabled      bool
+	NeedsEnable     bool
+	EnableError     string // Error message if enabling CDC failed
+}
+
+// CheckAndEnableCDC checks if CDC is enabled for configured tables and enables it if needed
+// Returns status for each table and any errors encountered
+func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error) {
+	db, err := a.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// First check if CDC is enabled at database level
+	var isCDCEnabled bool
+	err = db.QueryRow("SELECT is_cdc_enabled FROM sys.databases WHERE name = DB_NAME()").Scan(&isCDCEnabled)
+	if err != nil {
+		return nil, fmt.Errorf("check database CDC status: %w", err)
+	}
+
+	if !isCDCEnabled {
+		// Enable CDC at database level
+		_, err = db.Exec("EXEC sys.sp_cdc_enable_db")
+		if err != nil {
+			return nil, fmt.Errorf("enable database CDC: %w", err)
+		}
+	}
+
+	var statuses []CDCStatus
+	var enableErrors []string
+
+	for _, table := range configuredTables {
+		schema, tableName := parseTableName(table)
+		captureInstance := schema + "_" + tableName
+
+		status := CDCStatus{
+			Schema:          schema,
+			Table:           tableName,
+			CaptureInstance: captureInstance,
+		}
+
+		// Check if CDC is enabled for this table
+		query := `
+			SELECT COUNT(*) 
+			FROM cdc.change_tables 
+			WHERE capture_instance = @p1
+		`
+		var count int
+		err = db.QueryRow(query, captureInstance).Scan(&count)
+		if err != nil {
+			// Table might not have CDC enabled yet
+			status.CDCEnabled = false
+			status.NeedsEnable = true
+		} else {
+			status.CDCEnabled = count > 0
+			status.NeedsEnable = !status.CDCEnabled
+		}
+
+		// Enable CDC if needed
+		if status.NeedsEnable {
+			enableQuery := `
+				EXEC sys.sp_cdc_enable_table
+					@source_schema = @p1,
+					@source_name = @p2,
+					@role_name = NULL,
+					@supports_net_changes = 0
+			`
+			_, err = db.Exec(enableQuery, schema, tableName)
+			if err != nil {
+				// Record error but continue checking other tables
+				enableErrors = append(enableErrors, fmt.Sprintf("%s.%s: %v", schema, tableName, err))
+				status.EnableError = err.Error()
+			} else {
+				status.CDCEnabled = true
+				status.NeedsEnable = false
+			}
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	// If there were enable errors, return them as a combined message
+	if len(enableErrors) > 0 {
+		return statuses, fmt.Errorf("CDC enable errors: %s", strings.Join(enableErrors, "; "))
+	}
+
+	return statuses, nil
+}
+
+// parseTableName extracts schema and table name from "schema.table" format
+func parseTableName(fullName string) (string, string) {
+	parts := strings.SplitN(fullName, ".", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "dbo", parts[0]
 }
