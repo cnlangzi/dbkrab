@@ -367,29 +367,11 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "invalid request body"})
 	}
 
-	// Get current tracked tables from config
-	var oldTables []string
-	if s.configWatcher != nil {
-		oldCfg := s.configWatcher.Get()
-		oldTables = oldCfg.Tables
-	}
-
-	// Create sets for comparison
-	newTablesSet := make(map[string]bool)
-	for _, t := range req.Tables {
-		newTablesSet[t] = true
-	}
-	oldTablesSet := make(map[string]bool)
-	for _, t := range oldTables {
-		oldTablesSet[t] = true
-	}
-
 	var enabled []string
-	var disabled []string
 	var skipped []string
 	var errors []string
 
-	// Enable CDC for newly added tables
+	// Enable CDC for tables that are checked but CDC not yet enabled in database
 	for _, table := range req.Tables {
 		parts := strings.SplitN(table, ".", 2)
 		if len(parts) != 2 {
@@ -405,6 +387,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		}
 
 		if !cdcEnabled {
+			// Enable CDC in database
 			if err := s.cdcAdmin.EnableCDC(schema, name); err != nil {
 				errors = append(errors, fmt.Sprintf("enable CDC for %s: %v", table, err))
 				continue
@@ -412,31 +395,6 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 			enabled = append(enabled, table)
 		} else {
 			skipped = append(skipped, table)
-		}
-	}
-
-	// Disable CDC for removed tables
-	for _, table := range oldTables {
-		if !newTablesSet[table] {
-			parts := strings.SplitN(table, ".", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			schema, name := parts[0], parts[1]
-
-			cdcEnabled, err := s.cdcAdmin.GetCDCStatus(schema, name)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("check CDC status for %s: %v", table, err))
-				continue
-			}
-
-			if cdcEnabled {
-				if err := s.cdcAdmin.DisableCDC(schema, name); err != nil {
-					errors = append(errors, fmt.Sprintf("disable CDC for %s: %v", table, err))
-					continue
-				}
-				disabled = append(disabled, table)
-			}
 		}
 	}
 
@@ -457,24 +415,22 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		}
 	}
 
-	// If there were enable/disable errors, return them as a combined message
+	// If there were errors, return them
 	if len(errors) > 0 {
 		return c.View(map[string]any{
-			"success":  false,
-			"error":    strings.Join(errors, "; "),
-			"enabled":  enabled,
-			"disabled": disabled,
-			"skipped":  skipped,
+			"success": false,
+			"error":   strings.Join(errors, "; "),
+			"enabled": enabled,
+			"skipped": skipped,
 		})
 	}
 
 	return c.View(map[string]any{
-		"success":  true,
-		"message":  "CDC configuration updated",
-		"enabled":  enabled,
-		"disabled": disabled,
-		"skipped":  skipped,
-		"tables":   req.Tables,
+		"success": true,
+		"message": "CDC configuration updated",
+		"enabled": enabled,
+		"skipped": skipped,
+		"tables":  req.Tables,
 	})
 }
 
