@@ -196,7 +196,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	// Group changes by table and operation
 	changesByTable := make(map[string][]sqlplugin.ChangeItem)
 	for _, change := range tx.Changes {
-		opType := change.Operation
+		opType := toOperation(change.Operation)
 		item := sqlplugin.ChangeItem{
 			Table:     change.Table,
 			LSN:       fmt.Sprintf("%x", change.LSN),
@@ -300,7 +300,7 @@ func (m *Manager) List() []PluginInfo {
 	var list []PluginInfo
 
 	// List SQL plugins
-	for name, p := range m.sqlPlugins {
+	for name := range m.sqlPlugins {
 		list = append(list, PluginInfo{
 			Name:     name,
 			Path:     "sql_plugins/" + name,
