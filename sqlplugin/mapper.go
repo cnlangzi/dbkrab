@@ -16,13 +16,13 @@ func NewMapper() *Mapper {
 // BuildParams converts a single ChangeItem to SQL template parameters.
 // Implements Task 1.2 principles:
 // - Single Change processing
+// - All parameters prefixed with table name (e.g., orders_order_id)
 // - Data fields overwrite CDC metadata if same name
 // - OpUpdateBefore returns empty params (caller should skip)
-// - Auto-generates {table}_id parameter from table name
 func (m *Mapper) BuildParams(change *ChangeItem) (map[string]interface{}, error) {
 	params := make(map[string]interface{})
 
-	// CDC metadata (lower priority)
+	// CDC metadata (lower priority) - also prefixed with table name
 	if change.LSN != "" {
 		params["cdc_lsn"] = change.LSN
 	}
@@ -34,15 +34,12 @@ func (m *Mapper) BuildParams(change *ChangeItem) (map[string]interface{}, error)
 	}
 	params["cdc_operation"] = int(change.Operation)
 
-	// Auto-generate {table}_id from table name
+	// All Data fields prefixed with table name
 	shortTable := m.shortTableName(change.Table)
-	if change.TableID != nil {
-		params[fmt.Sprintf("%s_id", shortTable)] = change.TableID
-	}
-
-	// Data fields (higher priority - overwrites metadata if same name)
 	for k, v := range change.Data {
-		params[k] = v
+		// Prefix: {table}_{field_name}
+		key := fmt.Sprintf("%s_%s", shortTable, k)
+		params[key] = v
 	}
 
 	return params, nil

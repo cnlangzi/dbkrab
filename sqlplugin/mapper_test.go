@@ -75,7 +75,7 @@ func TestBuildParams_Basic(t *testing.T) {
 		t.Fatalf("BuildParams error: %v", err)
 	}
 
-	// CDC metadata
+	// CDC metadata (not prefixed)
 	if params["cdc_lsn"] != "0x00001abc" {
 		t.Errorf("cdc_lsn = %v, want 0x00001abc", params["cdc_lsn"])
 	}
@@ -89,36 +89,76 @@ func TestBuildParams_Basic(t *testing.T) {
 		t.Errorf("cdc_operation = %v, want %d", params["cdc_operation"], Insert)
 	}
 
-	// Auto-generated table ID
-	if params["orders_id"] != 100 {
-		t.Errorf("orders_id = %v, want 100", params["orders_id"])
+	// Data fields prefixed with table name
+	if params["orders_order_id"] != 100 {
+		t.Errorf("orders_order_id = %v, want 100", params["orders_order_id"])
 	}
-
-	// Data fields
-	if params["order_id"] != 100 {
-		t.Errorf("order_id = %v, want 100", params["order_id"])
+	if params["orders_amount"] != 50.00 {
+		t.Errorf("orders_amount = %v, want 50.00", params["orders_amount"])
 	}
-	if params["amount"] != 50.00 {
-		t.Errorf("amount = %v, want 50.00", params["amount"])
-	}
-	if params["status"] != "pending" {
-		t.Errorf("status = %v, want pending", params["status"])
+	if params["orders_status"] != "pending" {
+		t.Errorf("orders_status = %v, want pending", params["orders_status"])
 	}
 }
 
-func TestBuildParams_DataOverwritesMetadata(t *testing.T) {
+func TestBuildParams_MultiTableWithSameFieldName(t *testing.T) {
 	mapper := NewMapper()
 
-	// Data has same name as CDC metadata
-	change := &ChangeItem{
+	// Two changes from different tables with same field name "order_id"
+	changeOrders := &ChangeItem{
 		Table:     "dbo.orders",
-		LSN:       "0x00001abc",
-		TxID:      "tx_12345",
+		LSN:       "0x001",
+		TxID:      "tx1",
 		Operation: Insert,
-		TableID:   100,
+		TableID:   1,
 		Data: map[string]interface{}{
-			"cdc_lsn": "user-defined-lsn", // This should overwrite cdc_lsn
 			"order_id": 100,
+		},
+	}
+
+	changeItems := &ChangeItem{
+		Table:     "dbo.order_items",
+		LSN:       "0x002",
+		TxID:      "tx1",
+		Operation: Insert,
+		TableID:   10,
+		Data: map[string]interface{}{
+			"order_id": 200, // Same field name, different value
+		},
+	}
+
+	paramsOrders, _ := mapper.BuildParams(changeOrders)
+	paramsItems, _ := mapper.BuildParams(changeItems)
+
+	// Different table prefixes prevent name collision
+	if paramsOrders["orders_order_id"] != 100 {
+		t.Errorf("orders_order_id = %v, want 100", paramsOrders["orders_order_id"])
+	}
+	if paramsItems["order_items_order_id"] != 200 {
+		t.Errorf("order_items_order_id = %v, want 200", paramsItems["order_items_order_id"])
+	}
+
+	// Verify they are distinct
+	if paramsOrders["orders_order_id"] == paramsItems["order_items_order_id"] {
+		t.Error("expected different values for same field from different tables")
+	}
+}
+
+func TestBuildParams_ComplexSchema(t *testing.T) {
+	mapper := NewMapper()
+
+	change := &ChangeItem{
+		Table:     "inventory.dbo.products",
+		LSN:       "0x001",
+		TxID:      "tx1",
+		Operation: Update,
+		TableID:   500,
+		Data: map[string]interface{}{
+			"product_id":    500,
+			"name":          "Widget",
+			"price":         29.99,
+			"category_id":   10,
+			"updated_at":    "2026-04-07 08:00:00",
 		},
 	}
 
@@ -127,41 +167,22 @@ func TestBuildParams_DataOverwritesMetadata(t *testing.T) {
 		t.Fatalf("BuildParams error: %v", err)
 	}
 
-	// Data overwrites CDC metadata
-	if params["cdc_lsn"] != "user-defined-lsn" {
-		t.Errorf("cdc_lsn = %v, want user-defined-lsn (overwritten by Data)", params["cdc_lsn"])
-	}
-}
-
-func TestBuildParams_AutoGenerateTableID(t *testing.T) {
-	mapper := NewMapper()
-
-	tests := []struct {
-		table        string
-		expectedKey  string
-	}{
-		{"dbo.orders", "orders_id"},
-		{"dbo.order_items", "order_items_id"},
-		{"customers", "customers_id"},
-		{"sys.tables", "tables_id"},
+	// Verify all fields are prefixed with "products" (short table name)
+	expectedParams := map[string]interface{}{
+		"cdc_lsn":              "0x001",
+		"cdc_tx_id":            "tx1",
+		"cdc_table":            "inventory.dbo.products",
+		"cdc_operation":        int(Update),
+		"products_product_id":   500,
+		"products_name":        "Widget",
+		"products_price":        29.99,
+		"products_category_id":  10,
+		"products_updated_at":   "2026-04-07 08:00:00",
 	}
 
-	for _, tt := range tests {
-		change := &ChangeItem{
-			Table:     tt.table,
-			LSN:       "0x001",
-			TxID:      "tx1",
-			Operation: Insert,
-			TableID:   1,
-			Data:      map[string]interface{}{},
-		}
-
-		params, _ := mapper.BuildParams(change)
-
-		if params[tt.expectedKey] != 1 {
-			t.Errorf("table=%s: %s = %v, want 1", tt.table, tt.expectedKey, params[tt.expectedKey])
+	for key, expectedValue := range expectedParams {
+		if params[key] != expectedValue {
+			t.Errorf("%s = %v, want %v", key, params[key], expectedValue)
 		}
 	}
 }
-
-
