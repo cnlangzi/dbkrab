@@ -84,9 +84,9 @@ func TestEngine_Handle(t *testing.T) {
 			t.Errorf("expected orders_amount = 500, got %v", params["orders_amount"])
 		}
 
-		// Verify orders_id is set
-		if params["orders_id"] != 100 {
-			t.Errorf("expected orders_id = 100, got %v", params["orders_id"])
+		// Verify orders_id is NOT set (order_id is not id)
+		if params["orders_id"] != nil {
+			t.Errorf("expected orders_id = nil (order_id is not id), got %v", params["orders_id"])
 		}
 	})
 
