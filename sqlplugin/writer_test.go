@@ -14,14 +14,14 @@ func TestWriter_InsertStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	tmpFile.Close()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create test table
 	_, err = db.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)")
@@ -122,14 +122,14 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	tmpFile.Close()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)")
 	if err != nil {
@@ -229,14 +229,14 @@ func TestWriter_DeleteStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	tmpFile.Close()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
 	if err != nil {
