@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	_ "modernc.org/sqlite"
@@ -79,7 +80,8 @@ func createTables(db *sql.DB) error {
 			table_name TEXT NOT NULL,
 			operation TEXT NOT NULL,
 			data TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			changed_at TIMESTAMP,
+			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 
 		CREATE TABLE IF NOT EXISTS poller_state (
@@ -92,7 +94,7 @@ func createTables(db *sql.DB) error {
 		
 		CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
 		CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name);
-		CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
+		CREATE INDEX IF NOT EXISTS idx_changed_at ON transactions(changed_at);
 	`)
 	return err
 }
@@ -178,8 +180,8 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT INTO transactions (transaction_id, table_name, operation, data, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO transactions (transaction_id, table_name, operation, data, changed_at, pulled_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
@@ -196,9 +198,9 @@ func (s *Store) Write(tx *core.Transaction) error {
 			dataJSON = []byte("{}")
 		}
 
-		var createdAt interface{}
+		var cdcTime interface{}
 		if !change.CommitTime.IsZero() {
-			createdAt = change.CommitTime
+			cdcTime = change.CommitTime
 		}
 
 		_, err = stmt.Exec(
@@ -206,7 +208,8 @@ func (s *Store) Write(tx *core.Transaction) error {
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
-			createdAt,
+			cdcTime,
+			time.Now(), // pulled_at
 		)
 		if err != nil {
 			return fmt.Errorf("insert change: %w", err)
@@ -407,7 +410,7 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, created_at FROM transactions WHERE 1=1`
+	query := `SELECT id, transaction_id, table_name, operation, data, changed_at, pulled_at FROM transactions WHERE 1=1`
 	args := []interface{}{}
 
 	if tableName != "" {
@@ -443,9 +446,9 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	for rows.Next() {
 		var id int
 		var resultTxID, resultTableName, resultOperation, dataStr string
-		var createdAt interface{}
+		var cdcTime, pulledAt interface{}
 
-		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &createdAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &cdcTime, &pulledAt); err != nil {
 			return nil, err
 		}
 
@@ -460,7 +463,8 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			"table_name":     resultTableName,
 			"operation":      resultOperation,
 			"data":           data,
-			"created_at":     createdAt,
+			"changed_at":     cdcTime,
+			"pulled_at":      pulledAt,
 		})
 	}
 

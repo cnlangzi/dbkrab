@@ -323,7 +323,7 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.created_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -365,7 +365,7 @@ function renderMobileCard(log) {
                     <div class="flex items-center gap-2 text-xs text-textMuted">
                         <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
                         <span class="text-border">•</span>
-                        <span class="whitespace-nowrap">${formatLocalTime(log.created_at)}</span>
+                        <span class="whitespace-nowrap">${formatLocalTime(log.changed_at)}</span>
                     </div>
                 </div>
             </div>
