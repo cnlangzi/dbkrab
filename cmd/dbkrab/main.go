@@ -162,6 +162,17 @@ func main() {
 	cdcAdmin := cdcadmin.NewAdmin(&cfg.MSSQL)
 	slog.Info("CDC admin initialized")
 
+	// Check and set CDC retention to 7 days
+	retention, err := cdcAdmin.CheckAndSetCDCRetention()
+	if err != nil {
+		slog.Warn("failed to check/set CDC retention", "error", err)
+	} else {
+		retentionDays := float64(retention) / 1440
+		slog.Info("CDC retention configured",
+			"retention_minutes", retention,
+			"retention_days", retentionDays)
+	}
+
 	// Start API/Dashboard server
 	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, sink, *apiPort, *configPath, cfg, configWatcher)
 	go func() {
