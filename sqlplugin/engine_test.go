@@ -35,71 +35,58 @@ func TestEngine_Handle(t *testing.T) {
 					Output:     "order_sync",
 					PrimaryKey: "order_id",
 					OnConflict: "skip",
-					// SQL will be set by test
 				},
 			},
 		},
 	}
 
-	// Note: We can't fully test without MSSQL, but we can test the parameter building
-
-	t.Run("buildBatchParams", func(t *testing.T) {
+	t.Run("buildParams", func(t *testing.T) {
 		engine := &Engine{
 			skill: skill,
 		}
 
-		tx := &core.Transaction{
-			ID: "tx-123",
-			Changes: []core.Change{
-				{
-					Table:         "orders",
-					TransactionID: "tx-123",
-					LSN:           []byte{0x01, 0x02, 0x03},
-					Operation:     core.OpInsert,
-					Data: map[string]interface{}{
-						"order_id": 100,
-						"amount":   500,
-						"status":   "pending",
-					},
-				},
-				{
-					Table:         "orders",
-					TransactionID: "tx-123",
-					LSN:           []byte{0x04, 0x05, 0x06},
-					Operation:     core.OpInsert,
-					Data: map[string]interface{}{
-						"order_id": 101,
-						"amount":   300,
-						"status":   "pending",
-					},
-				},
+		change := &core.Change{
+			Table:         "orders",
+			TransactionID: "tx-123",
+			LSN:           []byte{0x01, 0x02, 0x03},
+			Operation:     core.OpInsert,
+			Data: map[string]interface{}{
+				"order_id": 100,
+				"amount":   500,
+				"status":   "pending",
 			},
 		}
 
-		params, err := engine.buildBatchParams(tx, tx.Changes)
+		params, err := engine.buildParams(change)
 		if err != nil {
-			t.Fatalf("buildBatchParams failed: %v", err)
+			t.Fatalf("buildParams failed: %v", err)
 		}
 
-		// Verify params
+		// Verify CDC metadata
 		if params["cdc_tx_id"] != "tx-123" {
 			t.Errorf("expected cdc_tx_id = tx-123, got %v", params["cdc_tx_id"])
 		}
 
-		if params["orders_order_id"] != 101 {
-			t.Errorf("expected orders_order_id = 101 (last change), got %v", params["orders_order_id"])
+		if params["cdc_lsn"] != "010203" {
+			t.Errorf("expected cdc_lsn = 010203, got %v", params["cdc_lsn"])
 		}
 
-		if params["orders_amount"] != 300 {
-			t.Errorf("expected orders_amount = 300 (last change), got %v", params["orders_amount"])
+		if params["cdc_table"] != "orders" {
+			t.Errorf("expected cdc_table = orders, got %v", params["cdc_table"])
 		}
 
-		ids, ok := params["orders_ids"].([]interface{})
-		if !ok {
-			t.Fatalf("expected orders_ids to be []interface{}, got %T", params["orders_ids"])
+		// Verify data fields with prefix
+		if params["orders_order_id"] != 100 {
+			t.Errorf("expected orders_order_id = 100, got %v", params["orders_order_id"])
 		}
-		if len(ids) != 2 {
-			t.Errorf("expected 2 ids, got %d", len(ids))
+
+		if params["orders_amount"] != 500 {
+			t.Errorf("expected orders_amount = 500, got %v", params["orders_amount"])
+		}
+
+		// Verify orders_id is set
+		if params["orders_id"] != 100 {
+			t.Errorf("expected orders_id = 100, got %v", params["orders_id"])
 		}
 	})
 
@@ -107,14 +94,13 @@ func TestEngine_Handle(t *testing.T) {
 		engine := &Engine{skill: skill}
 
 		tests := []struct {
-			op      core.Operation
-			want    Operation
-			wantErr bool
+			op   core.Operation
+			want Operation
 		}{
-			{core.OpInsert, Insert, false},
-			{core.OpUpdateAfter, Update, false},
-			{core.OpDelete, Delete, false},
-			{core.OpUpdateBefore, 0, true}, // Should be skipped
+			{core.OpInsert, Insert},
+			{core.OpUpdateAfter, Update},
+			{core.OpDelete, Delete},
+			{core.OpUpdateBefore, 0}, // Should be skipped
 		}
 
 		for _, tt := range tests {
@@ -126,33 +112,12 @@ func TestEngine_Handle(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("groupChangesByOperation", func(t *testing.T) {
-		changes := []core.Change{
-			{Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
-			{Operation: core.OpDelete, Data: map[string]interface{}{"id": 2}},
-			{Operation: core.OpInsert, Data: map[string]interface{}{"id": 3}},
-			{Operation: core.OpUpdateAfter, Data: map[string]interface{}{"id": 4}},
-		}
-
-		groups := groupChangesByOperation(changes)
-
-		if len(groups[core.OpInsert]) != 2 {
-			t.Errorf("expected 2 inserts, got %d", len(groups[core.OpInsert]))
-		}
-		if len(groups[core.OpDelete]) != 1 {
-			t.Errorf("expected 1 delete, got %d", len(groups[core.OpDelete]))
-		}
-		if len(groups[core.OpUpdateAfter]) != 1 {
-			t.Errorf("expected 1 update, got %d", len(groups[core.OpUpdateAfter]))
-		}
-	})
 }
 
 func TestEngine_ShortTableName(t *testing.T) {
 	tests := []struct {
 		input string
-		want string
+		want  string
 	}{
 		{"orders", "orders"},
 		{"dbo.orders", "orders"},
@@ -173,7 +138,7 @@ func TestEngine_ShortTableName(t *testing.T) {
 
 func TestIsIDField(t *testing.T) {
 	tests := []struct {
-		name  string
+		name string
 		isID bool
 	}{
 		{"id", true},
