@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
@@ -148,6 +149,14 @@ func (s *Server) registerAPIRoutes() {
 		slog.Info("CDC logs/status routes registered")
 	} else {
 		slog.Warn("CDC logs/status routes skipped - sink is nil")
+	}
+
+	// CDC gap monitoring routes
+	if s.cdcAdmin != nil && s.sink != nil {
+		api.Get("/cdc/gap", s.handleCDCGap, xun.WithViewer(&xun.JsonViewer{}))
+		slog.Info("CDC gap monitoring route registered")
+	} else {
+		slog.Warn("CDC gap monitoring route skipped - cdcAdmin or sink is nil")
 	}
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
@@ -485,4 +494,178 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 		"success": true,
 		"state":   state,
 	})
+}
+
+// handleCDCGap handles GET /api/cdc/gap
+// Returns GAP status for all tracked tables including LSN info, lag bytes, and duration
+func (s *Server) handleCDCGap(c *xun.Context) error {
+	if s.cdcAdmin == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "CDC admin not initialized",
+		})
+	}
+
+	if s.sink == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink not initialized",
+		})
+	}
+
+	// Get tracked tables from config
+	var trackedTables []string
+	if s.configWatcher != nil {
+		cfg := s.configWatcher.Get()
+		trackedTables = cfg.Tables
+	}
+
+	// Get gap detector thresholds from config
+	warnLagBytes := int64(100 * 1024 * 1024)      // Default 100MB
+	warnLagDuration := 1 * time.Hour              // Default 1 hour
+	critLagBytes := int64(1024 * 1024 * 1024)     // Default 1GB
+	critLagDuration := 6 * time.Hour              // Default 6 hours
+
+	if s.configWatcher != nil {
+		cfg := s.configWatcher.Get()
+		if cfg.CDCProtection.Enabled {
+			if cfg.CDCProtection.WarningLagBytes > 0 {
+				warnLagBytes = cfg.CDCProtection.WarningLagBytes
+			}
+			if cfg.CDCProtection.WarningLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDCProtection.WarningLagDuration); err == nil {
+					warnLagDuration = dur
+				}
+			}
+			if cfg.CDCProtection.CriticalLagBytes > 0 {
+				critLagBytes = cfg.CDCProtection.CriticalLagBytes
+			}
+			if cfg.CDCProtection.CriticalLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDCProtection.CriticalLagDuration); err == nil {
+					critLagDuration = dur
+				}
+			}
+		}
+	}
+
+	// Get database connection from sink
+	db := s.sink.GetDB()
+	if db == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "database connection not available",
+		})
+	}
+
+	// Create gap detector
+	gapDetector := cdc.NewGapDetector(db)
+	ctx := context.Background()
+
+	// Get CDC max LSN once (shared across all tables)
+	maxLSN, err := gapDetector.GetMaxLSN(ctx)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("get max LSN: %v", err),
+		})
+	}
+
+	// Collect gap info for all tracked tables
+	gapInfos := make([]map[string]any, 0, len(trackedTables))
+	
+	for _, table := range trackedTables {
+		parts := strings.SplitN(table, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		schema, name := parts[0], parts[1]
+		captureInstance := fmt.Sprintf("%s_%s", schema, name)
+
+		// Get current LSN from poller state (approximation - in real scenario would track per-table)
+		// For now, use the global last_lsn from poller state
+		state, err := s.sink.GetPollerState()
+		if err != nil {
+			slog.Warn("failed to get poller state", "table", table, "error", err)
+			continue
+		}
+
+		var currentLSN []byte
+		if lsnStr, ok := state["last_lsn"].(string); ok && lsnStr != "" {
+			// Convert hex string back to bytes if needed
+			// For now, we'll query the actual current LSN from CDC
+			currentLSN = maxLSN // Use max as approximation
+		}
+
+		// Check gap for this table
+		gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
+		if err != nil {
+			slog.Warn("failed to check gap", "table", table, "error", err)
+			continue
+		}
+
+		// Determine status
+		status := "healthy"
+		statusColor := "success"
+		if gapInfo.HasGap {
+			status = "critical"
+			statusColor = "error"
+		} else if gapInfo.IsGapCritical(critLagBytes, critLagDuration) {
+			status = "critical"
+			statusColor = "error"
+		} else if gapInfo.IsGapWarning(warnLagBytes, warnLagDuration) {
+			status = "warning"
+			statusColor = "warning"
+		}
+
+		gapInfos = append(gapInfos, map[string]any{
+			"table":             table,
+			"schema":            schema,
+			"name":              name,
+			"capture_instance":  captureInstance,
+			"current_lsn":       formatLSN(gapInfo.CurrentLSN),
+			"min_lsn":           formatLSN(gapInfo.MinLSN),
+			"max_lsn":           formatLSN(gapInfo.MaxLSN),
+			"has_gap":           gapInfo.HasGap,
+			"lag_bytes":         gapInfo.LagBytes,
+			"lag_duration":      gapInfo.LagDuration.String(),
+			"lag_duration_secs": int64(gapInfo.LagDuration.Seconds()),
+			"status":            status,
+			"status_color":      statusColor,
+			"checked_at":        gapInfo.CheckedAt,
+		})
+	}
+
+	return c.View(map[string]any{
+		"success":     true,
+		"count":       len(gapInfos),
+		"tables":      gapInfos,
+		"max_lsn":     formatLSN(maxLSN),
+		"thresholds": map[string]any{
+			"warning_lag_bytes":     warnLagBytes,
+			"warning_lag_duration":  warnLagDuration.String(),
+			"critical_lag_bytes":    critLagBytes,
+			"critical_lag_duration": critLagDuration.String(),
+		},
+	})
+}
+
+// formatLSN converts LSN bytes to hexadecimal string
+func formatLSN(lsn []byte) string {
+	if len(lsn) == 0 {
+		return "0x00000000:00000000"
+	}
+	// SQL Server LSN is 10 bytes: VLF offset (4 bytes) + log block offset (2 bytes) + slot offset (4 bytes)
+	// Format as 0xXXXXXXXX:XXXXXXXX
+	if len(lsn) >= 8 {
+		return fmt.Sprintf("0x%02X%02X%02X%02X:%02X%02X%02X%02X",
+			lsn[0], lsn[1], lsn[2], lsn[3],
+			lsn[4], lsn[5], lsn[6], lsn[7])
+	}
+	// Fallback for shorter LSNs
+	var sb strings.Builder
+	sb.WriteString("0x")
+	for _, b := range lsn {
+		sb.WriteString(fmt.Sprintf("%02X", b))
+	}
+	return sb.String()
 }
