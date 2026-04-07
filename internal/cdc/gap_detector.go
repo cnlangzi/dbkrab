@@ -187,7 +187,13 @@ func LSNBytesDiff(a, b []byte) int64 {
 		bi := int64(b[i])
 		delta := ai - bi
 
-		// Check for potential overflow before multiplying
+		// Skip if delta is zero (no contribution to diff)
+		if delta == 0 {
+			multiplier *= 256
+			continue
+		}
+
+		// Check for potential overflow before multiplying (only if delta != 0)
 		if multiplier > math.MaxInt64/256 {
 			overflow = true
 			break
