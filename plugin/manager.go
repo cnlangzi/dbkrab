@@ -236,10 +236,9 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 				Fields:       change.Data,
 			}
 			// Execute stages if present
+				var err error
 			if len(skill.Stages) > 0 {
-				
-				
-				err = p.Executor.ExecuteStages(skill, params)
+				_, err = p.Executor.ExecuteStages(skill, params)
 				if err != nil {
 					return fmt.Errorf("execute stages: %w", err)
 				}
