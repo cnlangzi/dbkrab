@@ -206,11 +206,6 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 		}
 
 		// Extract primary key from data
-		for k, v := range change.Data {
-			item.TableID = v
-			break // Use first field as table ID for simplicity
-		}
-
 		changesByTable[change.Table] = append(changesByTable[change.Table], item)
 	}
 
@@ -243,15 +238,12 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 
 			// Extract table IDs from data
 			for _, v := range change.Data {
-				params.TableIDs = append(params.TableIDs, v)
-				break
 			}
 
 			// Execute stages if present
-			var stageResults map[string]*sqlplugin.DataSet
 			if len(skill.Stages) > 0 {
 				var err error
-				stageResults, err = p.Executor.ExecuteStages(skill, params)
+				_, err = p.Executor.ExecuteStages(skill, params)
 				if err != nil {
 					return fmt.Errorf("execute stages: %w", err)
 				}
@@ -293,15 +285,15 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 func toOperation(op core.Operation) sqlplugin.Operation {
 	switch op {
 	case core.OpDelete:
-		return sqlplugin.OpDelete
+		return sqlplugin.Delete
 	case core.OpInsert:
-		return sqlplugin.OpInsert
+		return sqlplugin.Insert
 	case core.OpUpdateBefore:
-		return sqlplugin.OpUpdateBefore
+		return sqlplugin.Update
 	case core.OpUpdateAfter:
-		return sqlplugin.OpUpdateAfter
+		return sqlplugin.Update
 	default:
-		return sqlplugin.OpInsert
+		return sqlplugin.Insert
 	}
 }
 
