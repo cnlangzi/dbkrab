@@ -22,9 +22,9 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 		data: make(map[string]offset.Offset),
 	}
 
-	// Create poller with failing sink
+	// Create poller with failing store
 	poller := &Poller{
-		sink:    failSink,
+		store:   failSink,
 		offsets: offsetStore,
 	}
 
@@ -76,7 +76,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 
 	// Create poller
 	poller := &Poller{
-		sink:    successSink,
+		store:   successSink,
 		offsets: offsetStore,
 		handler: failHandler,
 	}
@@ -256,7 +256,7 @@ func (s *mockSink) Write(tx *Transaction) error {
 	return nil
 }
 
-func (s *mockSink) WriteOps(ops []SinkOp) error {
+func (s *mockSink) WriteOps(ops []Sink) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
@@ -316,7 +316,7 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(tx *Transaction) ([]SinkOp, error) {
+func (h *mockHandler) Handle(tx *Transaction) ([]Sink, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {

@@ -6,17 +6,17 @@ type DataSet struct {
 	Rows    [][]any
 }
 
-// SinkOpConfig represents sink configuration
-type SinkOpConfig struct {
+// SinkConfig represents sink configuration
+type SinkConfig struct {
 	Name       string
 	Output     string
 	PrimaryKey string
 	OnConflict string
 }
 
-// SinkOp represents a sink operation from SQL plugin
-type SinkOp struct {
-	Config  SinkOpConfig
+// Sink represents a sink operation from SQL plugin
+type Sink struct {
+	Config  SinkConfig
 	DataSet *DataSet
 	OpType  Operation // Uses core.Operation from transaction.go
 }
