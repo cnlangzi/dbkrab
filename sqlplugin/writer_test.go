@@ -51,7 +51,7 @@ func TestWriter_InsertStrategy(t *testing.T) {
 				Rows:    [][]interface{}{{1, "test1", 100}},
 			},
 			wantErr:  false,
-			checkSQL: "SELECT name, value FROM test_table WHERE id = 1",
+			checkSQL: "SELECT name FROM test_table WHERE id = 1",
 			checkVal: "test1",
 		},
 		{
@@ -66,7 +66,7 @@ func TestWriter_InsertStrategy(t *testing.T) {
 				Rows:    [][]interface{}{{1, "updated1", 999}},
 			},
 			wantErr:  false,
-			checkSQL: "SELECT name, value FROM test_table WHERE id = 1",
+			checkSQL: "SELECT name FROM test_table WHERE id = 1",
 			checkVal: "test1", // Should remain unchanged
 		},
 		{
@@ -81,7 +81,7 @@ func TestWriter_InsertStrategy(t *testing.T) {
 				Rows:    [][]interface{}{{1, "overwritten", 888}},
 			},
 			wantErr:  false,
-			checkSQL: "SELECT name, value FROM test_table WHERE id = 1",
+			checkSQL: "SELECT name FROM test_table WHERE id = 1",
 			checkVal: "overwritten",
 		},
 	}
@@ -103,8 +103,7 @@ func TestWriter_InsertStrategy(t *testing.T) {
 			// Verify state
 			if tt.checkSQL != "" {
 				var name string
-				var value int
-				err := db.QueryRow(tt.checkSQL).Scan(&name, &value)
+				err := db.QueryRow(tt.checkSQL).Scan(&name)
 				if err != nil {
 					t.Errorf("check query failed: %v", err)
 					return
@@ -164,7 +163,7 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 				Rows:    [][]interface{}{{1, "updated", 200}},
 			},
 			wantErr:  false,
-			checkSQL: "SELECT name, value FROM test_table WHERE id = 1",
+			checkSQL: "SELECT name FROM test_table WHERE id = 1",
 			checkVal: "updated",
 		},
 		{
