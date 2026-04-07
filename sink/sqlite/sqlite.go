@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -207,6 +208,185 @@ func (s *Sink) Write(tx *core.Transaction) error {
 	}
 
 	return sqlTx.Commit()
+}
+
+// WriteOps writes transformed DataSets from SQL plugins to SQLite
+func (s *Sink) WriteOps(ops []core.SinkOp) error {
+	if len(ops) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, op := range ops {
+		switch op.OpType {
+		case core.OpInsert:
+			if err := s.insertInTx(tx, op.Config, op.DataSet); err != nil {
+				return fmt.Errorf("insert %s: %w", op.Config.Output, err)
+			}
+		case core.OpUpdateAfter:
+			if err := s.updateInTx(tx, op.Config, op.DataSet); err != nil {
+				return fmt.Errorf("update %s: %w", op.Config.Output, err)
+			}
+		case core.OpDelete:
+			if err := s.deleteInTx(tx, op.Config, op.DataSet); err != nil {
+				return fmt.Errorf("delete %s: %w", op.Config.Output, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// insertInTx inserts DataSet into table
+func (s *Sink) insertInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+	if ds == nil || len(ds.Rows) == 0 {
+		return nil
+	}
+
+	// Ensure table exists
+	if err := s.ensureTable(tx, config.Output, ds.Columns); err != nil {
+		return err
+	}
+
+	for _, row := range ds.Rows {
+		// Build INSERT SQL
+		escapedCols := make([]string, len(ds.Columns))
+		for i, col := range ds.Columns {
+			escapedCols[i] = fmt.Sprintf("[%s]", col)
+		}
+
+		placeholders := make([]string, len(ds.Columns))
+		for i := range ds.Columns {
+			placeholders[i] = "?"
+		}
+
+		sqlStr := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+			config.Output,
+			strings.Join(escapedCols, ", "),
+			strings.Join(placeholders, ", "))
+
+		_, err := tx.Exec(sqlStr, row...)
+		if err != nil {
+			return fmt.Errorf("execute: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// updateInTx updates records in table
+func (s *Sink) updateInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+	if ds == nil || len(ds.Rows) == 0 {
+		return nil
+	}
+
+	// Find PK index
+	pkIndex := -1
+	for i, col := range ds.Columns {
+		if col == config.PrimaryKey {
+			pkIndex = i
+			break
+		}
+	}
+
+	if pkIndex == -1 {
+		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
+	}
+
+	for _, row := range ds.Rows {
+		// Build UPDATE SQL
+		var setClauses []string
+		var values []any
+		for i, col := range ds.Columns {
+			if col == config.PrimaryKey {
+				continue
+			}
+			setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
+			values = append(values, row[i])
+		}
+
+		pkValue := row[pkIndex]
+		sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
+			config.Output,
+			strings.Join(setClauses, ", "),
+			config.PrimaryKey)
+		values = append(values, pkValue)
+
+		_, err := tx.Exec(sqlStr, values...)
+		if err != nil {
+			return fmt.Errorf("execute: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// deleteInTx deletes records from table
+func (s *Sink) deleteInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+	if ds == nil || len(ds.Rows) == 0 {
+		return nil
+	}
+
+	// Find PK index
+	pkIndex := -1
+	for i, col := range ds.Columns {
+		if col == config.PrimaryKey {
+			pkIndex = i
+			break
+		}
+	}
+
+	if pkIndex == -1 {
+		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
+	}
+
+	pkValues := make([]any, len(ds.Rows))
+	for i, row := range ds.Rows {
+		pkValues[i] = row[pkIndex]
+	}
+
+	// Build IN clause
+	placeholders := make([]string, len(ds.Rows))
+	for i := range ds.Rows {
+		placeholders[i] = "?"
+	}
+
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE [%s] IN (%s)",
+		config.Output,
+		config.PrimaryKey,
+		strings.Join(placeholders, ", "))
+
+	_, err := tx.Exec(sqlStr, pkValues...)
+	if err != nil {
+		return fmt.Errorf("execute: %w", err)
+	}
+
+	return nil
+}
+
+// ensureTable ensures the table exists with the given columns
+func (s *Sink) ensureTable(tx *sql.Tx, table string, columns []string) error {
+	escapedCols := make([]string, len(columns))
+	for i, col := range columns {
+		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
+	}
+
+	sqlStr := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)",
+		table,
+		strings.Join(escapedCols, ", "))
+
+	_, err := tx.Exec(sqlStr)
+	return err
 }
 
 // Close closes the database connection
