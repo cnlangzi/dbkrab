@@ -74,8 +74,8 @@ type PluginRuntime interface {
     Close() error
 }
 
-// Sink
-type Sink interface {
+// Store
+type Store interface {
     Write(tx *Transaction) error
 }
 ```

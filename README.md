@@ -42,7 +42,7 @@ MSSQL CDC Tables
     │
     ▼
 ┌─────────────────────────────────────────┐
-│      Sink (Storage Layer)               │
+│      Store (Storage Layer)              │
 │  • SQLite (built-in)                    │
 └─────────────────────────────────────────┘
 ```
