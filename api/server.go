@@ -926,7 +926,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 		// Connect to database for gap detection
 		db, err := s.cdcAdmin.Connect()
 		if err == nil {
-			defer db.Close()
+			defer db.Close() //nolint:errcheck
 			gapDetector := cdc.NewGapDetector(db)
 			ctx := context.Background()
 			
