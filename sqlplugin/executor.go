@@ -18,7 +18,9 @@ func NewExecutor(db *sql.DB) *Executor {
 }
 
 // parameterPatterns defines the supported parameter patterns
-var parameterPatterns = map[string]*regexp.Regexp{
+var _ = parameterPatterns
+var parameterPatterns = //nolint:unused
+ map[string]*regexp.Regexp{
 	"cdc_lsn":      regexp.MustCompile(`@cdc_lsn\b`),
 	"cdc_tx_id":    regexp.MustCompile(`@cdc_tx_id\b`),
 	"cdc_table":    regexp.MustCompile(`@cdc_table\b`),
