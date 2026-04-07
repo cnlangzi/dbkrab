@@ -47,13 +47,13 @@ sinks:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @id as id
+        SELECT @cdc_lsn as cdc_lsn, @order_items_id as id
       output: order_items_enriched
       primary_key: id
