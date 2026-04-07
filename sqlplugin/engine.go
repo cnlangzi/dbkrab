@@ -183,11 +183,21 @@ func shortTableName(table string) string {
 }
 
 // isIDField checks if a field name looks like an ID field
+// Checks for prefix (id, uuid) or suffix (_id, Id, ID)
 func isIDField(name string) bool {
-	idNames := []string{"id", "_id", "Id", "ID", "uuid", "key"}
+	idNames := []string{"id", "uuid", "key"}
+	// Check prefix
 	for _, idName := range idNames {
 		if len(name) >= len(idName) {
 			if name[:len(idName)] == idName {
+				return true
+			}
+		}
+	}
+	// Check suffix
+	for _, idName := range idNames {
+		if len(name) >= len(idName) {
+			if name[len(name)-len(idName):] == idName {
 				return true
 			}
 		}
