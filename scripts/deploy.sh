@@ -1,6 +1,7 @@
 #!/bin/bash
 # dbkrab deployment script
 # Usage: ./deploy.sh [config_file]
+# Note: Run as normal user, sudo is used only where needed
 
 set -e
 
@@ -13,16 +14,22 @@ LOG_FILE="/var/log/dbkrab/dbkrab.log"
 
 echo "🦀 Deploying dbkrab..."
 
-# Create directories
+# ============================================
+# Step 1: Create directories (requires sudo)
+# ============================================
 echo "📁 Creating directories..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p /var/log/dbkrab
 sudo mkdir -p /var/lib/dbkrab/data
+
+# Change ownership to current user (requires sudo)
 sudo chown -R $(whoami):$(whoami) "$INSTALL_DIR"
 sudo chown -R $(whoami):$(whoami) /var/log/dbkrab
 sudo chown -R $(whoami):$(whoami) /var/lib/dbkrab
 
-# Stop old process
+# ============================================
+# Step 2: Stop old process (normal user)
+# ============================================
 echo "🛑 Stopping old process..."
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
@@ -30,25 +37,35 @@ if [ -f "$PID_FILE" ]; then
         echo "   Stopping PID $OLD_PID..."
         kill "$OLD_PID" || true
         sleep 2
-        kill -9 "$OLD_PID" 2>/dev/null || true
+        # Force kill if still running
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            kill -9 "$OLD_PID" 2>/dev/null || true
+        fi
     fi
-    rm -f "$PID_FILE"
+    # Remove PID file (might need sudo if created by root)
+    sudo rm -f "$PID_FILE"
 fi
 
 # Also kill any running dbkrab processes
-pkill -f "dbkrab -config" 2>/dev/null || true
+pkill -9 -f "dbkrab -config" 2>/dev/null || true
 sleep 1
 
-# Build
+# ============================================
+# Step 3: Build binary (normal user - NO sudo)
+# ============================================
 echo "🔨 Building..."
 make build
 
-# Install binary
+# ============================================
+# Step 4: Install binary (normal user)
+# ============================================
 echo "📦 Installing binary..."
 cp bin/dbkrab "$INSTALL_DIR/dbkrab"
 chmod +x "$INSTALL_DIR/dbkrab"
 
-# Install config (only if not exists)
+# ============================================
+# Step 5: Install config (normal user)
+# ============================================
 echo "⚙️  Installing config..."
 if [ -f "$CONFIG_DEST" ]; then
     echo "   Config already exists at $CONFIG_DEST, keeping existing config"
@@ -61,16 +78,22 @@ else
     fi
 fi
 
-# Start new process
+# ============================================
+# Step 6: Start new process (normal user)
+# ============================================
 echo "🚀 Starting dbkrab..."
 cd "$INSTALL_DIR"
 nohup "$INSTALL_DIR/dbkrab" -config "$CONFIG_DEST" -api-port 9021 > "$LOG_FILE" 2>&1 &
 NEW_PID=$!
+
+# Save PID file (requires sudo for /var/run)
 echo "$NEW_PID" | sudo tee "$PID_FILE" > /dev/null
 
 sleep 3
 
-# Verify
+# ============================================
+# Step 7: Verify deployment
+# ============================================
 if kill -0 "$NEW_PID" 2>/dev/null; then
     echo "✅ Deployment successful!"
     echo "   PID: $NEW_PID"
