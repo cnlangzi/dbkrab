@@ -70,7 +70,7 @@ func (w *Writer) insertInTx(tx *sql.Tx, config *SinkConfig, ds *DataSet) error {
 	strategy := config.GetOnConflict()
 
 	for _, row := range ds.Rows {
-		sqlStr, err := w.buildInsertSQL(config.Output, config.PrimaryKey, ds.Columns, strategy)
+		sqlStr, err := w.buildInsertSQL(config.Output, config.PrimaryKey, ds.Columns, row, strategy)
 		if err != nil {
 			return NewWriteError(config.Output, err)
 		}
@@ -80,7 +80,7 @@ func (w *Writer) insertInTx(tx *sql.Tx, config *SinkConfig, ds *DataSet) error {
 			// For error strategy, check if it's a constraint violation
 			if strategy == ConflictError && isConstraintError(err) {
 				return NewWriteError(config.Output,
-					fmt.Errorf("constraint error on insert: record already exists (pk=%v)", row[0]))
+					fmt.Errorf("constraint error on insert: record already exists (pk=%v)", getPKValue(ds.Columns, row, config.PrimaryKey)))
 			}
 			return NewWriteError(config.Output, fmt.Errorf("execute insert: %w", err))
 		}
@@ -176,7 +176,8 @@ func (w *Writer) deleteInTx(tx *sql.Tx, config *SinkConfig, ds *DataSet) error {
 }
 
 // buildInsertSQL builds INSERT SQL based on conflict strategy
-func (w *Writer) buildInsertSQL(table, pk string, columns []string, strategy OnConflictStrategy) (string, error) {
+// row is needed for ConflictError to properly check if record exists
+func (w *Writer) buildInsertSQL(table, pk string, columns []string, row []interface{}, strategy OnConflictStrategy) (string, error) {
 	// Escape column names
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
@@ -203,10 +204,10 @@ func (w *Writer) buildInsertSQL(table, pk string, columns []string, strategy OnC
 		sql = fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
 			table, colList, valuesList)
 	case ConflictError:
-		// INSERT INTO ... SELECT WHERE NOT EXISTS
-		pkEscaped := fmt.Sprintf("[%s]", pk)
-		sql = fmt.Sprintf("INSERT INTO %s (%s) SELECT %s WHERE NOT EXISTS (SELECT 1 FROM %s WHERE %s = ?)",
-			table, colList, valuesList, table, pkEscaped)
+		// For ConflictError, we use standard INSERT (will error on constraint violation)
+		// The error will be caught in insertInTx and converted to a meaningful message
+		sql = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+			table, colList, valuesList)
 	default:
 		// Default to skip
 		sql = fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
@@ -275,6 +276,8 @@ func (w *Writer) buildUpdateSQL(table, pk string, columns []string, row []interf
 }
 
 // buildDeleteSQL builds DELETE SQL based on conflict strategy
+// For DELETE, ConflictSkip and ConflictOverwrite behave the same (idempotent)
+// ConflictError checks if rows were actually deleted
 func (w *Writer) buildDeleteSQL(table, pk string, numValues int, strategy OnConflictStrategy) (string, error) {
 	// Build the IN clause placeholders
 	placeholders := make([]string, numValues)
@@ -285,21 +288,10 @@ func (w *Writer) buildDeleteSQL(table, pk string, numValues int, strategy OnConf
 
 	pkEscaped := fmt.Sprintf("[%s]", pk)
 
-	var sql string
-	switch strategy {
-	case ConflictOverwrite:
-		// Direct DELETE
-		sql = fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", table, pkEscaped, valuesList)
-	case ConflictSkip:
-		// DELETE ... WHERE EXISTS (only if record exists)
-		sql = fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s) AND EXISTS (SELECT 1 FROM %s WHERE %s IN (%s))",
-			table, pkEscaped, valuesList, table, pkEscaped, valuesList)
-	case ConflictError:
-		// Direct DELETE - will error if no rows affected (handled at call site)
-		sql = fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", table, pkEscaped, valuesList)
-	default:
-		sql = fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", table, pkEscaped, valuesList)
-	}
+	// All DELETE strategies use the same SQL - difference is in error handling
+	// ConflictSkip/Overwrite: no error even if no rows deleted
+	// ConflictError: error if no rows deleted
+	sql := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", table, pkEscaped, valuesList)
 
 	return sql, nil
 }
@@ -339,7 +331,7 @@ func (w *Writer) WriteUpsert(table string, pk string, ds *DataSet) error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, row := range ds.Rows {
-		sqlStr, err := w.buildInsertSQL(table, pk, ds.Columns, ConflictOverwrite)
+		sqlStr, err := w.buildInsertSQL(table, pk, ds.Columns, row, ConflictOverwrite)
 		if err != nil {
 			return NewWriteError(table, err)
 		}
@@ -364,7 +356,7 @@ func (w *Writer) WriteUpsertInTx(tx *sql.Tx, table string, pk string, ds *DataSe
 	}
 
 	for _, row := range ds.Rows {
-		sqlStr, err := w.buildInsertSQL(table, pk, ds.Columns, ConflictOverwrite)
+		sqlStr, err := w.buildInsertSQL(table, pk, ds.Columns, row, ConflictOverwrite)
 		if err != nil {
 			return NewWriteError(table, err)
 		}
