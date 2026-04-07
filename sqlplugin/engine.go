@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
@@ -183,21 +184,24 @@ func shortTableName(table string) string {
 }
 
 // isIDField checks if a field name looks like an ID field
-// Checks for prefix (id, uuid) or suffix (_id, Id, ID)
+// Handles: id, order_id, customerId, product_ID, uuid, key, etc.
 func isIDField(name string) bool {
 	idNames := []string{"id", "uuid", "key"}
-	// Check prefix
+	// Check prefix (id, uuid, key)
 	for _, idName := range idNames {
-		if len(name) >= len(idName) {
-			if name[:len(idName)] == idName {
-				return true
-			}
+		if len(name) >= len(idName) && strings.ToLower(name[:len(idName)]) == idName {
+			return true
 		}
 	}
-	// Check suffix
+	// Check suffix (_id, Id, ID, Id, UUID, Key)
 	for _, idName := range idNames {
 		if len(name) >= len(idName) {
-			if name[len(name)-len(idName):] == idName {
+			// Try lowercase comparison for _id style
+			if strings.ToLower(name[len(name)-len(idName):]) == idName {
+				return true
+			}
+			// Try exact match for CamelCase (Id, ID)
+			if name[len(name)-len(idName):] == idName || name[len(name)-len(idName):] == strings.ToUpper(idName) {
 				return true
 			}
 		}
