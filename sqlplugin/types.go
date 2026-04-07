@@ -75,12 +75,12 @@ type Skill struct {
 	Sinks       SinksConfig `yaml:"sinks"`        // Sink configuration
 }
 
-// Stage represents a SQL stage
+// Stage represents a SQL stage in the enrichment pipeline
 type Stage struct {
-	Name     string `yaml:"name"`     // Optional stage name (temp table name)
-	SQL      string `yaml:"sql"`      // Inline SQL
-	SQLFile  string `yaml:"sql_file"` // External SQL file path
-	TempTable string `yaml:"temp_table"` // Temp table name (optional, for compatibility)
+	Name      string `yaml:"name"`      // Stage name, used to inject results to next stage
+	SQL       string `yaml:"sql"`       // Inline SQL template
+	SQLFile   string `yaml:"sql_file"`   // External SQL file path
+	TempTable string `yaml:"temp_table"` // Deprecated: no longer used, kept for compatibility
 }
 
 // SinksConfig represents sink configuration

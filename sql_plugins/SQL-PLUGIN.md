@@ -1,8 +1,9 @@
 # SQL Plugin Architecture
 
-**Version**: 1.2  
+**Version**: 1.3  
 **Status**: Draft  
-**Created**: 2026-04-06
+**Created**: 2026-04-06  
+**Updated**: 2026-04-07
 
 ---
 
@@ -31,15 +32,15 @@ Core Poller (Transaction-based batch collection)
 │  1. Input Mapper                             │
 │     CDC data → SQL Parameters (@cdc_*, @*)   │
 │                                              │
-│  2. SQL Template Executor                    │
-│     Transaction batch → SQL execution        │
-│     Multiple changes per operation type       │
+│  2. Stage Executor (optional)                │
+│     Multi-step SQL → DataSet in memory      │
+│     Each stage receives previous result      │
 │                                              │
-│  3. Result Router                            │
-│     DataSet → Field mapping → Target Sink    │
+│  3. Sink Executor                            │
+│     Final SQL → DataSet                      │
 │                                              │
 │  4. Sink Writer                              │
-│     Batch write with transaction boundary     │
+│     Batch write with transaction boundary    │
 └─────────────────────────────────────────────┘
     ↓
 ┌────────┐
@@ -66,7 +67,8 @@ Transaction T1:
     
 For each change (row):
   1. Build fresh params for this single change
-  2. Execute sink SQL once with those params
+  2. Execute stages (if any) in memory
+  3. Execute sink SQL once with those params
   
 Result: Sink executed 4 times, each with independent parameters
 ```
@@ -87,6 +89,25 @@ When executing SQL, CDC captured data is injected as parameters. **Parameters ar
 | `@{table}_id` | any | The `id` field value (if present in Data), prefixed with table name |
 
 **Per-Change Execution**: Each change is processed independently. If a transaction has 3 row changes, the sink SQL executes 3 times, each with its own fresh parameter set.
+
+### In-Memory Stage Pipeline
+
+When `stages` are defined, they form a pipeline:
+
+```
+CDC change
+    ↓
+Stage 1 SQL → DataSet (in memory)
+    ↓
+Stage 2 SQL → DataSet (in memory)  [previous DataSet fields injected as @stage_* params]
+    ↓
+...
+    ↓
+Sink SQL → DataSet → SQLite
+```
+
+**No temp tables in MSSQL.** Data flows through stages as DataSet objects in Go memory. Each stage receives the previous stage's DataSet as parameters, allowing subsequent stages to reference computed fields.
+
 ### Output Configuration
 
 `output` specifies the target **SQLite table name** directly. The Engine uses `primary_key` to:
@@ -116,6 +137,13 @@ description: "Plugin description"
 # Tables to monitor (CDC source)
 on:
   - table_name
+
+# Optional multi-step SQL stages (executed in order)
+stages:
+  - name: stage_name          # Used for injecting results to next stage
+    sql_file: stage.sql        # Path to external SQL file
+    sql: |                     # Or inline SQL
+      SELECT ...;
 
 # Sink configurations (one for each operation type)
 sinks:
@@ -151,18 +179,16 @@ sinks:
 | `name` | Yes | Plugin name |
 | `description` | No | Plugin description |
 | `on` | Yes | List of tables to monitor |
+| `stages` | No | Multi-step SQL pipeline |
+| `stages[].name` | Yes (if stages used) | Stage name, used to inject results to next stage |
+| `stages[].sql` | Yes (if stages used) | Inline SQL template |
+| `stages[].sql_file` | No | Path to external SQL file (alternative to inline sql) |
 | `sinks` | Yes | Sink configurations keyed by operation type |
 | `sinks[].on` | No | Filter sink to only process changes from specified table. Required when `on` contains multiple tables |
 | `sinks[].sql` | Yes | SQL template (SELECT only) |
 | `sinks[].sql_file` | No | Path to external SQL file (alternative to inline sql) |
 | `sinks[].output` | Yes | Target SQLite table name |
 | `sinks[].primary_key` | Yes | Primary key column name in target table |
-
-### Multi-Table Note
-
-When monitoring multiple tables via `on`, each sink should specify `on` to filter which table's CDC changes it handles. All Data parameters are prefixed with table name:
-- When `orders` changes: `@orders_order_id`, `@orders_amount`, `@orders_status`
-- When `order_items` changes: `@order_items_order_id`, `@order_items_product_id`, `@order_items_quantity`
 
 ---
 
@@ -239,8 +265,9 @@ Transaction T1 changes:
 
 Each change (row) is processed **individually**. For each change:
 1. Build fresh parameters from this change's data
-2. Execute sink SQL once with those parameters
-3. Write result to target
+2. Execute stages in memory (if defined), passing previous DataSet to next
+3. Execute sink SQL once with the final parameters
+4. Collect SinkOp for later batch write
 
 **Change 1 - INSERT orders(order_id=100):**
 
@@ -333,8 +360,6 @@ BEGIN TRANSACTION
 COMMIT
 ```
 
-```
-
 ---
 
 ## Example: 1:1:1 (Single Table CDC, No Join, Single Output)
@@ -405,8 +430,6 @@ sinks:
 
 ---
 
----
-
 ## Example: 1:N:1 (Single Table CDC, Join N Tables, Single Output)
 
 ### Scenario
@@ -435,7 +458,6 @@ on:
 stages:
   - name: join_customers
     sql_file: step1_join_customers.sql
-    temp_table: customers_enriched
     
   - name: join_products
     sql_file: step2_join_products.sql
@@ -444,14 +466,14 @@ sinks:
   insert:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT * FROM join_products;
       output: enriched_orders
       primary_key: order_id
 
   update:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT * FROM join_products;
       output: enriched_orders
       primary_key: order_id
 
@@ -466,28 +488,48 @@ sinks:
 ### step1_join_customers.sql
 
 ```sql
--- Enrich with customer data, store in temp table
+-- Enrich with customer data using CTE
+-- Previous stage results are available as @stage_<name>_<field> params
+WITH base AS (
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    @orders_customer_id as customer_id
+)
 SELECT 
-  @cdc_lsn as cdc_lsn,
-  @cdc_tx_id as cdc_transaction_id,
-  @cdc_table as cdc_source_table,
-  @cdc_operation as cdc_operation,
-  @orders_order_id as order_id,
-  @orders_customer_id as customer_id,
+  b.cdc_lsn,
+  b.cdc_transaction_id,
+  b.cdc_source_table,
+  b.cdc_operation,
+  b.order_id,
+  b.customer_id,
   c.name as customer_name,
   c.email as customer_email,
   c.segment as customer_segment
-INTO #customers_enriched
-FROM (SELECT @orders_customer_id as customer_id, @orders_order_id as order_id) o
-LEFT JOIN customers c ON o.customer_id = c.id;
+FROM base b
+LEFT JOIN customers c ON b.customer_id = c.id;
 ```
 
 ### step2_join_products.sql
 
 ```sql
--- Continue with products enrichment, final result to #products_enriched
+-- Continue with products enrichment
+-- Stage results from join_customers are injected as @join_customers_<field>
 WITH base AS (
-  SELECT * FROM customers_enriched
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    @orders_customer_id as customer_id,
+    -- Fields from previous stage
+    @join_customers_customer_name as customer_name,
+    @join_customers_customer_email as customer_email,
+    @join_customers_customer_segment as customer_segment
 )
 SELECT 
   b.cdc_lsn,
@@ -502,7 +544,6 @@ SELECT
   p.product_name,
   p.category as product_category,
   p.price as product_price
-INTO #products_enriched
 FROM base b
 LEFT JOIN products p ON b.order_id = p.order_id;
 ```
@@ -512,14 +553,22 @@ LEFT JOIN products p ON b.order_id = p.order_id;
 ```
 CDC [order_id: 123, customer_id: 456, product_id: 789]
     ↓
-step1_join_customers.sql → #customers_enriched
+Stage 1 (join_customers): CTE with CDC params + JOIN customers → DataSet
     ↓
-step2_join_products.sql → #products_enriched
+Stage 2 (join_products): CTE with CDC params + previous stage params + JOIN products → DataSet
     ↓
-INSERT/UPDATE sink: SELECT * FROM products_enriched
-    ↓
-enriched_orders table
+Sink: SELECT * FROM join_products → enriched_orders table
 ```
+
+### Stage Parameter Injection
+
+When a stage has a `name`, its resulting DataSet fields are injected into the next stage as `@<stage_name>_<field>` parameters. This allows subsequent stages to reference computed fields from previous stages.
+
+For the example above, after Stage 1 executes, Stage 2 receives these additional parameters:
+- `@join_customers_order_id`
+- `@join_customers_customer_name`
+- `@join_customers_customer_email`
+- `@join_customers_customer_segment`
 
 ---
 
@@ -559,26 +608,26 @@ sinks:
   insert:
     - name: customers_sync
       sql: |
-        SELECT * FROM customers_view;
+        SELECT * FROM fanout WHERE record_type = 'customer';
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT * FROM products_view;
+        SELECT * FROM fanout WHERE record_type = 'product';
       output: products_sync
       primary_key: product_id
 
   update:
     - name: customers_sync
       sql: |
-        SELECT * FROM customers_view;
+        SELECT * FROM fanout WHERE record_type = 'customer';
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT * FROM products_view;
+        SELECT * FROM fanout WHERE record_type = 'product';
       output: products_sync
       primary_key: product_id
 
@@ -599,16 +648,27 @@ sinks:
 ### enrich.sql
 
 ```sql
--- Enrichment: JOIN customers and products, result to #enriched
+-- Enrichment: JOIN customers and products using CTE
+WITH base AS (
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    @orders_customer_id as customer_id,
+    @orders_product_id as product_id,
+    @orders_amount as order_amount
+)
 SELECT 
-  @cdc_lsn as cdc_lsn,
-  @cdc_tx_id as cdc_transaction_id,
-  @cdc_table as cdc_source_table,
-  @cdc_operation as cdc_operation,
-  @orders_order_id as order_id,
-  @orders_customer_id as customer_id,
-  @orders_product_id as product_id,
-  @orders_amount as order_amount,
+  b.cdc_lsn,
+  b.cdc_transaction_id,
+  b.cdc_source_table,
+  b.cdc_operation,
+  b.order_id,
+  b.customer_id,
+  b.product_id,
+  b.order_amount,
   -- Customer fields
   c.name as customer_name,
   c.email as customer_email,
@@ -617,42 +677,69 @@ SELECT
   p.product_name,
   p.category as product_category,
   p.price as product_price
-INTO #enriched
-FROM (SELECT @orders_customer_id as customer_id, @orders_product_id as product_id, @orders_amount as amount) o
-LEFT JOIN customers c ON o.customer_id = c.id
-LEFT JOIN products p ON o.product_id = p.id;
+FROM base b
+LEFT JOIN customers c ON b.customer_id = c.id
+LEFT JOIN products p ON b.product_id = p.id;
 ```
 
 ### fanout.sql
 
 ```sql
--- Fanout: Create two views from enriched result
-
--- View 1: customers_view
+-- Fanout: Route to appropriate record type using CASE expressions
+-- Previous stage results are injected as @enrich_<field>
+WITH base AS (
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    @orders_customer_id as customer_id,
+    @orders_product_id as product_id,
+    -- Fields from enrich stage
+    @enrich_customer_name as customer_name,
+    @enrich_customer_email as customer_email,
+    @enrich_customer_segment as customer_segment,
+    @enrich_product_name as product_name,
+    @enrich_product_category as product_category,
+    @enrich_product_price as product_price,
+    @enrich_order_amount as order_amount
+)
 SELECT 
   cdc_lsn,
   cdc_transaction_id,
   cdc_source_table,
   cdc_operation,
+  'customer' as record_type,
   customer_id,
   customer_name,
   customer_email,
-  customer_segment
-FROM #enriched
-WHERE customer_id IS NOT NULL;
+  customer_segment,
+  NULL as product_id,
+  NULL as product_name,
+  NULL as product_category,
+  NULL as product_price,
+  NULL as order_amount
+FROM base WHERE customer_id IS NOT NULL
 
--- View 2: products_view
+UNION ALL
+
 SELECT 
   cdc_lsn,
   cdc_transaction_id,
   cdc_source_table,
   cdc_operation,
+  'product' as record_type,
+  NULL as customer_id,
+  NULL as customer_name,
+  NULL as customer_email,
+  NULL as customer_segment,
   product_id,
   product_name,
   product_category,
-  product_price
-FROM #enriched
-WHERE product_id IS NOT NULL;
+  product_price,
+  order_amount
+FROM base WHERE product_id IS NOT NULL;
 ```
 
 ### Execution Flow
@@ -660,13 +747,13 @@ WHERE product_id IS NOT NULL;
 ```
 CDC [order_id: 123, customer_id: 456, product_id: 789]
     ↓
-enrich.sql → #enriched
+Stage 1 (enrich): CTE with CDC params + JOIN → DataSet
     ↓
-fanout.sql → #customers_view + #products_view
+Stage 2 (fanout): CTE with CDC params + enrich stage params + UNION ALL → DataSet
     ↓
-INSERT/UPDATE:
-  - customers_sync sink → SELECT * FROM customers_view → customers_sync table
-  - products_sync sink → SELECT * FROM products_view → products_sync table
+Sink:
+  - SELECT * FROM fanout WHERE record_type = 'customer' → customers_sync table
+  - SELECT * FROM fanout WHERE record_type = 'product' → products_sync table
 ```
 
 ---
@@ -709,14 +796,14 @@ sinks:
     - name: orders_sync
       on: orders               # Only process orders table CDC changes
       sql: |
-        SELECT * FROM orders_view;
+        SELECT * FROM fanout WHERE record_type = 'orders';
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items         # Only process order_items table CDC changes
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT * FROM fanout WHERE record_type = 'order_items';
       output: order_items_enriched
       primary_key: id
 
@@ -724,14 +811,14 @@ sinks:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT * FROM orders_view;
+        SELECT * FROM fanout WHERE record_type = 'orders';
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT * FROM fanout WHERE record_type = 'order_items';
       output: order_items_enriched
       primary_key: id
 
@@ -754,18 +841,30 @@ sinks:
 ### join_all.sql
 
 ```sql
--- Handle CDC batch with multiple tables
--- CDC batch data is written to #cdc_batch by Engine
-
+-- Handle CDC change with enrichment
+-- All CDC fields are available as @table_field parameters
+WITH base AS (
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    @orders_customer_id as customer_id,
+    @orders_amount as amount,
+    @order_items_product_id as product_id,
+    @order_items_quantity as quantity
+)
 SELECT 
   b.cdc_lsn,
   b.cdc_transaction_id,
   b.cdc_source_table,
   b.cdc_operation,
   b.order_id,
-  -- orders fields (NULL for order_items)
+  -- orders fields
   b.amount,
-  -- order_items fields (NULL for orders)
+  -- order_items fields
+  b.product_id,
   b.quantity,
   -- Joined customer data
   c.name as customer_name,
@@ -780,8 +879,7 @@ SELECT
     WHEN b.cdc_source_table = 'order_items' THEN p.price * b.quantity
     ELSE b.amount
   END as final_amount
-INTO #enriched_flow
-FROM #cdc_batch b
+FROM base b
 LEFT JOIN customers c ON b.customer_id = c.id
 LEFT JOIN products p ON b.product_id = p.id;
 ```
@@ -790,47 +888,64 @@ LEFT JOIN products p ON b.product_id = p.id;
 
 ```sql
 -- Fanout: Route to appropriate table based on cdc_source_table
-
--- View 1: orders
+-- Previous stage results injected as @join_<field>
+WITH base AS (
+  SELECT 
+    @cdc_lsn as cdc_lsn,
+    @cdc_tx_id as cdc_transaction_id,
+    @cdc_table as cdc_source_table,
+    @cdc_operation as cdc_operation,
+    @orders_order_id as order_id,
+    -- Fields from join stage
+    @join_amount as amount,
+    @join_quantity as quantity,
+    @join_customer_name as customer_name,
+    @join_customer_email as customer_email,
+    @join_customer_segment as customer_segment,
+    @join_product_name as product_name,
+    @join_product_category as product_category,
+    @join_product_price as product_price,
+    @join_final_amount as final_amount
+)
 SELECT 
   cdc_lsn,
   cdc_transaction_id,
   cdc_source_table,
   cdc_operation,
+  'orders' as record_type,
   order_id,
   amount as order_amount,
   customer_name,
   customer_email,
   customer_segment,
+  NULL as product_id,
+  NULL as product_name,
+  NULL as product_category,
+  NULL as product_price,
+  NULL as quantity,
   final_amount
-FROM #enriched_flow
-WHERE cdc_source_table = 'orders';
+FROM base WHERE cdc_source_table = 'orders'
 
--- View 2: order_items
+UNION ALL
+
 SELECT 
   cdc_lsn,
   cdc_transaction_id,
   cdc_source_table,
   cdc_operation,
+  'order_items' as record_type,
   order_id,
-  quantity,
+  NULL as order_amount,
+  NULL as customer_name,
+  NULL as customer_email,
+  NULL as customer_segment,
+  @order_items_product_id as product_id,
   product_name,
   product_category,
   product_price,
+  quantity,
   final_amount
-FROM #enriched_flow
-WHERE cdc_source_table = 'order_items';
-```
-
-### CDC Batch Structure for N:N:N
-
-```
-#cdc_batch (written by Engine):
-
-| cdc_lsn | cdc_tx_id | cdc_source_table | cdc_operation | order_id | customer_id | amount | product_id | quantity |
-|---------|-----------|------------------|---------------|----------|-------------|--------|------------|----------|
-| 0x001   | T1        | orders           | 2             | 123      | 456         | 5000   | NULL       | NULL    |
-| 0x002   | T1        | order_items      | 2             | 123      | NULL        | NULL   | 789        | 2        |
+FROM base WHERE cdc_source_table = 'order_items';
 ```
 
 ### Execution Flow
@@ -840,24 +955,21 @@ Transaction T1 CDC batch:
   orders: {order_id: 123, customer_id: 456, amount: 5000}
   order_items: {order_id: 123, product_id: 789, quantity: 2}
     ↓
-Engine writes to #cdc_batch
+For each change:
     ↓
-join_all.sql → #enriched_flow
+Stage 1 (join): CTE with CDC params + JOIN customers/products → DataSet
     ↓
-fanout.sql:
-  - orders_view → SELECT ... WHERE cdc_source_table = 'orders'
-  - order_items_view → SELECT ... WHERE cdc_source_table = 'order_items'
+Stage 2 (fanout): CTE with CDC params + join stage params + UNION ALL → DataSet
     ↓
-INSERT/UPDATE:
-  - orders_sync sink → orders_enriched table
-  - order_items_sync sink → order_items_enriched table
+Sinks (filtered by `on`):
+  - orders_sync → SELECT WHERE record_type = 'orders' → orders_enriched table
+  - order_items_sync → SELECT WHERE record_type = 'order_items' → order_items_enriched table
 ```
 
 ---
 
 ## Future Enhancements
 
-- Support for external SQL files (`sql_file` field)
 - Multiple sinks per operation type (fan-out)
 - Filter expressions for row-level routing
 - Support for CDC UPDATE_BEFORE (for audit use cases)

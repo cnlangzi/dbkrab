@@ -26,12 +26,16 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB, sqliteDB *sql.DB) *Engine {
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
-// It extracts CDC changes, executes sink SQL against MSSQL, and writes results to SQLite
+// It extracts CDC changes, executes optional stages and sink SQL against MSSQL, and writes results to SQLite
 // Each change (row) is processed individually - if there are 3 row changes, sink is executed 3 times
+// All sink operations are collected and written in one transaction at the end
 func (e *Engine) Handle(tx *core.Transaction) error {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil
 	}
+
+	// Collect all sink operations for batch write
+	var allSinkOps []*SinkOp
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
@@ -47,63 +51,117 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 			continue
 		}
 
-		// Build params for this single change
-		params, err := e.buildParams(&change)
+		// Build CDC params for this single change
+		cdcParams, err := e.buildCDCParams(&change)
 		if err != nil {
 			return fmt.Errorf("build params: %w", err)
 		}
 
-		// Filter sinks by table
+		// Execute stages in memory if defined
+		var stageDataSet *DataSet
+		if len(e.skill.Stages) > 0 {
+			stageDataSet, err = e.executor.ExecuteStages(e.skill, cdcParams)
+			if err != nil {
+				return fmt.Errorf("execute stages: %w", err)
+			}
+		}
+
+		// Build params for sink, including stage results if available
+		sinkParams := e.buildSinkParams(cdcParams, stageDataSet)
+
+		// Filter sinks by table and execute
 		for _, sink := range sinks {
 			if sink.On != "" && sink.On != change.Table {
 				continue
 			}
 
 			// Execute sink SQL against MSSQL
-			ds, err := e.executor.ExecuteDriver(sink.SQL, params)
+			ds, err := e.executor.ExecuteDriver(sink.SQL, sinkParams)
 			if err != nil {
 				return fmt.Errorf("execute sink %s: %w", sink.Name, err)
 			}
 
-			// Write result to SQLite
+			// Collect sink operation for batch write
 			sinkOp := &SinkOp{
 				Config:  sink,
 				DataSet: ds,
 				OpType:  sinkType,
 			}
+			allSinkOps = append(allSinkOps, sinkOp)
+		}
+	}
 
-			if err := e.writer.WriteBatch([]*SinkOp{sinkOp}); err != nil {
-				return fmt.Errorf("write sink %s: %w", sink.Name, err)
-			}
+	// Write all sink operations in one transaction
+	if len(allSinkOps) > 0 {
+		if err := e.writer.WriteBatch(allSinkOps); err != nil {
+			return fmt.Errorf("write batch: %w", err)
 		}
 	}
 
 	return nil
 }
 
-
-// buildParams builds a parameter map from a single change
-// It extracts CDC metadata and data fields with table prefix
-func (e *Engine) buildParams(change *core.Change) (map[string]interface{}, error) {
-	params := make(map[string]interface{})
-
-	// CDC metadata
-	params["cdc_tx_id"] = change.TransactionID
-	params["cdc_lsn"] = hex.EncodeToString(change.LSN)
-	params["cdc_table"] = change.Table
+// buildCDCParams builds CDC parameters from a single change
+func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
+	params := CDCParameters{
+		CDCLSN:       hex.EncodeToString(change.LSN),
+		CDCTxID:      change.TransactionID,
+		CDCTable:     change.Table,
+		CDCOperation: int(change.Operation),
+		Fields:       make(map[string]interface{}),
+	}
 
 	// Add all data fields with table prefix
 	shortTable := shortTableName(change.Table)
 	for k, v := range change.Data {
-		params[fmt.Sprintf("%s_%s", shortTable, k)] = v
+		params.Fields[fmt.Sprintf("%s_%s", shortTable, k)] = v
 	}
 
 	// Add id field if exists
 	if id, ok := change.Data["id"]; ok {
-		params[shortTable+"_id"] = id
+		params.Fields[shortTable+"_id"] = id
 	}
 
 	return params, nil
+}
+
+// buildSinkParams builds parameters for sink execution, merging CDC params with stage results
+func (e *Engine) buildSinkParams(cdcParams CDCParameters, stageDataSet *DataSet) map[string]interface{} {
+	params := make(map[string]interface{})
+
+	// CDC metadata
+	params["cdc_lsn"] = cdcParams.CDCLSN
+	params["cdc_tx_id"] = cdcParams.CDCTxID
+	params["cdc_table"] = cdcParams.CDCTable
+	params["cdc_operation"] = cdcParams.CDCOperation
+
+	// CDC data fields
+	for k, v := range cdcParams.Fields {
+		params[k] = v
+	}
+
+	// Add stage results as @<stage_name>_<field> if available
+	if stageDataSet != nil && len(stageDataSet.Rows) > 0 {
+		// Get the last stage name
+		if len(e.skill.Stages) > 0 {
+			lastStage := e.skill.Stages[len(e.skill.Stages)-1]
+			stageName := lastStage.Name
+			if stageName == "" {
+				stageName = lastStage.TempTable
+			}
+
+			if stageName != "" {
+				row := stageDataSet.Rows[0]
+				for i, col := range stageDataSet.Columns {
+					if i < len(row) {
+						params[fmt.Sprintf("%s_%s", stageName, col)] = row[i]
+					}
+				}
+			}
+		}
+	}
+
+	return params
 }
 
 // operationToSinkType converts core.Operation to sqlplugin.Operation
@@ -120,7 +178,6 @@ func (e *Engine) operationToSinkType(op core.Operation) Operation {
 		return 0 // 0 is not valid, indicates skip
 	}
 }
-
 
 // shortTableName extracts short table name (e.g., dbo.orders -> orders)
 func shortTableName(table string) string {

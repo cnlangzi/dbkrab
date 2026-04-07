@@ -68,53 +68,80 @@ func (e *Executor) ExecuteDriver(sqlTmpl string, params map[string]interface{}) 
 	return e.driver.Execute(sqlTmpl, params)
 }
 
-// ExecuteStages executes multi-step SQL stages
-func (e *Executor) ExecuteStages(skill *Skill, params CDCParameters) (map[string]*DataSet, error) {
-	results := make(map[string]*DataSet)
+// ExecuteStages executes multi-step SQL stages in memory
+// Each stage receives the previous stage's DataSet as parameters
+// No temp tables in MSSQL - data flows as DataSet objects in Go memory
+func (e *Executor) ExecuteStages(skill *Skill, params CDCParameters) (*DataSet, error) {
+	if len(skill.Stages) == 0 {
+		return nil, nil
+	}
+
+	var currentDataSet *DataSet
 
 	for _, stage := range skill.Stages {
 		if stage.SQL == "" {
 			continue
 		}
 
+		// Build stage-specific params by merging CDC params with previous stage results
+		stageParams := e.buildStageParams(params, stage.Name, currentDataSet)
+
 		// Substitute parameters
-		sql, err := e.substituteParams(stage.SQL, params)
+		sql, err := e.substituteParams(stage.SQL, stageParams)
 		if err != nil {
 			return nil, NewExecutionError(stage.SQL, nil, err)
 		}
 
 		// Execute the stage SQL
-		_, err = e.db.Exec(sql)
+		ds, err := e.executeQuery(sql)
 		if err != nil {
 			return nil, NewExecutionError(stage.SQL, nil, err)
 		}
 
-		// If stage has a name/temp_table, it's a temporary table we can query
-		stageName := stage.Name
-		if stageName == "" && stage.TempTable != "" {
-			stageName = stage.TempTable
-		}
+		currentDataSet = ds
+	}
 
-		// Query the temp table to get results for the next stage
-		if stageName != "" {
-			// Check if the temp table exists and has data
-			query := fmt.Sprintf("SELECT * FROM %s", stageName)
-			rows, err := e.db.Query(query)
-			if err != nil {
-				// Table might not exist, skip
-				continue
-			}
-			defer func() { _ = rows.Close() }()
+	return currentDataSet, nil
+}
 
-			ds, err := e.scanRows(rows)
-			if err != nil {
-				return nil, err
+// buildStageParams builds parameters for a stage, merging CDC params with previous stage results
+// Previous stage results are injected as @<stage_name>_<field> parameters
+func (e *Executor) buildStageParams(cdcParams CDCParameters, stageName string, prevDataSet *DataSet) CDCParameters {
+	params := CDCParameters{
+		CDCLSN:       cdcParams.CDCLSN,
+		CDCTxID:      cdcParams.CDCTxID,
+		CDCTable:     cdcParams.CDCTable,
+		CDCOperation: cdcParams.CDCOperation,
+		Fields:       make(map[string]interface{}),
+	}
+
+	// Copy CDC fields
+	for k, v := range cdcParams.Fields {
+		params.Fields[k] = v
+	}
+
+	// Add previous stage results as @<stageName>_<field>
+	if prevDataSet != nil && stageName != "" && len(prevDataSet.Rows) > 0 {
+		row := prevDataSet.Rows[0] // Use first row
+		for i, col := range prevDataSet.Columns {
+			if i < len(row) {
+				params.Fields[fmt.Sprintf("%s_%s", stageName, col)] = row[i]
 			}
-			results[stageName] = ds
 		}
 	}
 
-	return results, nil
+	return params
+}
+
+// executeQuery executes a SELECT query and returns DataSet
+func (e *Executor) executeQuery(sql string) (*DataSet, error) {
+	rows, err := e.db.Query(sql)
+	if err != nil {
+		return nil, NewExecutionError(sql, nil, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return e.scanRows(rows)
 }
 
 // substituteParams replaces parameter placeholders with actual values
