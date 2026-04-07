@@ -30,7 +30,7 @@ func (w *Writer) WriteUpsert(table string, pk string, ds *DataSet) error {
 	if err != nil {
 		return NewWriteError(table, fmt.Errorf("begin transaction: %w", err))
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Build and execute INSERT OR REPLACE for each row
 	for _, row := range ds.Rows {
@@ -113,7 +113,7 @@ func (w *Writer) WriteDelete(table string, pk string, ds *DataSet) error {
 	if err != nil {
 		return NewWriteError(table, fmt.Errorf("begin transaction: %w", err))
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Collect primary key values
 	pkIndex := -1
