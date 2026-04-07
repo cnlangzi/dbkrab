@@ -66,20 +66,20 @@ func (l *Loader) validate(skill *Skill) error {
 	return nil
 }
 
-// loadSQLFiles loads external SQL files referenced in stages and sinks
+// loadSQLFiles loads external SQL files referenced in jobs and sinks
 func (l *Loader) loadSQLFiles(skill *Skill, pluginName string) error {
 	pluginDir := filepath.Join(l.pluginsDir, pluginName)
 
-	// Load stage SQL files
-	for i := range skill.Stages {
-		stage := &skill.Stages[i]
-		if stage.SQLFile != "" {
-			sqlPath := filepath.Join(pluginDir, stage.SQLFile)
+	// Load job SQL files
+	for i := range skill.Jobs {
+		job := &skill.Jobs[i]
+		if job.SQLFile != "" {
+			sqlPath := filepath.Join(pluginDir, job.SQLFile)
 			data, err := os.ReadFile(sqlPath)
 			if err != nil {
-				return fmt.Errorf("read stage SQL file %s: %w", stage.SQLFile, ErrSQLFileNotFound)
+				return fmt.Errorf("read job SQL file %s: %w", job.SQLFile, ErrSQLFileNotFound)
 			}
-			stage.SQL = string(data)
+			job.SQL = string(data)
 		}
 	}
 

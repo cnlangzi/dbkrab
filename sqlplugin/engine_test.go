@@ -57,36 +57,36 @@ func TestEngine_Handle(t *testing.T) {
 			},
 		}
 
-		params, err := engine.buildParams(change)
+		params, err := engine.buildCDCParams(change)
 		if err != nil {
 			t.Fatalf("buildParams failed: %v", err)
 		}
 
 		// Verify CDC metadata
-		if params["cdc_tx_id"] != "tx-123" {
-			t.Errorf("expected cdc_tx_id = tx-123, got %v", params["cdc_tx_id"])
+		if params.CDCTxID != "tx-123" {
+			t.Errorf("expected cdc_tx_id = tx-123, got %v", params.CDCTxID)
 		}
 
-		if params["cdc_lsn"] != "010203" {
-			t.Errorf("expected cdc_lsn = 010203, got %v", params["cdc_lsn"])
+		if params.CDCLSN != "010203" {
+			t.Errorf("expected cdc_lsn = 010203, got %v", params.CDCLSN)
 		}
 
-		if params["cdc_table"] != "orders" {
-			t.Errorf("expected cdc_table = orders, got %v", params["cdc_table"])
+		if params.CDCTable != "orders" {
+			t.Errorf("expected cdc_table = orders, got %v", params.CDCTable)
 		}
 
 		// Verify data fields with prefix
-		if params["orders_order_id"] != 100 {
-			t.Errorf("expected orders_order_id = 100, got %v", params["orders_order_id"])
+		if params.Fields["orders_order_id"] != 100 {
+			t.Errorf("expected orders_order_id = 100, got %v", params.Fields["orders_order_id"])
 		}
 
-		if params["orders_amount"] != 500 {
-			t.Errorf("expected orders_amount = 500, got %v", params["orders_amount"])
+		if params.Fields["orders_amount"] != 500 {
+			t.Errorf("expected orders_amount = 500, got %v", params.Fields["orders_amount"])
 		}
 
 		// Verify orders_id is NOT set (order_id is not id)
-		if params["orders_id"] != nil {
-			t.Errorf("expected orders_id = nil (order_id is not id), got %v", params["orders_id"])
+		if params.Fields["orders_id"] != nil {
+			t.Errorf("expected orders_id = nil (order_id is not id), got %v", params.Fields["orders_id"])
 		}
 	})
 
