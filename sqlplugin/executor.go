@@ -7,27 +7,40 @@ import (
 )
 
 // Executor executes SQL templates with parameter substitution
+// It supports both string substitution and driver-based parameterized execution
 type Executor struct {
-	db *sql.DB
+	db     *sql.DB
+	driver DriverExecutor
 }
 
 // NewExecutor creates a new SQL template executor
+// For backwards compatibility, uses string substitution by default
 func NewExecutor(db *sql.DB) *Executor {
 	return &Executor{db: db}
 }
 
-// Execute executes a SQL template with parameters
+// NewExecutorWithDriver creates a new executor with a specific driver
+// dbType: "mssql" or "sqlite"
+func NewExecutorWithDriver(db *sql.DB, dbType DriverType) *Executor {
+	var driver DriverExecutor
+	switch dbType {
+	case DriverMSSQL:
+		driver = NewMSSQLExecutor(db)
+	case DriverSQLite:
+		driver = NewSQLiteExecutor(db)
+	default:
+		panic("unsupported driver type: " + string(dbType) + "")
+	}
+	return &Executor{db: db, driver: driver}
+}
+
+// Execute executes a SQL template with parameters using string substitution
+// For backwards compatibility - considers using ExecuteDriver for parameterized queries
 func (e *Executor) Execute(sqlTmpl string, params CDCParameters) (*DataSet, error) {
 	// Substitute parameters
 	sql, err := e.substituteParams(sqlTmpl, params)
 	if err != nil {
-		return nil, NewExecutionError(sqlTmpl, map[string]interface{}{
-			"cdc_lsn": params.CDCLSN,
-			"cdc_tx_id": params.CDCTxID,
-			"cdc_table": params.CDCTable,
-			"cdc_operation": params.CDCOperation,
-			"fields": params.Fields,
-		}, err)
+		return nil, NewExecutionError(sqlTmpl, nil, err)
 	}
 
 	// Execute query
@@ -44,6 +57,15 @@ func (e *Executor) Execute(sqlTmpl string, params CDCParameters) (*DataSet, erro
 	}
 
 	return ds, nil
+}
+
+// ExecuteDriver executes a SQL template using driver-based parameterized queries
+// This is the preferred method for security (SQL injection prevention)
+func (e *Executor) ExecuteDriver(sqlTmpl string, params map[string]interface{}) (*DataSet, error) {
+	if e.driver == nil {
+		panic("driver not configured - use NewExecutorWithDriver")
+	}
+	return e.driver.Execute(sqlTmpl, params)
 }
 
 // ExecuteStages executes multi-step SQL stages
