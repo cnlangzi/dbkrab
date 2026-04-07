@@ -18,9 +18,8 @@ import (
 type SQLPlugin struct {
 	Name     string
 	Skill    *sqlplugin.Skill
+	Engine   *sqlplugin.Engine // SQL Plugin execution engine
 	Loader   *sqlplugin.Loader
-	Executor *sqlplugin.Executor
-	Router   *sqlplugin.Router
 	Writer   *sqlplugin.Writer
 }
 
@@ -66,15 +65,13 @@ func (m *Manager) InitSQLPlugins(mssqlDB *sql.DB, sqliteWriter *sqlplugin.Writer
 	}
 
 	for name, skill := range plugins {
-		executor := sqlplugin.NewExecutor(mssqlDB)
-		router := sqlplugin.NewRouter()
+		engine := sqlplugin.NewEngine(skill, mssqlDB, sqliteWriter.DB())
 
 		m.sqlPlugins[name] = &SQLPlugin{
 			Name:     name,
 			Skill:    skill,
+			Engine:   engine,
 			Loader:   loader,
-			Executor: executor,
-			Router:   router,
 			Writer:   sqliteWriter,
 		}
 	}
@@ -191,105 +188,8 @@ func (m *Manager) Handle(tx *core.Transaction) error {
 
 // handleSQLPlugin processes a transaction through a SQL plugin
 func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
-	skill := p.Skill
-
-	// Group changes by table and operation
-	changesByTable := make(map[string][]sqlplugin.ChangeItem)
-	for _, change := range tx.Changes {
-		opType := toOperation(change.Operation)
-		item := sqlplugin.ChangeItem{
-			Table:     change.Table,
-			LSN:       fmt.Sprintf("%x", change.LSN),
-			TxID:      change.TransactionID,
-			Operation: opType,
-			Data:      change.Data,
-		}
-
-		// Extract primary key from data
-		changesByTable[change.Table] = append(changesByTable[change.Table], item)
-	}
-
-	// Process each table
-	for tableName, changes := range changesByTable {
-		for _, change := range changes {
-			opType := change.Operation
-			sinkType := sqlplugin.OperationToSinkType(opType)
-
-			// Get sinks for this operation type
-			sinks := skill.GetSinks(opType)
-			if len(sinks) == 0 {
-				continue
-			}
-
-			// Filter sinks by table if multi-table
-			sinks = sqlplugin.FilterSinks(sinks, tableName)
-			if len(sinks) == 0 {
-				continue
-			}
-
-			// Build CDC parameters
-			params := sqlplugin.CDCParameters{
-				CDCLSN:       change.LSN,
-				CDCTxID:      change.TxID,
-				CDCTable:     tableName,
-				CDCOperation: int(opType),
-				Fields:       change.Data,
-			}
-			// Execute stages if present
-				var err error
-			if len(skill.Stages) > 0 {
-				_, err = p.Executor.ExecuteStages(skill, params)
-				if err != nil {
-					return fmt.Errorf("execute stages: %w", err)
-				}
-			}
-
-			// Execute sink SQL and write results
-			for _, sink := range sinks {
-				var ds *sqlplugin.DataSet
-
-				// If stages were executed, query the stage results
-				if sink.SQL != "" {
-					
-					_, err = p.Executor.ExecuteInline(sink.SQL)
-					if err != nil {
-						return fmt.Errorf("execute sink SQL: %w", err)
-					}
-				}
-
-				// Write to SQLite
-				if ds != nil && len(ds.Rows) > 0 {
-					if sinkType == "delete" {
-						if err := p.Writer.WriteDelete(sink.Output, sink.PrimaryKey, ds); err != nil {
-							return fmt.Errorf("write delete: %w", err)
-						}
-					} else {
-						if err := p.Writer.WriteUpsert(sink.Output, sink.PrimaryKey, ds); err != nil {
-							return fmt.Errorf("write upsert: %w", err)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// toOperation converts core.Operation to sqlplugin.Operation
-func toOperation(op core.Operation) sqlplugin.Operation {
-	switch op {
-	case core.OpDelete:
-		return sqlplugin.Delete
-	case core.OpInsert:
-		return sqlplugin.Insert
-	case core.OpUpdateBefore:
-		return sqlplugin.Update
-	case core.OpUpdateAfter:
-		return sqlplugin.Update
-	default:
-		return sqlplugin.Insert
-	}
+	// Use the Engine to handle the transaction
+	return p.Engine.Handle(tx)
 }
 
 // List returns all loaded plugins (both SQL and WASM)

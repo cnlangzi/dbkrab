@@ -1,8 +1,9 @@
 # SQL Plugin Architecture
 
-**Version**: 1.2  
+**Version**: 2.0  
 **Status**: Draft  
-**Created**: 2026-04-06
+**Created**: 2026-04-06  
+**Updated**: 2026-04-07
 
 ---
 
@@ -31,15 +32,15 @@ Core Poller (Transaction-based batch collection)
 │  1. Input Mapper                             │
 │     CDC data → SQL Parameters (@cdc_*, @*)   │
 │                                              │
-│  2. SQL Template Executor                    │
-│     Transaction batch → SQL execution        │
-│     Multiple changes per operation type       │
+│  2. Job Executor (optional)                  │
+│     Parallel SQL jobs → DataSet             │
+│     Each job independent, no cross-reference │
 │                                              │
-│  3. Result Router                            │
-│     DataSet → Field mapping → Target Sink    │
+│  3. Sink Executor                            │
+│     Sink SQL → DataSet                       │
 │                                              │
 │  4. Sink Writer                              │
-│     Batch write with transaction boundary     │
+│     Batch write with transaction boundary    │
 └─────────────────────────────────────────────┘
     ↓
 ┌────────┐
@@ -66,16 +67,17 @@ Transaction T1:
     
 For each change (row):
   1. Build fresh params for this single change
-  2. Execute sink SQL once with those params
+  2. Execute all jobs in parallel (if any)
+  3. Execute sink SQL for this operation type
   
-Result: Sink executed 4 times, each with independent parameters
+Result: Jobs and sinks execute per change, all results written in one transaction
 ```
 
 **Key principle**: Each change gets its own independent execution context. Parameters are NOT shared between changes.
 
 ### CDC Parameters
 
-When executing SQL, CDC captured data is injected as parameters. **Parameters are built fresh for each change (row)**:
+When executing SQL (jobs or sinks), CDC captured data is injected as parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -86,7 +88,33 @@ When executing SQL, CDC captured data is injected as parameters. **Parameters ar
 | `@{table}_{field}` | any | Data field value, prefixed with table name (e.g., `@orders_order_id`) |
 | `@{table}_id` | any | The `id` field value (if present in Data), prefixed with table name |
 
-**Per-Change Execution**: Each change is processed independently. If a transaction has 3 row changes, the sink SQL executes 3 times, each with its own fresh parameter set.
+### Jobs vs Sinks
+
+**Jobs** (optional):
+- Execute SQL against MSSQL in parallel
+- Each job produces a DataSet that is written to SQLite
+- Jobs have their own `output` table name
+- Jobs run for ALL operation types (not filtered by INSERT/UPDATE/DELETE)
+
+**Sinks** (required):
+- Execute SQL against MSSQL based on operation type
+- Each sink produces a DataSet that is written to SQLite
+- Sink `output` specifies the target table
+- Sinks are filtered by `on` table and operation type
+
+### Execution Flow
+
+```
+CDC change (e.g., INSERT on orders)
+    ↓
+[Job 1] SQL → DataSet → SQLite (table: job1_output)
+[Job 2] SQL → DataSet → SQLite (table: job2_output)
+    ↓
+[Sink] SQL (filtered by INSERT) → DataSet → SQLite (table: sink_output)
+    ↓
+All writes happen in one transaction
+```
+
 ### Output Configuration
 
 `output` specifies the target **SQLite table name** directly. The Engine uses `primary_key` to:
@@ -117,11 +145,19 @@ description: "Plugin description"
 on:
   - table_name
 
+# Optional parallel SQL jobs (executed before sinks, for all operation types)
+jobs:
+  - name: job_name          # Job identifier
+    sql_file: job.sql        # Path to external SQL file
+    sql: |                     # Or inline SQL
+      SELECT ... FROM table WHERE id = @table_id;
+    output: job_output_table   # Target table in SQLite
+
 # Sink configurations (one for each operation type)
 sinks:
   insert:
     - name: sink_name
-      on: table_name         # Optional: filter by source table (required for multi-table plugins)
+      on: table_name         # Optional: filter by source table
       sql: |
         SELECT ... FROM source_table WHERE id = @table_id;
       output: target_table      # SQLite table name
@@ -129,18 +165,18 @@ sinks:
 
   update:
     - name: sink_name
-      on: table_name         # Optional: filter by source table
+      on: table_name
       sql: |
         SELECT ... FROM source_table WHERE id = @table_id;
-      output: target_table      # SQLite table name
+      output: target_table
       primary_key: id
 
   delete:
     - name: sink_name
-      on: table_name         # Optional: filter by source table
+      on: table_name
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
-      output: target_table      # SQLite table name
+      output: target_table
       primary_key: id
 ```
 
@@ -151,18 +187,17 @@ sinks:
 | `name` | Yes | Plugin name |
 | `description` | No | Plugin description |
 | `on` | Yes | List of tables to monitor |
+| `jobs` | No | Parallel SQL jobs (executed for all operations) |
+| `jobs[].name` | Yes (if jobs used) | Job name (identifier) |
+| `jobs[].sql` | Yes (if jobs used) | Inline SQL template |
+| `jobs[].sql_file` | No | Path to external SQL file |
+| `jobs[].output` | Yes (if jobs used) | Target SQLite table name |
 | `sinks` | Yes | Sink configurations keyed by operation type |
-| `sinks[].on` | No | Filter sink to only process changes from specified table. Required when `on` contains multiple tables |
+| `sinks[].on` | No | Filter sink to only process changes from specified table |
 | `sinks[].sql` | Yes | SQL template (SELECT only) |
-| `sinks[].sql_file` | No | Path to external SQL file (alternative to inline sql) |
+| `sinks[].sql_file` | No | Path to external SQL file |
 | `sinks[].output` | Yes | Target SQLite table name |
 | `sinks[].primary_key` | Yes | Primary key column name in target table |
-
-### Multi-Table Note
-
-When monitoring multiple tables via `on`, each sink should specify `on` to filter which table's CDC changes it handles. All Data parameters are prefixed with table name:
-- When `orders` changes: `@orders_order_id`, `@orders_amount`, `@orders_status`
-- When `order_items` changes: `@order_items_order_id`, `@order_items_product_id`, `@order_items_quantity`
 
 ---
 
@@ -170,24 +205,15 @@ When monitoring multiple tables via `on`, each sink should specify `on` to filte
 
 ### INSERT
 
-CDC INSERT operation triggers the `insert` sink.
-
-- SQL executes against **source database**
-- Target behavior: **Upsert** (INSERT if not exists, UPDATE if exists)
+CDC INSERT operation triggers the `insert` sinks.
 
 ### UPDATE
 
-CDC UPDATE (after-image, operation=4) triggers the `update` sink.
-
-- SQL executes against **source database**
-- Target behavior: **Upsert**
+CDC UPDATE (after-image, operation=4) triggers the `update` sinks.
 
 ### DELETE
 
-CDC DELETE operation triggers the `delete` sink.
-
-- SQL may or may not query database (see scenarios below)
-- Target behavior: **DELETE**
+CDC DELETE operation triggers the `delete` sinks.
 
 ---
 
@@ -214,125 +240,9 @@ When target table primary key or structure differs from source:
 delete:
   - name: sync
     sql: |
-      -- Query target database to find mapped primary key
       SELECT @orders_order_id as target_id FROM order_sync WHERE source_order_id = @orders_order_id;
     output: order_sync
     primary_key: id
-```
-
----
-
-## Execution Flow
-
-### 1. CDC Batch Collection
-
-Poller collects CDC changes within a transaction:
-
-```
-Transaction T1 changes:
-  orders INSERT: [{order_id: 100, amount: 500}, {order_id: 101, amount: 300}]
-  orders UPDATE: [{order_id: 200, status: 'completed'}]
-  orders DELETE: [{order_id: 300}]
-```
-
-### 2. Per-Change Processing
-
-Each change (row) is processed **individually**. For each change:
-1. Build fresh parameters from this change's data
-2. Execute sink SQL once with those parameters
-3. Write result to target
-
-**Change 1 - INSERT orders(order_id=100):**
-
-```sql
--- @cdc_lsn = '0x0001A2B1'
--- @cdc_tx_id = 'T1'
--- @cdc_table = 'orders'
--- @cdc_operation = 2
--- @orders_order_id = 100
--- @orders_amount = 500
-
-SELECT 
-  @cdc_lsn as cdc_lsn,
-  @cdc_tx_id as cdc_transaction_id,
-  @cdc_table as cdc_source_table,
-  @cdc_operation as cdc_operation,
-  o.order_id,
-  o.amount,
-  o.status,
-  o.created_at
-FROM orders o
-WHERE o.order_id = 100;
-```
-
-**Change 2 - INSERT orders(order_id=101):**
-
-```sql
--- @cdc_lsn = '0x0001A2B2'
--- @cdc_tx_id = 'T1'
--- @cdc_table = 'orders'
--- @cdc_operation = 2
--- @orders_order_id = 101
--- @orders_amount = 300
-
-SELECT ... WHERE o.order_id = 101;
-```
-
-**Change 3 - UPDATE orders(order_id=200):**
-
-```sql
--- @cdc_lsn = '0x0001A2C0'
--- @cdc_tx_id = 'T1'
--- @cdc_table = 'orders'
--- @cdc_operation = 4
--- @orders_order_id = 200
-
-SELECT ... WHERE o.order_id = 200;
-```
-
-**Change 4 - DELETE orders(order_id=300):**
-
-```sql
--- @cdc_lsn = '0x0001A2D0'
--- @cdc_tx_id = 'T1'
--- @cdc_table = 'orders'
--- @cdc_operation = 1
--- @orders_order_id = 300
-
-SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
-```
-
-### 3. Result Collection
-
-Each SQL execution returns a DataSet:
-
-```
-Change 1 DataSet:
-  [{order_id: 100, amount: 500, status: 'pending', ...}]
-
-Change 2 DataSet:
-  [{order_id: 101, amount: 300, status: 'pending', ...}]
-
-Change 3 DataSet:
-  [{order_id: 200, status: 'completed', ...}]
-
-Change 4 DataSet:
-  [{cdc_lsn: '0x0001A2D0', order_id: 300}]
-```
-
-### 4. Sink Write (Transaction Boundary)
-
-All sink operations within the same CDC transaction are written as one transaction to target database:
-
-```
-BEGIN TRANSACTION
-  INSERT INTO order_sync (...) VALUES (...)
-  INSERT INTO order_sync (...) VALUES (...)
-  UPDATE order_sync SET ... WHERE order_id = 200
-  DELETE FROM order_sync WHERE order_id = 300
-COMMIT
-```
-
 ```
 
 ---
@@ -375,7 +285,7 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id = @orders_order_id;
-      output: order_sync        # SQLite table name
+      output: order_sync
       primary_key: order_id
 
   update:
@@ -392,35 +302,31 @@ sinks:
           o.created_at
         FROM orders o
         WHERE o.order_id = @orders_order_id;
-      output: order_sync        # SQLite table name
+      output: order_sync
       primary_key: order_id
 
   delete:
     - name: sync
       sql: |
         SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
-      output: order_sync        # SQLite table name
+      output: order_sync
       primary_key: order_id
 ```
 
 ---
 
----
-
-## Example: 1:N:1 (Single Table CDC, Join N Tables, Single Output)
+## Example: 1:N:1 with Jobs (Single Table CDC, Join N Tables, Single Output)
 
 ### Scenario
 
-Monitor `orders` table, JOIN `customers` and `products` tables to enrich data, output to single table `enriched_orders`.
+Monitor `orders` table. Use jobs to pre-fetch related data. Join with customers and products in sink SQL.
 
 ### Directory Structure
 
 ```
 sql_plugins/
 └── enrich_orders/
-    ├── skill.yml
-    ├── step1_join_customers.sql
-    └── step2_join_products.sql
+    └── skill.yml
 ```
 
 ### skill.yml
@@ -432,26 +338,71 @@ description: "orders CDC with customer and product enrichment"
 on:
   - orders
 
-stages:
-  - name: join_customers
-    sql_file: step1_join_customers.sql
-    temp_table: customers_enriched
-    
-  - name: join_products
-    sql_file: step2_join_products.sql
+jobs:
+  - name: fetch_customers
+    sql: |
+      SELECT 
+        @orders_customer_id as customer_id,
+        c.name as customer_name,
+        c.email as customer_email,
+        c.segment as customer_segment
+      FROM customers c
+      WHERE c.customer_id = @orders_customer_id;
+    output: customers_cache
+
+  - name: fetch_products
+    sql: |
+      SELECT 
+        @orders_product_id as product_id,
+        p.product_name,
+        p.category as product_category,
+        p.price as product_price
+      FROM products p
+      WHERE p.product_id = @orders_product_id;
+    output: products_cache
 
 sinks:
   insert:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM customers c
+        LEFT JOIN products p ON p.product_id = @orders_product_id
+        WHERE c.customer_id = @orders_customer_id;
       output: enriched_orders
       primary_key: order_id
 
   update:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM customers c
+        LEFT JOIN products p ON p.product_id = @orders_product_id
+        WHERE c.customer_id = @orders_customer_id;
       output: enriched_orders
       primary_key: order_id
 
@@ -463,122 +414,114 @@ sinks:
       primary_key: order_id
 ```
 
-### step1_join_customers.sql
-
-```sql
--- Enrich with customer data, store in temp table
-SELECT 
-  @cdc_lsn as cdc_lsn,
-  @cdc_tx_id as cdc_transaction_id,
-  @cdc_table as cdc_source_table,
-  @cdc_operation as cdc_operation,
-  @orders_order_id as order_id,
-  @orders_customer_id as customer_id,
-  c.name as customer_name,
-  c.email as customer_email,
-  c.segment as customer_segment
-INTO #customers_enriched
-FROM (SELECT @orders_customer_id as customer_id, @orders_order_id as order_id) o
-LEFT JOIN customers c ON o.customer_id = c.id;
-```
-
-### step2_join_products.sql
-
-```sql
--- Continue with products enrichment, final result to #products_enriched
-WITH base AS (
-  SELECT * FROM customers_enriched
-)
-SELECT 
-  b.cdc_lsn,
-  b.cdc_transaction_id,
-  b.cdc_source_table,
-  b.cdc_operation,
-  b.order_id,
-  b.customer_id,
-  b.customer_name,
-  b.customer_email,
-  b.customer_segment,
-  p.product_name,
-  p.category as product_category,
-  p.price as product_price
-INTO #products_enriched
-FROM base b
-LEFT JOIN products p ON b.order_id = p.order_id;
-```
-
 ### Execution Flow
 
 ```
 CDC [order_id: 123, customer_id: 456, product_id: 789]
     ↓
-step1_join_customers.sql → #customers_enriched
+Job: fetch_customers → customers_cache table
+Job: fetch_products → products_cache table
     ↓
-step2_join_products.sql → #products_enriched
+INSERT sink → enriched_orders table
     ↓
-INSERT/UPDATE sink: SELECT * FROM products_enriched
-    ↓
-enriched_orders table
+All tables written in one transaction
 ```
 
 ---
 
-## Example: 1:N:N (Single Table CDC, Join N Tables, Multiple Outputs)
+## Example: 1:N:N (Single Table CDC, Fan-out to Multiple Tables)
 
 ### Scenario
 
-Monitor `orders` table, JOIN `customers` and `products` tables, split into two outputs: `customers_sync` and `products_sync`.
-
-### Directory Structure
-
-```
-sql_plugins/
-└── sync_orders_split/
-    ├── skill.yml
-    ├── enrich.sql
-    └── fanout.sql
-```
+Monitor `orders` table, output to two separate tables: `customers_sync` and `products_sync`.
 
 ### skill.yml
 
 ```yaml
 name: sync_orders_split
-description: "orders CDC enrich and fanout to two tables"
+description: "orders CDC fanout to customers and products tables"
 
 on:
   - orders
 
-stages:
-  - name: enrich
-    sql_file: enrich.sql
-
-  - name: fanout
-    sql_file: fanout.sql
+jobs:
+  - name: log_order_event
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_tx_id,
+        @cdc_table as cdc_table,
+        @cdc_operation as cdc_operation,
+        @orders_order_id as order_id,
+        @orders_customer_id as customer_id,
+        @orders_product_id as product_id,
+        GETDATE() as logged_at
+    output: order_events
 
 sinks:
   insert:
     - name: customers_sync
       sql: |
-        SELECT * FROM customers_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT * FROM products_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_product_id as product_id,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @orders_product_id;
       output: products_sync
       primary_key: product_id
 
   update:
     - name: customers_sync
       sql: |
-        SELECT * FROM customers_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT * FROM products_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_product_id as product_id,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @orders_product_id;
       output: products_sync
       primary_key: product_id
 
@@ -596,96 +539,13 @@ sinks:
       primary_key: product_id
 ```
 
-### enrich.sql
-
-```sql
--- Enrichment: JOIN customers and products, result to #enriched
-SELECT 
-  @cdc_lsn as cdc_lsn,
-  @cdc_tx_id as cdc_transaction_id,
-  @cdc_table as cdc_source_table,
-  @cdc_operation as cdc_operation,
-  @orders_order_id as order_id,
-  @orders_customer_id as customer_id,
-  @orders_product_id as product_id,
-  @orders_amount as order_amount,
-  -- Customer fields
-  c.name as customer_name,
-  c.email as customer_email,
-  c.segment as customer_segment,
-  -- Product fields
-  p.product_name,
-  p.category as product_category,
-  p.price as product_price
-INTO #enriched
-FROM (SELECT @orders_customer_id as customer_id, @orders_product_id as product_id, @orders_amount as amount) o
-LEFT JOIN customers c ON o.customer_id = c.id
-LEFT JOIN products p ON o.product_id = p.id;
-```
-
-### fanout.sql
-
-```sql
--- Fanout: Create two views from enriched result
-
--- View 1: customers_view
-SELECT 
-  cdc_lsn,
-  cdc_transaction_id,
-  cdc_source_table,
-  cdc_operation,
-  customer_id,
-  customer_name,
-  customer_email,
-  customer_segment
-FROM #enriched
-WHERE customer_id IS NOT NULL;
-
--- View 2: products_view
-SELECT 
-  cdc_lsn,
-  cdc_transaction_id,
-  cdc_source_table,
-  cdc_operation,
-  product_id,
-  product_name,
-  product_category,
-  product_price
-FROM #enriched
-WHERE product_id IS NOT NULL;
-```
-
-### Execution Flow
-
-```
-CDC [order_id: 123, customer_id: 456, product_id: 789]
-    ↓
-enrich.sql → #enriched
-    ↓
-fanout.sql → #customers_view + #products_view
-    ↓
-INSERT/UPDATE:
-  - customers_sync sink → SELECT * FROM customers_view → customers_sync table
-  - products_sync sink → SELECT * FROM products_view → products_sync table
-```
-
 ---
 
 ## Example: N:N:N (Multiple Tables CDC, Join N Tables, Multiple Outputs)
 
 ### Scenario
 
-Monitor `orders` and `order_items` tables (same transaction), JOIN `customers` and `products` tables, output to `orders_enriched` and `order_items_enriched` separately.
-
-### Directory Structure
-
-```
-sql_plugins/
-└── sync_order_flow/
-    ├── skill.yml
-    ├── join_all.sql
-    └── fanout.sql
-```
+Monitor `orders` and `order_items` tables (same transaction), output to `orders_enriched` and `order_items_enriched` separately.
 
 ### skill.yml
 
@@ -697,26 +557,56 @@ on:
   - orders
   - order_items
 
-stages:
-  - name: join
-    sql_file: join_all.sql
-
-  - name: fanout
-    sql_file: fanout.sql
+jobs:
+  - name: log_cdc_event
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_tx_id,
+        @cdc_table as cdc_table,
+        @cdc_operation as cdc_operation,
+        @orders_order_id as order_id,
+        GETDATE() as logged_at
+    output: cdc_events
 
 sinks:
   insert:
     - name: orders_sync
-      on: orders               # Only process orders table CDC changes
+      on: orders
       sql: |
-        SELECT * FROM orders_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          @orders_amount as amount,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
-      on: order_items         # Only process order_items table CDC changes
+      on: order_items
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @order_items_id as id,
+          @order_items_product_id as product_id,
+          @order_items_quantity as quantity,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @order_items_product_id;
       output: order_items_enriched
       primary_key: id
 
@@ -724,14 +614,39 @@ sinks:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT * FROM orders_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          @orders_amount as amount,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @order_items_id as id,
+          @order_items_product_id as product_id,
+          @order_items_quantity as quantity,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @order_items_product_id;
       output: order_items_enriched
       primary_key: id
 
@@ -746,118 +661,15 @@ sinks:
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @order_items_id as id
       output: order_items_enriched
       primary_key: id
-```
-
-### join_all.sql
-
-```sql
--- Handle CDC batch with multiple tables
--- CDC batch data is written to #cdc_batch by Engine
-
-SELECT 
-  b.cdc_lsn,
-  b.cdc_transaction_id,
-  b.cdc_source_table,
-  b.cdc_operation,
-  b.order_id,
-  -- orders fields (NULL for order_items)
-  b.amount,
-  -- order_items fields (NULL for orders)
-  b.quantity,
-  -- Joined customer data
-  c.name as customer_name,
-  c.email as customer_email,
-  c.segment as customer_segment,
-  -- Joined product data
-  p.product_name,
-  p.category as product_category,
-  p.price as product_price,
-  -- Computed amount
-  CASE 
-    WHEN b.cdc_source_table = 'order_items' THEN p.price * b.quantity
-    ELSE b.amount
-  END as final_amount
-INTO #enriched_flow
-FROM #cdc_batch b
-LEFT JOIN customers c ON b.customer_id = c.id
-LEFT JOIN products p ON b.product_id = p.id;
-```
-
-### fanout.sql
-
-```sql
--- Fanout: Route to appropriate table based on cdc_source_table
-
--- View 1: orders
-SELECT 
-  cdc_lsn,
-  cdc_transaction_id,
-  cdc_source_table,
-  cdc_operation,
-  order_id,
-  amount as order_amount,
-  customer_name,
-  customer_email,
-  customer_segment,
-  final_amount
-FROM #enriched_flow
-WHERE cdc_source_table = 'orders';
-
--- View 2: order_items
-SELECT 
-  cdc_lsn,
-  cdc_transaction_id,
-  cdc_source_table,
-  cdc_operation,
-  order_id,
-  quantity,
-  product_name,
-  product_category,
-  product_price,
-  final_amount
-FROM #enriched_flow
-WHERE cdc_source_table = 'order_items';
-```
-
-### CDC Batch Structure for N:N:N
-
-```
-#cdc_batch (written by Engine):
-
-| cdc_lsn | cdc_tx_id | cdc_source_table | cdc_operation | order_id | customer_id | amount | product_id | quantity |
-|---------|-----------|------------------|---------------|----------|-------------|--------|------------|----------|
-| 0x001   | T1        | orders           | 2             | 123      | 456         | 5000   | NULL       | NULL    |
-| 0x002   | T1        | order_items      | 2             | 123      | NULL        | NULL   | 789        | 2        |
-```
-
-### Execution Flow
-
-```
-Transaction T1 CDC batch:
-  orders: {order_id: 123, customer_id: 456, amount: 5000}
-  order_items: {order_id: 123, product_id: 789, quantity: 2}
-    ↓
-Engine writes to #cdc_batch
-    ↓
-join_all.sql → #enriched_flow
-    ↓
-fanout.sql:
-  - orders_view → SELECT ... WHERE cdc_source_table = 'orders'
-  - order_items_view → SELECT ... WHERE cdc_source_table = 'order_items'
-    ↓
-INSERT/UPDATE:
-  - orders_sync sink → orders_enriched table
-  - order_items_sync sink → order_items_enriched table
 ```
 
 ---
 
 ## Future Enhancements
 
-- Support for external SQL files (`sql_file` field)
 - Multiple sinks per operation type (fan-out)
 - Filter expressions for row-level routing
 - Support for CDC UPDATE_BEFORE (for audit use cases)

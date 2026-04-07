@@ -17,6 +17,11 @@ func NewWriter(db *sql.DB) *Writer {
 	return &Writer{db: db}
 }
 
+// DB returns the underlying database connection
+func (w *Writer) DB() *sql.DB {
+	return w.db
+}
+
 // SinkOp represents a single sink operation
 type SinkOp struct {
 	Config  SinkConfig
