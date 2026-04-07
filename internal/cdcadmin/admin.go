@@ -307,3 +307,83 @@ func parseTableName(fullName string) (string, string) {
 	}
 	return "dbo", parts[0]
 }
+
+// CDCJobInfo represents CDC job configuration
+// DefaultRetentionMinutes is the recommended CDC retention (7 days = 10080 minutes)
+const DefaultRetentionMinutes = 10080
+
+type CDCJobInfo struct {
+	JobType        string
+	JobName        string
+	Retention      int // in minutes
+	PollingInterval int
+}
+
+// CheckAndSetCDCRetention checks CDC job retention and sets it to 7 days if needed
+// Returns current retention value and any changes made
+func (a *Admin) CheckAndSetCDCRetention() (int, error) {
+	db, err := a.Connect()
+	if err != nil {
+		return 0, fmt.Errorf("connect: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Get current CDC job configuration
+	rows, err := db.Query("EXEC sp_cdc_help_jobs")
+	if err != nil {
+		return 0, fmt.Errorf("query CDC jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var currentRetention int
+	var jobName string
+	
+	// Find cleanup job
+	for rows.Next() {
+		var jobID []byte
+		var jobType, name string
+		var maxtrans, maxscans int
+		var continuous bool
+		var pollinginterval, retention, threshold int
+		
+		err = rows.Scan(&jobID, &jobType, &name, &maxtrans, &maxscans, 
+			&continuous, &pollinginterval, &retention, &threshold)
+		if err != nil {
+			return 0, fmt.Errorf("scan job info: %w", err)
+		}
+		
+		if jobType == "cleanup" {
+			currentRetention = retention
+			jobName = name
+			break
+		}
+	}
+
+	// Check if retention needs to be updated
+	if currentRetention != DefaultRetentionMinutes {
+		slog.Info("updating CDC cleanup job retention",
+			"current", currentRetention,
+			"recommended", DefaultRetentionMinutes,
+			"job_name", jobName)
+		
+		_, err = db.Exec(`
+			EXEC sp_cdc_change_job 
+				@job_type = N'cleanup', 
+				@retention = @retention
+		`, sql.Named("retention", DefaultRetentionMinutes))
+		if err != nil {
+			return currentRetention, fmt.Errorf("update CDC retention: %w", err)
+		}
+		
+		slog.Info("CDC cleanup job retention updated successfully",
+			"old_retention_minutes", currentRetention,
+			"new_retention_minutes", DefaultRetentionMinutes)
+		return DefaultRetentionMinutes, nil
+	}
+
+	slog.Info("CDC cleanup job retention already configured correctly",
+		"retention_minutes", currentRetention,
+		"retention_days", float64(currentRetention)/1440)
+
+	return currentRetention, nil
+}
