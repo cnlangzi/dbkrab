@@ -92,6 +92,18 @@ function renderTables(tables) {
         return;
     }
 
+    // Sort: CDC disabled first, then by schema.table name
+    const sortedTables = [...tables].sort((a, b) => {
+        // CDC disabled comes first
+        if (a.cdc_enabled !== b.cdc_enabled) {
+            return a.cdc_enabled ? 1 : -1;
+        }
+        // Then sort by schema.table name
+        const nameA = `${a.schema}.${a.name}`;
+        const nameB = `${b.schema}.${b.name}`;
+        return nameA.localeCompare(nameB);
+    });
+
     const table = document.createElement('table');
     table.className = 'min-w-full divide-y divide-gray-200';
     table.innerHTML = `
@@ -106,7 +118,7 @@ function renderTables(tables) {
             </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-            ${tables.map(t => `
+            ${sortedTables.map(t => `
                 <tr class="${t.cdc_enabled ? 'bg-green-50' : ''}">
                     <td class="px-6 py-4 whitespace-nowrap">
                         <input type="checkbox" 
