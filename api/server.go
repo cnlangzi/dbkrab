@@ -393,13 +393,16 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		}
 	}
 
-	// Save tables to config file if we have config access
-	if s.config != nil && s.configPath != "" {
-		// Update config Tables field
-		(*s.config).Tables = req.Tables
-
-		// Save to config file
-		if err := config.Save(s.configPath, s.config); err != nil {
+	// Save tables to config file
+	// The config watcher will detect the file change and reload automatically
+	if s.configPath != "" {
+		// Get current config from watcher (most up-to-date)
+		currentCfg := s.configWatcher.Get()
+		
+		// Update tables and save to file
+		currentCfg.Tables = req.Tables
+		
+		if err := config.Save(s.configPath, currentCfg); err != nil {
 			slog.Error("failed to save config file", "error", err, "path", s.configPath)
 			// Don't fail the request, just log the error
 		} else {
