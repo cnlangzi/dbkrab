@@ -48,13 +48,17 @@ echo "📦 Installing binary..."
 cp bin/dbkrab "$INSTALL_DIR/dbkrab"
 chmod +x "$INSTALL_DIR/dbkrab"
 
-# Install config
+# Install config (only if not exists)
 echo "⚙️  Installing config..."
-if [ -f "$CONFIG_SRC" ]; then
-    cp "$CONFIG_SRC" "$CONFIG_DEST"
-    echo "   Config: $CONFIG_DEST"
+if [ -f "$CONFIG_DEST" ]; then
+    echo "   Config already exists at $CONFIG_DEST, keeping existing config"
 else
-    echo "⚠️  Config file not found: $CONFIG_SRC"
+    if [ -f "$CONFIG_SRC" ]; then
+        cp "$CONFIG_SRC" "$CONFIG_DEST"
+        echo "   Config: $CONFIG_DEST"
+    else
+        echo "⚠️  Config file not found: $CONFIG_SRC"
+    fi
 fi
 
 # Start new process

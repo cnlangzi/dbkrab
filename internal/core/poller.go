@@ -13,6 +13,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/alert"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
+	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
@@ -24,6 +25,7 @@ type Poller struct {
 	cfg           *config.Config
 	db            *sql.DB
 	querier       *cdc.Querier
+	cdcAdmin      *cdcadmin.Admin
 	gapDetector   *cdc.GapDetector
 	alertManager  *alert.AlertManager
 	offsets       offset.StoreInterface
@@ -81,6 +83,7 @@ func NewPoller(cfg *config.Config, db *sql.DB, sink Sink, offsetStore offset.Sto
 		cfg:      cfg,
 		db:       db,
 		querier:  cdc.NewQuerier(db),
+		cdcAdmin: cdcadmin.NewAdmin(&cfg.MSSQL),
 		offsets:  offsetStore,
 		sink:     sink,
 		dlq:      dlqStore,
@@ -130,6 +133,31 @@ func (p *Poller) Start(ctx context.Context) error {
 	// Load existing offsets
 	if err := p.offsets.Load(); err != nil {
 		return fmt.Errorf("load offsets: %w", err)
+	}
+
+	// Check and enable CDC for configured tables
+	slog.Info("checking CDC status for configured tables", "tables", p.cfg.Tables)
+	statuses, err := p.cdcAdmin.CheckAndEnableCDC(p.cfg.Tables)
+	if err != nil {
+		// Log the error but continue - some tables might still work
+		slog.Warn("CDC auto-enable failed (requires DBO privileges)", "error", err)
+		slog.Warn("Please ask DBA to enable CDC for the tables, or run with a user that has db_owner role")
+	}
+	for _, status := range statuses {
+		if status.CDCEnabled {
+			if status.EnableError != "" {
+				slog.Warn("CDC enable attempted but failed (requires DBO privileges)", 
+					"table", status.Schema+"."+status.Table, 
+					"capture_instance", status.CaptureInstance,
+					"error", status.EnableError)
+			} else if status.NeedsEnable {
+				slog.Info("CDC enabled for table", "table", status.Schema+"."+status.Table, "capture_instance", status.CaptureInstance)
+			} else {
+				slog.Info("CDC already enabled for table", "table", status.Schema+"."+status.Table, "capture_instance", status.CaptureInstance)
+			}
+		} else {
+			slog.Warn("CDC not enabled for table", "table", status.Schema+"."+status.Table, "capture_instance", status.CaptureInstance)
+		}
 	}
 
 	interval, err := p.cfg.PollingInterval()
