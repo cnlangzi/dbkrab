@@ -15,7 +15,7 @@ func TestWriter_InsertStrategy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
-	tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
@@ -123,7 +123,7 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
-	tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
@@ -230,7 +230,7 @@ func TestWriter_DeleteStrategy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
-	tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	db, err := sql.Open("sqlite3", tmpFile.Name())
 	if err != nil {
