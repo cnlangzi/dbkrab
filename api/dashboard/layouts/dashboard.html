@@ -25,6 +25,10 @@
                    class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "tables"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
                     📋 CDC Tables
                 </a>
+                <a href="/logs" 
+                   class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "logs"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
+                    📜 CDC Logs
+                </a>
                 <a href="/dlq" 
                    class="block px-4 py-3 {{with .Data}}{{if eq .activeTab "dlq"}}bg-blue-600{{end}}{{end}}hover:bg-gray-800 transition">
                     🗄️ Dead Letter Queue

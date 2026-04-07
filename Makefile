@@ -92,6 +92,54 @@ mod:
 	$(GO) mod tidy
 	$(GO) mod download
 
+## deploy: Deploy to /opt/dbkrab (build, install, restart)
+deploy:
+	@echo "Deploying to /opt/dbkrab..."
+	@chmod +x scripts/deploy.sh
+	@./scripts/deploy.sh config.yaml
+
+## deploy-systemd: Deploy and install systemd service
+deploy-systemd: deploy
+	@echo "Installing systemd service..."
+	@sudo cp scripts/dbkrab.service /etc/systemd/system/
+	@sudo systemctl daemon-reload
+	@sudo systemctl enable dbkrab
+	@sudo systemctl restart dbkrab
+	@echo "✅ systemd service installed and started"
+
+## status: Show service status
+status:
+	@if [ -f /var/run/dbkrab.pid ]; then \
+		PID=$$(cat /var/run/dbkrab.pid); \
+		if kill -0 $$PID 2>/dev/null; then \
+			echo "✅ dbkrab running (PID: $$PID)"; \
+			curl -s http://localhost:9021/api/health; \
+		else \
+			echo "❌ dbkrab not running (stale PID file)"; \
+		fi; \
+	else \
+		echo "❌ dbkrab not running (no PID file)"; \
+	fi
+
+## logs: Show recent logs
+logs:
+	@tail -50 /var/log/dbkrab/dbkrab.log
+
+## stop: Stop dbkrab
+stop:
+	@echo "Stopping dbkrab..."
+	@if [ -f /var/run/dbkrab.pid ]; then \
+		kill $$(cat /var/run/dbkrab.pid) 2>/dev/null || true; \
+		rm -f /var/run/dbkrab.pid; \
+		echo "✅ Stopped"; \
+	else \
+		pkill -f "dbkrab -config" 2>/dev/null || true; \
+		echo "✅ Stopped"; \
+	fi
+
+## restart: Restart dbkrab
+restart: stop deploy
+
 ## install: Install binary to /usr/local/bin
 install: build
 	@echo "Installing to /usr/local/bin..."

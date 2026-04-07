@@ -61,9 +61,18 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 	// Build the CDC function name
 	fnName := fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
 	
+	// Get max LSN if toLSN is not provided
+	if len(toLSN) == 0 {
+		var err error
+		toLSN, err = q.GetMaxLSN(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get max LSN: %w", err)
+		}
+	}
+
+	// Note: Use * only to avoid duplicate columns (CDC function already returns metadata)
 	query := fmt.Sprintf(`
-		SELECT __$start_lsn, __$transaction_id, __$operation, __$update_mask, *
-		FROM %s(@from_lsn, @to_lsn, N'all')
+		SELECT * FROM %s(@from_lsn, @to_lsn, N'all')
 		ORDER BY __$start_lsn
 	`, fnName)
 
@@ -72,6 +81,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		sql.Named("to_lsn", toLSN),
 	)
 	if err != nil {
+		slog.Error("GetChanges query error", "captureInstance", captureInstance, "error", err)
 		return nil, fmt.Errorf("query CDC: %w", err)
 	}
 	defer func() {
@@ -99,31 +109,43 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
 
-		// Extract CDC metadata (first 4 columns)
-		lsn, _ := values[0].([]byte)
-		
-		// P0 fix: Properly parse transaction_id (uniqueidentifier type)
-		// MSSQL returns __$transaction_id as []byte (16-byte GUID)
-		var txID string
-		if txBytes, ok := values[1].([]byte); ok && len(txBytes) > 0 {
-			// Format as GUID string: 8-4-4-4-12 (standard MSSQL format)
-			// Note: MSSQL GUID storage order differs from display order
-			// We use hex encoding for consistent cross-table comparison
-			txID = formatMSSQLGUID(txBytes)
-		} else {
-			// Fallback for unexpected types
-			txID = fmt.Sprintf("%v", values[1])
+		// Extract CDC metadata by column name
+		colIndex := make(map[string]int)
+		for i, col := range columns {
+			colIndex[col] = i
+		}
+
+		// Get LSN
+		var lsn []byte
+		if idx, ok := colIndex["__$start_lsn"]; ok {
+			lsn, _ = values[idx].([]byte)
 		}
 		
-		op, _ := values[2].(int32)
-		// updateMask is values[3], we skip it for now
+		// Get transaction ID
+		var txID string
+		if idx, ok := colIndex["__$transaction_id"]; ok {
+			if txBytes, ok := values[idx].([]byte); ok && len(txBytes) > 0 {
+				txID = formatMSSQLGUID(txBytes)
+			} else {
+				txID = fmt.Sprintf("%v", values[idx])
+			}
+		}
+		
+		// Get operation (MSSQL returns int64)
+		var op int64
+		if idx, ok := colIndex["__$operation"]; ok {
+			op, _ = values[idx].(int64)
+		}
 
-		// Build data map from remaining columns
+		// Build data map from all columns (including metadata for completeness)
 		data := make(map[string]interface{})
-		for i := 4; i < len(columns); i++ {
-			colName := columns[i]
+		for i, col := range columns {
+			// Skip CDC metadata columns for data map
+			if strings.HasPrefix(col, "__$") {
+				continue
+			}
 			// Convert column name to lowercase for consistency
-			data[strings.ToLower(colName)] = values[i]
+			data[strings.ToLower(col)] = values[i]
 		}
 
 		changes = append(changes, Change{

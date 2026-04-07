@@ -1,0 +1,24 @@
+[Unit]
+Description=dbkrab - MSSQL CDC Replication Service
+After=network.target
+Documentation=https://github.com/cnlangzi/dbkrab
+
+[Service]
+Type=simple
+User=dayi
+Group=dayi
+WorkingDirectory=/opt/dbkrab
+ExecStart=/opt/dbkrab/dbkrab -config /opt/dbkrab/config.yaml -api-port 9021
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/dbkrab/dbkrab.log
+StandardError=append:/var/log/dbkrab/dbkrab.error.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/dbkrab /var/log/dbkrab
+
+[Install]
+WantedBy=multi-user.target
