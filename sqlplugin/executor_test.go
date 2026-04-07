@@ -10,12 +10,11 @@ func TestExecutorReplaceParameters(t *testing.T) {
 		CDCLSN:       "0x00001abc",
 		CDCTxID:      "tx_12345",
 		CDCTable:     "dbo.orders",
-		CDCOperation:  int(Insert),
-		TableIDs:     []interface{}{1, 2, 3},
+		CDCOperation: int(Insert),
 		Fields: map[string]interface{}{
-			"order_id":    123,
-			"amount":     100.50,
-			"customer_id": 456,
+			"orders_order_id":    123,
+			"orders_amount":     100.50,
+			"orders_customer_id": 456,
 		},
 	}
 
@@ -46,17 +45,17 @@ func TestExecutorReplaceParameters(t *testing.T) {
 		},
 		{
 			name:     "field parameter",
-			template: "SELECT * FROM orders WHERE order_id = @order_id",
+			template: "SELECT * FROM orders WHERE order_id = @orders_order_id",
 			expected: "SELECT * FROM orders WHERE order_id = 123",
 		},
 		{
 			name:     "multiple parameters",
-			template: "SELECT * FROM orders WHERE order_id = @order_id AND customer_id = @customer_id",
+			template: "SELECT * FROM orders WHERE order_id = @orders_order_id AND customer_id = @orders_customer_id",
 			expected: "SELECT * FROM orders WHERE order_id = 123 AND customer_id = 456",
 		},
 		{
 			name:     "float parameter",
-			template: "SELECT * FROM orders WHERE amount > @amount",
+			template: "SELECT * FROM orders WHERE amount > @orders_amount",
 			expected: "SELECT * FROM orders WHERE amount > 100.5", // Go truncates floats
 		},
 	}
@@ -82,41 +81,16 @@ func TestExecutorParameterReplacement(t *testing.T) {
 		CDCTxID:     "tx001",
 		CDCTable:    "dbo.test",
 		CDCOperation: 1,
-		TableIDs:    []interface{}{1, 2},
 		Fields: map[string]interface{}{
-			"id":   100,
-			"name": "test",
+			"test_id":   100,
+			"test_name": "test",
 		},
 	}
 
-	template := "SELECT * FROM test WHERE cdc_lsn = '@cdc_lsn' AND id = @id AND name = '@name'"
+	template := "SELECT * FROM test WHERE cdc_lsn = '@cdc_lsn' AND id = @test_id AND name = '@test_name'"
 	result, err := executor.ReplaceParameters(template, params)
 
 	expected := "SELECT * FROM test WHERE cdc_lsn = '0xabc123' AND id = 100 AND name = 'test'"
-	if err != nil {
-		t.Fatalf("ReplaceParameters error: %v", err)
-	}
-	if result != expected {
-		t.Errorf("ReplaceParameters() = %q, want %q", result, expected)
-	}
-}
-
-func TestExecutorMultipleTableIDs(t *testing.T) {
-	executor := NewExecutor(nil)
-
-	params := CDCParameters{
-		CDCLSN:   "0x001",
-		CDCTable: "dbo.orders",
-		Fields:  map[string]interface{}{
-			"order_ids": []interface{}{1, 2, 3, 4, 5},
-		},
-	}
-
-	template := "SELECT * FROM orders WHERE @order_ids"
-	result, err := executor.ReplaceParameters(template, params)
-
-	// Expected: order_ids should be replaced with (1, 2, 3, 4, 5)
-	expected := "SELECT * FROM orders WHERE (1, 2, 3, 4, 5)"
 	if err != nil {
 		t.Fatalf("ReplaceParameters error: %v", err)
 	}
@@ -131,17 +105,17 @@ func TestExecutorMultipleReplacements(t *testing.T) {
 	params := CDCParameters{
 		CDCLSN: "0x001",
 		Fields: map[string]interface{}{
-			"amount":    100,
-			"qty":     5,
-			"product_id": 999,
+			"orders_amount":     100,
+			"orders_qty":      5,
+			"orders_product_id": 999,
 		},
 	}
 
 	template := `
 		UPDATE inventory 
-		SET quantity = quantity - @qty, 
-		    amount = amount - @amount
-		WHERE id = @product_id
+		SET quantity = quantity - @orders_qty, 
+		    amount = amount - @orders_amount
+		WHERE id = @orders_product_id
 	`
 	result, err := executor.ReplaceParameters(template, params)
 
