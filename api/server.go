@@ -92,6 +92,10 @@ func (s *Server) Start() error {
 		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
 		xun.WithHandlerViewers(&xun.JsonViewer{}, &xun.HtmlViewer{}),
+		xun.WithBuildAssetURL(func(name string) bool {
+			// Enable asset hashing for JS and CSS files
+			return strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css")
+		}),
 	)
 
 	// Register routes
