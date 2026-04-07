@@ -123,7 +123,7 @@ sinks:
     - name: sink_name
       on: table_name         # Optional: filter by source table (required for multi-table plugins)
       sql: |
-        SELECT ... FROM source_table WHERE id IN (@table_ids);
+        SELECT ... FROM source_table WHERE id = @table_id;
       output: target_table      # SQLite table name
       primary_key: id
 
@@ -131,7 +131,7 @@ sinks:
     - name: sink_name
       on: table_name         # Optional: filter by source table
       sql: |
-        SELECT ... FROM source_table WHERE id IN (@table_ids);
+        SELECT ... FROM source_table WHERE id = @table_id;
       output: target_table      # SQLite table name
       primary_key: id
 
@@ -173,7 +173,6 @@ When monitoring multiple tables via `on`, each sink should specify `on` to filte
 CDC INSERT operation triggers the `insert` sink.
 
 - SQL executes against **source database**
-- Batch execution using `IN (@table_ids)` for efficiency
 - Target behavior: **Upsert** (INSERT if not exists, UPDATE if exists)
 
 ### UPDATE
@@ -181,7 +180,6 @@ CDC INSERT operation triggers the `insert` sink.
 CDC UPDATE (after-image, operation=4) triggers the `update` sink.
 
 - SQL executes against **source database**
-- Batch execution using `IN (@table_ids)` for efficiency
 - Target behavior: **Upsert**
 
 ### DELETE
@@ -189,7 +187,6 @@ CDC UPDATE (after-image, operation=4) triggers the `update` sink.
 CDC DELETE operation triggers the `delete` sink.
 
 - SQL may or may not query database (see scenarios below)
-- Batch execution using `IN (@table_ids)` for efficiency
 - Target behavior: **DELETE**
 
 ---
@@ -218,7 +215,7 @@ delete:
   - name: sync
     sql: |
       -- Query target database to find mapped primary key
-      SELECT @orders_order_id as target_id FROM order_sync WHERE source_order_id IN (@orders_order_id);
+      SELECT @orders_order_id as target_id FROM order_sync WHERE source_order_id = @orders_order_id;
     output: order_sync
     primary_key: id
 ```
@@ -238,26 +235,22 @@ Transaction T1 changes:
   orders DELETE: [{order_id: 300}]
 ```
 
-### 2. Grouping by Operation Type
+### 2. Per-Change Processing
 
-Changes are grouped:
+Each change (row) is processed **individually**. For each change:
+1. Build fresh parameters from this change's data
+2. Execute sink SQL once with those parameters
+3. Write result to target
 
-```
-INSERT group: @orders_order_id = [100, 101]
-UPDATE group: @orders_order_id = [200]
-DELETE group: @orders_order_id = [300]
-```
-
-### 3. SQL Execution (Per Operation Type)
-
-**INSERT sink:**
+**Change 1 - INSERT orders(order_id=100):**
 
 ```sql
--- @cdc_lsn = '0x0001A2B3'
+-- @cdc_lsn = '0x0001A2B1'
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 2
--- @orders_order_id = [100, 101]
+-- @orders_order_id = 100
+-- @orders_amount = 500
 
 SELECT 
   @cdc_lsn as cdc_lsn,
@@ -269,52 +262,65 @@ SELECT
   o.status,
   o.created_at
 FROM orders o
-WHERE o.order_id IN (100, 101);
+WHERE o.order_id = 100;
 ```
 
-**UPDATE sink:**
+**Change 2 - INSERT orders(order_id=101):**
+
+```sql
+-- @cdc_lsn = '0x0001A2B2'
+-- @cdc_tx_id = 'T1'
+-- @cdc_table = 'orders'
+-- @cdc_operation = 2
+-- @orders_order_id = 101
+-- @orders_amount = 300
+
+SELECT ... WHERE o.order_id = 101;
+```
+
+**Change 3 - UPDATE orders(order_id=200):**
 
 ```sql
 -- @cdc_lsn = '0x0001A2C0'
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 4
--- @orders_order_id = [200]
+-- @orders_order_id = 200
 
-SELECT ...
-FROM orders o
-WHERE o.order_id IN (200);
+SELECT ... WHERE o.order_id = 200;
 ```
 
-**DELETE sink:**
+**Change 4 - DELETE orders(order_id=300):**
 
 ```sql
 -- @cdc_lsn = '0x0001A2D0'
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 1
--- @orders_order_id = [300]
+-- @orders_order_id = 300
 
 SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
 ```
 
-### 4. DataSet Result
+### 3. Result Collection
 
 Each SQL execution returns a DataSet:
 
 ```
-INSERT DataSet:
-  [{order_id: 100, amount: 500, status: 'pending', ...},
-   {order_id: 101, amount: 300, status: 'pending', ...}]
+Change 1 DataSet:
+  [{order_id: 100, amount: 500, status: 'pending', ...}]
 
-UPDATE DataSet:
+Change 2 DataSet:
+  [{order_id: 101, amount: 300, status: 'pending', ...}]
+
+Change 3 DataSet:
   [{order_id: 200, status: 'completed', ...}]
 
-DELETE DataSet:
+Change 4 DataSet:
   [{cdc_lsn: '0x0001A2D0', order_id: 300}]
 ```
 
-### 5. Sink Write (Transaction Boundary)
+### 4. Sink Write (Transaction Boundary)
 
 All sink operations within the same CDC transaction are written as one transaction to target database:
 
@@ -325,6 +331,8 @@ BEGIN TRANSACTION
   UPDATE order_sync SET ... WHERE order_id = 200
   DELETE FROM order_sync WHERE order_id = 300
 COMMIT
+```
+
 ```
 
 ---
@@ -366,7 +374,7 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@orders_order_id);
+        WHERE o.order_id = @orders_order_id;
       output: order_sync        # SQLite table name
       primary_key: order_id
 
@@ -383,7 +391,7 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@orders_order_id);
+        WHERE o.order_id = @orders_order_id;
       output: order_sync        # SQLite table name
       primary_key: order_id
 
