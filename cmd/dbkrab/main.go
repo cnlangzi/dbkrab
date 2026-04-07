@@ -141,7 +141,7 @@ func main() {
 
 	// Create poller with dynamic plugin support
 	poller := core.NewPoller(cfg, db, sink, offsetStore, dlqStore)
-	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
+	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) ([]core.SinkOp, error) {
 		return pluginManager.Handle(tx)
 	}))
 	

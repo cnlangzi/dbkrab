@@ -16,20 +16,18 @@ import (
 
 // SQLPlugin represents a loaded SQL plugin
 type SQLPlugin struct {
-	Name     string
-	Skill    *sqlplugin.Skill
-	Engine   *sqlplugin.Engine // SQL Plugin execution engine
-	Loader   *sqlplugin.Loader
-	Writer   *sqlplugin.Writer
+	Name   string
+	Skill  *sqlplugin.Skill
+	Engine *sqlplugin.Engine // SQL Plugin execution engine
+	Loader *sqlplugin.Loader
 }
 
 // Manager manages SQL plugins and WASM plugins with hot-reload support
 type Manager struct {
-	plugins      map[string]*Plugin
-	sqlPlugins   map[string]*SQLPlugin
-	mu           sync.RWMutex
-	mssqlDB      *sql.DB
-	sqliteWriter *sqlplugin.Writer
+	plugins    map[string]*Plugin
+	sqlPlugins map[string]*SQLPlugin
+	mu         sync.RWMutex
+	mssqlDB    *sql.DB
 }
 
 // Plugin represents a loaded WASM plugin
@@ -50,12 +48,11 @@ func NewManager() *Manager {
 }
 
 // InitSQLPlugins initializes SQL plugins with database connections
-func (m *Manager) InitSQLPlugins(mssqlDB *sql.DB, sqliteWriter *sqlplugin.Writer, sqlPluginsDir string) error {
+func (m *Manager) InitSQLPlugins(mssqlDB *sql.DB, sqlPluginsDir string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.mssqlDB = mssqlDB
-	m.sqliteWriter = sqliteWriter
 
 	// Load all SQL plugins
 	loader := sqlplugin.NewLoader(sqlPluginsDir)
@@ -65,14 +62,13 @@ func (m *Manager) InitSQLPlugins(mssqlDB *sql.DB, sqliteWriter *sqlplugin.Writer
 	}
 
 	for name, skill := range plugins {
-		engine := sqlplugin.NewEngine(skill, mssqlDB, sqliteWriter.DB())
+		engine := sqlplugin.NewEngine(skill, mssqlDB)
 
 		m.sqlPlugins[name] = &SQLPlugin{
-			Name:     name,
-			Skill:    skill,
-			Engine:   engine,
-			Loader:   loader,
-			Writer:   sqliteWriter,
+			Name:   name,
+			Skill:  skill,
+			Engine: engine,
+			Loader: loader,
 		}
 	}
 
@@ -163,32 +159,35 @@ func (m *Manager) Reload(name string) error {
 	return m.Load(name, plugin.Path, plugin.Config)
 }
 
-// Handle processes a transaction through all loaded plugins
-// SQL plugins take priority over WASM plugins
-func (m *Manager) Handle(tx *core.Transaction) error {
+// Handle processes a transaction through all plugins
+// Returns transformed operations for the caller to write via Sink
+func (m *Manager) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	var allOps []core.SinkOp
+
 	// First, process through SQL plugins
 	for name, sqlPlugin := range m.sqlPlugins {
-		if err := m.handleSQLPlugin(sqlPlugin, tx); err != nil {
-			return fmt.Errorf("SQL plugin %s handle: %w", name, err)
+		ops, err := m.handleSQLPlugin(sqlPlugin, tx)
+		if err != nil {
+			return nil, fmt.Errorf("SQL plugin %s handle: %w", name, err)
 		}
+		allOps = append(allOps, ops...)
 	}
 
-	// Then, process through WASM plugins
+	// Then, process through WASM plugins (legacy - they process internally)
 	for name, plugin := range m.plugins {
 		if err := plugin.instance.Handle(tx); err != nil {
-			return fmt.Errorf("plugin %s handle: %w", name, err)
+			return nil, fmt.Errorf("plugin %s handle: %w", name, err)
 		}
 	}
 
-	return nil
+	return allOps, nil
 }
 
 // handleSQLPlugin processes a transaction through a SQL plugin
-func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
-	// Use the Engine to handle the transaction
+func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) ([]core.SinkOp, error) {
 	return p.Engine.Handle(tx)
 }
 
@@ -236,8 +235,8 @@ func (m *Manager) Watch(ctx context.Context, dir string) error {
 	sqlPluginsDir := filepath.Join(dir, "..", "sql_plugins")
 	if _, err := os.Stat(sqlPluginsDir); err == nil {
 		// SQL plugins directory exists, load all SQL plugins
-		if m.mssqlDB != nil && m.sqliteWriter != nil {
-			if err := m.InitSQLPlugins(m.mssqlDB, m.sqliteWriter, sqlPluginsDir); err != nil {
+		if m.mssqlDB != nil {
+			if err := m.InitSQLPlugins(m.mssqlDB, sqlPluginsDir); err != nil {
 				fmt.Printf("Warning: failed to load SQL plugins: %v\n", err)
 			}
 		}
