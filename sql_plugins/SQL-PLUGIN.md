@@ -198,7 +198,7 @@ When target table primary key matches source table field name:
 delete:
   - name: sync
     sql: |
-      SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
     output: order_sync
     primary_key: order_id
 ```
@@ -289,7 +289,7 @@ WHERE o.order_id IN (200);
 -- @cdc_operation = 1
 -- @orders_order_id = [300]
 
-SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
 ```
 
 ### 4. DataSet Result
@@ -384,7 +384,7 @@ sinks:
   delete:
     - name: sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: order_sync        # SQLite table name
       primary_key: order_id
 ```
@@ -444,7 +444,7 @@ sinks:
   delete:
     - name: sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: enriched_orders
       primary_key: order_id
 ```
@@ -458,13 +458,13 @@ SELECT
   @cdc_tx_id as cdc_transaction_id,
   @cdc_table as cdc_source_table,
   @cdc_operation as cdc_operation,
-  @order_id as order_id,
+  @orders_order_id as order_id,
   @orders_customer_id as customer_id,
   c.name as customer_name,
   c.email as customer_email,
   c.segment as customer_segment
 INTO #customers_enriched
-FROM (SELECT @orders_customer_id as customer_id, @order_id as order_id) o
+FROM (SELECT @orders_customer_id as customer_id, @orders_order_id as order_id) o
 LEFT JOIN customers c ON o.customer_id = c.id;
 ```
 
@@ -591,7 +591,7 @@ SELECT
   @cdc_tx_id as cdc_transaction_id,
   @cdc_table as cdc_source_table,
   @cdc_operation as cdc_operation,
-  @order_id as order_id,
+  @orders_order_id as order_id,
   @orders_customer_id as customer_id,
   @orders_product_id as product_id,
   @orders_amount as order_amount,
@@ -725,7 +725,7 @@ sinks:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: orders_enriched
       primary_key: order_id
 
