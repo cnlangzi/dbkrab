@@ -43,7 +43,7 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 
 		// Get corresponding sink type
 		sinkType := e.operationToSinkType(op)
-		if sinkType == "" {
+		if sinkType == 0 {
 			continue // Unknown operation
 		}
 
@@ -147,7 +147,8 @@ func (e *Engine) buildBatchParams(tx *core.Transaction, changes []core.Change) (
 	return params, nil
 }
 
-// operationToSinkType converts core.Operation to sqlplugin.Operation string
+// operationToSinkType converts core.Operation to sqlplugin.Operation
+// Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
 func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	switch op {
 	case core.OpInsert:
@@ -157,7 +158,7 @@ func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	case core.OpDelete:
 		return Delete
 	default:
-		return "" // Skip UpdateBefore and unknown
+		return 0 // 0 is not valid, indicates skip
 	}
 }
 
