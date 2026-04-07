@@ -148,18 +148,12 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		// Get commit time from LSN
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
-			val := values[idx]
-			slog.Debug("commit_time value", "type", fmt.Sprintf("%T", val), "value", val)
-			switch v := val.(type) {
+			switch v := values[idx].(type) {
 			case time.Time:
 				commitTime = v
 			case string:
 				commitTime, _ = time.Parse(time.RFC3339Nano, v)
-			default:
-				slog.Warn("unexpected commit_time type", "type", fmt.Sprintf("%T", val))
 			}
-		} else {
-			slog.Warn("__$commit_time column not found in CDC result")
 		}
 
 		// Build data map from all columns (including metadata for completeness)
