@@ -77,9 +77,10 @@ When executing SQL, CDC captured data is injected as parameters:
 | `@cdc_tx_id` | string | Transaction ID |
 | `@cdc_table` | string | Source table name |
 | `@cdc_operation` | int | Operation type (1=DELETE, 2=INSERT, 4=UPDATE) |
-| `@{table}_ids` | []any | Array of all changed IDs for that table (per operation type within transaction) |
-| `@{field}` | any | Direct field value from CDC captured data |
+| `@{table}_{field}` | any | Data field value, prefixed with table name (e.g., `@orders_order_id`, `@orders_amount`) |
 
+
+| Note | | CDC metadata (`@cdc_lsn`, `@cdc_tx_id`, `@cdc_table`, `@cdc_operation`) keep original names |
 ### Output Configuration
 
 `output` specifies the target **SQLite table name** directly. The Engine uses `primary_key` to:
@@ -132,7 +133,7 @@ sinks:
     - name: sink_name
       on: table_name         # Optional: filter by source table
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @id as id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: target_table      # SQLite table name
       primary_key: id
 ```
@@ -153,9 +154,9 @@ sinks:
 
 ### Multi-Table Note
 
-When monitoring multiple tables via `on`, each sink should specify `on` to filter which table's CDC changes it handles. CDC parameters are table-specific:
-- When `orders` changes: only `@order_id`, `@amount`, `@status` are available
-- When `order_items` changes: only `@order_id`, `@product_id`, `@quantity` are available
+When monitoring multiple tables via `on`, each sink should specify `on` to filter which table's CDC changes it handles. All Data parameters are prefixed with table name:
+- When `orders` changes: `@orders_order_id`, `@orders_amount`, `@orders_status`
+- When `order_items` changes: `@order_items_order_id`, `@order_items_product_id`, `@order_items_quantity`
 
 ---
 
@@ -211,7 +212,7 @@ delete:
   - name: sync
     sql: |
       -- Query target database to find mapped primary key
-      SELECT id as target_id FROM order_sync WHERE source_order_id IN (@order_ids);
+      SELECT @orders_order_id as target_id FROM order_sync WHERE source_order_id IN (@orders_order_id);
     output: order_sync
     primary_key: id
 ```
@@ -236,9 +237,9 @@ Transaction T1 changes:
 Changes are grouped:
 
 ```
-INSERT group: @order_ids = [100, 101]
-UPDATE group: @order_ids = [200]
-DELETE group: @order_ids = [300]
+INSERT group: @orders_order_id = [100, 101]
+UPDATE group: @orders_order_id = [200]
+DELETE group: @orders_order_id = [300]
 ```
 
 ### 3. SQL Execution (Per Operation Type)
@@ -250,7 +251,7 @@ DELETE group: @order_ids = [300]
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 2
--- @order_ids = [100, 101]
+-- @orders_order_id = [100, 101]
 
 SELECT 
   @cdc_lsn as cdc_lsn,
@@ -272,7 +273,7 @@ WHERE o.order_id IN (100, 101);
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 4
--- @order_ids = [200]
+-- @orders_order_id = [200]
 
 SELECT ...
 FROM orders o
@@ -286,7 +287,7 @@ WHERE o.order_id IN (200);
 -- @cdc_tx_id = 'T1'
 -- @cdc_table = 'orders'
 -- @cdc_operation = 1
--- @order_ids = [300]
+-- @orders_order_id = [300]
 
 SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
 ```
@@ -359,7 +360,7 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@order_ids);
+        WHERE o.order_id IN (@orders_order_id);
       output: order_sync        # SQLite table name
       primary_key: order_id
 
@@ -376,7 +377,7 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@order_ids);
+        WHERE o.order_id IN (@orders_order_id);
       output: order_sync        # SQLite table name
       primary_key: order_id
 
@@ -458,12 +459,12 @@ SELECT
   @cdc_table as cdc_source_table,
   @cdc_operation as cdc_operation,
   @order_id as order_id,
-  @customer_id as customer_id,
+  @orders_customer_id as customer_id,
   c.name as customer_name,
   c.email as customer_email,
   c.segment as customer_segment
 INTO #customers_enriched
-FROM (SELECT @customer_id as customer_id, @order_id as order_id) o
+FROM (SELECT @orders_customer_id as customer_id, @order_id as order_id) o
 LEFT JOIN customers c ON o.customer_id = c.id;
 ```
 
@@ -570,13 +571,13 @@ sinks:
   delete:
     - name: customers_sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @customer_id as customer_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_customer_id as customer_id
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @product_id as product_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_product_id as product_id
       output: products_sync
       primary_key: product_id
 ```
@@ -591,9 +592,9 @@ SELECT
   @cdc_table as cdc_source_table,
   @cdc_operation as cdc_operation,
   @order_id as order_id,
-  @customer_id as customer_id,
-  @product_id as product_id,
-  @amount as order_amount,
+  @orders_customer_id as customer_id,
+  @orders_product_id as product_id,
+  @orders_amount as order_amount,
   -- Customer fields
   c.name as customer_name,
   c.email as customer_email,
@@ -603,7 +604,7 @@ SELECT
   p.category as product_category,
   p.price as product_price
 INTO #enriched
-FROM (SELECT @customer_id as customer_id, @product_id as product_id, @amount as amount) o
+FROM (SELECT @orders_customer_id as customer_id, @orders_product_id as product_id, @orders_amount as amount) o
 LEFT JOIN customers c ON o.customer_id = c.id
 LEFT JOIN products p ON o.product_id = p.id;
 ```
@@ -731,7 +732,7 @@ sinks:
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @id as id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: order_items_enriched
       primary_key: id
 ```
