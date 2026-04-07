@@ -15,14 +15,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Sink implements core.Sink for SQLite
-type Sink struct {
+// Store implements core.Store for SQLite
+type Store struct {
 	db   *sql.DB
 	path string
 }
 
-// NewSink creates a new SQLite sink with WAL mode and optimized settings
-func NewSink(path string) (*Sink, error) {
+// NewStore creates a new SQLite store with WAL mode and optimized settings
+func NewStore(path string) (*Store, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
@@ -58,16 +58,16 @@ func NewSink(path string) (*Sink, error) {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
-	sink := &Sink{db: db, path: path}
+	store := &Store{db: db, path: path}
 	// Initialize poller state
-	if err := sink.initPollerState(); err != nil {
+	if err := store.initPollerState(); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
 			slog.Warn("db.Close error", "error", closeErr)
 		}
 		return nil, fmt.Errorf("init poller state: %w", err)
 	}
 
-	return sink, nil
+	return store, nil
 }
 
 // createTables creates the necessary tables
@@ -98,7 +98,7 @@ func createTables(db *sql.DB) error {
 }
 
 // initPollerState initializes the poller state row
-func (s *Sink) initPollerState() error {
+func (s *Store) initPollerState() error {
 	_, err := s.db.Exec(`
 		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
 		VALUES (1, NULL, NULL, 0)
@@ -107,7 +107,7 @@ func (s *Sink) initPollerState() error {
 }
 
 // UpdatePollerState updates the poller state after successful poll
-func (s *Sink) UpdatePollerState(lastLSN string, changeCount int) error {
+func (s *Store) UpdatePollerState(lastLSN string, changeCount int) error {
 	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
 		UPDATE poller_state 
@@ -121,7 +121,7 @@ func (s *Sink) UpdatePollerState(lastLSN string, changeCount int) error {
 }
 
 // GetPollerState returns the current poller state
-func (s *Sink) GetPollerState() (map[string]interface{}, error) {
+func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	row := s.db.QueryRow(`
 		SELECT last_poll_time, last_lsn, total_changes, updated_at
 		FROM poller_state
@@ -161,7 +161,7 @@ func (s *Sink) GetPollerState() (map[string]interface{}, error) {
 }
 
 // Write writes a transaction to SQLite
-func (s *Sink) Write(tx *core.Transaction) error {
+func (s *Store) Write(tx *core.Transaction) error {
 	sqlTx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -211,7 +211,7 @@ func (s *Sink) Write(tx *core.Transaction) error {
 }
 
 // WriteOps writes transformed DataSets from SQL plugins to SQLite
-func (s *Sink) WriteOps(ops []core.SinkOp) error {
+func (s *Store) WriteOps(ops []core.Sink) error {
 	if len(ops) == 0 {
 		return nil
 	}
@@ -248,7 +248,7 @@ func (s *Sink) WriteOps(ops []core.SinkOp) error {
 }
 
 // insertInTx inserts DataSet into table
-func (s *Sink) insertInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+func (s *Store) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (s *Sink) insertInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet
 }
 
 // updateInTx updates records in table
-func (s *Sink) updateInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+func (s *Store) updateInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -332,7 +332,7 @@ func (s *Sink) updateInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet
 }
 
 // deleteInTx deletes records from table
-func (s *Sink) deleteInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet) error {
+func (s *Store) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -375,7 +375,7 @@ func (s *Sink) deleteInTx(tx *sql.Tx, config core.SinkOpConfig, ds *core.DataSet
 }
 
 // ensureTable ensures the table exists with the given columns
-func (s *Sink) ensureTable(tx *sql.Tx, table string, columns []string) error {
+func (s *Store) ensureTable(tx *sql.Tx, table string, columns []string) error {
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
 		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
@@ -390,17 +390,17 @@ func (s *Sink) ensureTable(tx *sql.Tx, table string, columns []string) error {
 }
 
 // Close closes the database connection
-func (s *Sink) Close() error {
+func (s *Store) Close() error {
 	return s.db.Close()
 }
 
 // GetChanges retrieves changes from the database
-func (s *Sink) GetChanges(limit int) ([]map[string]interface{}, error) {
+func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 	return s.GetChangesWithFilter(limit, "", "", "")
 }
 
 // GetChangesWithFilter retrieves changes with optional filters
-func (s *Sink) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
 	query := `SELECT id, transaction_id, table_name, operation, data, created_at FROM transactions WHERE 1=1`
 	args := []interface{}{}
 
@@ -462,6 +462,6 @@ func (s *Sink) GetChangesWithFilter(limit int, tableName, operation, txID string
 }
 
 // GetDB returns the underlying database connection
-func (s *Sink) GetDB() *sql.DB {
+func (s *Store) GetDB() *sql.DB {
 	return s.db
 }

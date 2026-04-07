@@ -90,23 +90,23 @@ func main() {
 	}
 	slog.Info("offset store initialized", "type", cfg.Offset.Type)
 
-	// Create sink
-	var sink *sqlite.Sink
+	// Create store
+	var store *sqlite.Store
 	switch cfg.Sink.Type {
 	case "sqlite":
-		sink, err = sqlite.NewSink(cfg.Sink.Path)
+		store, err = sqlite.NewStore(cfg.Sink.Path)
 		if err != nil {
-			slog.Error("failed to create SQLite sink", "error", err)
+			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
-			if err := sink.Close(); err != nil {
-				slog.Warn("sink.Close error", "error", err)
+			if err := store.Close(); err != nil {
+				slog.Warn("store.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite sink initialized", "path", cfg.Sink.Path)
+		slog.Info("SQLite store initialized", "path", cfg.Sink.Path)
 	default:
-		slog.Error("unknown sink type", "type", cfg.Sink.Type)
+		slog.Error("unknown store type", "type", cfg.Sink.Type)
 		os.Exit(1)
 	}
 
@@ -140,8 +140,8 @@ func main() {
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, db, sink, offsetStore, dlqStore)
-	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) ([]core.SinkOp, error) {
+	poller := core.NewPoller(cfg, db, store, offsetStore, dlqStore)
+	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) ([]core.Sink, error) {
 		return pluginManager.Handle(tx)
 	}))
 	
@@ -174,7 +174,7 @@ func main() {
 	}
 
 	// Start API/Dashboard server
-	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, sink, *apiPort, *configPath, cfg, configWatcher)
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, store, *apiPort, *configPath, cfg, configWatcher)
 	go func() {
 		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
 		if err := apiServer.Start(); err != nil {

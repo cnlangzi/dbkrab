@@ -39,7 +39,7 @@ type Server struct {
 	manager     *plugin.Manager
 	dlq         *dlq.DLQ
 	cdcAdmin    *cdcadmin.Admin
-	sink        *sqlite.Sink
+	store       *sqlite.Store
 	port        int
 	app         *xun.App
 	mux         *http.ServeMux
@@ -66,12 +66,12 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, sink *sqlite.Sink, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *sqlite.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,
 		cdcAdmin:      cdcAdmin,
-		sink:          sink,
+		store:         store,
 		port:          port,
 		configPath:    configPath,
 		config:        cfg,
@@ -143,16 +143,16 @@ func (s *Server) registerAPIRoutes() {
 	}
 
 	// CDC logs routes
-	if s.sink != nil {
+	if s.store != nil {
 		api.Get("/cdc/logs", s.handleCDCLogs, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC logs/status routes registered")
 	} else {
-		slog.Warn("CDC logs/status routes skipped - sink is nil")
+		slog.Warn("CDC logs/status routes skipped - store is nil")
 	}
 
 	// CDC gap monitoring routes
-	if s.cdcAdmin != nil && s.sink != nil {
+	if s.cdcAdmin != nil && s.store != nil {
 		api.Get("/cdc/gap", s.handleCDCGap, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC gap monitoring route registered")
 	} else {
@@ -458,7 +458,7 @@ func (s *Server) handleCDCLogs(c *xun.Context) error {
 	operation := c.Request.URL.Query().Get("operation")
 	txID := c.Request.URL.Query().Get("transaction_id")
 
-	logs, err := s.sink.GetChangesWithFilter(limit, tableName, operation, txID)
+	logs, err := s.store.GetChangesWithFilter(limit, tableName, operation, txID)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -476,14 +476,14 @@ func (s *Server) handleCDCLogs(c *xun.Context) error {
 // handleCDCStatus handles GET /api/cdc/status
 // Returns poller state: last_poll_time, last_lsn, total_changes
 func (s *Server) handleCDCStatus(c *xun.Context) error {
-	if s.sink == nil {
+	if s.store == nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sink not initialized",
+			"error":   "store not initialized",
 		})
 	}
 
-	state, err := s.sink.GetPollerState()
+	state, err := s.store.GetPollerState()
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -507,10 +507,10 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 		})
 	}
 
-	if s.sink == nil {
+	if s.store == nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sink not initialized",
+			"error":   "store not initialized",
 		})
 	}
 
@@ -585,7 +585,7 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 
 		// Get current LSN from poller state (approximation - in real scenario would track per-table)
 		// For now, use the global last_lsn from poller state
-		state, err := s.sink.GetPollerState()
+		state, err := s.store.GetPollerState()
 		if err != nil {
 			slog.Warn("failed to get poller state", "table", table, "error", err)
 			continue
@@ -868,8 +868,8 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	}
 	
 	// Collect CDC status
-	if s.sink != nil {
-		state, err := s.sink.GetPollerState()
+	if s.store != nil {
+		state, err := s.store.GetPollerState()
 		if err != nil {
 			metrics.CDCStatus = "error"
 			metrics.CDCMessage = "Failed to get poller state"
@@ -894,7 +894,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	}
 	
 	// Collect GAP metrics
-	if s.cdcAdmin != nil && s.sink != nil && s.configWatcher != nil {
+	if s.cdcAdmin != nil && s.store != nil && s.configWatcher != nil {
 		cfg := s.configWatcher.Get()
 		trackedTables := cfg.Tables
 		
@@ -932,7 +932,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			
 			maxLSN, err := gapDetector.GetMaxLSN(ctx)
 			if err == nil {
-				state, err := s.sink.GetPollerState()
+				state, err := s.store.GetPollerState()
 				if err == nil {
 					var currentLSN []byte
 					if lsnStr, ok := state["last_lsn"].(string); ok && lsnStr != "" {
