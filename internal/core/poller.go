@@ -54,19 +54,21 @@ type Poller struct {
 // Sink interface for storing changes
 type Sink interface {
 	Write(tx *Transaction) error
+	WriteOps(ops []SinkOp) error
 	Close() error
 }
 
 // Handler interface for custom processing
+// Handle returns transformed operations for the caller to write via Sink
 type Handler interface {
-	Handle(tx *Transaction) error
+	Handle(tx *Transaction) ([]SinkOp, error)
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(tx *Transaction) error
+type PluginHandler func(tx *Transaction) ([]SinkOp, error)
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(tx *Transaction) error {
+func (h PluginHandler) Handle(tx *Transaction) ([]SinkOp, error) {
 	return h(tx)
 }
 
@@ -392,17 +394,20 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	// Process complete transactions
 	var processErrors []error
 	for _, tx := range completeTxs {
+		var sinkOps []SinkOp
+
 		// Handler processing with retry
 		if p.handler != nil {
+			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				return p.handler.Handle(tx)
+				sinkOps, handlerErr = p.handler.Handle(tx)
+				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
 					"trace_id", tx.TraceID,
 					"tx_id", tx.ID,
 					"error", err)
-				// Handler errors don't block offset advancement, but write to DLQ
 				p.writeToDLQ(tx, err, "handler")
 			}
 		}
@@ -419,6 +424,21 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 					"error", err)
 				p.writeToDLQ(tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
+			}
+
+			// Write transformed DataSets from handler
+			if len(sinkOps) > 0 {
+				err := retry.DoWithName(ctx, func() error {
+					return p.sink.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_ops_tx_%s", tx.ID))
+				if err != nil {
+					slog.Error("sink ops error",
+						"trace_id", tx.TraceID,
+						"tx_id", tx.ID,
+						"error", err)
+					p.writeToDLQ(tx, err, "sink_ops")
+					processErrors = append(processErrors, fmt.Errorf("sink ops tx %s: %w", tx.ID, err))
+				}
 			}
 		}
 	}
@@ -441,16 +461,19 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
+		var sinkOps []SinkOp
+
 		// Handler processing with retry (non-blocking: continue even if handler fails)
 		if p.handler != nil {
+			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				return p.handler.Handle(&tx)
+				sinkOps, handlerErr = p.handler.Handle(&tx)
+				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
 					"tx_id", tx.ID,
 					"error", err)
-				// Handler errors don't block offset advancement, but write to DLQ
 				p.writeToDLQ(&tx, err, "handler")
 			}
 		}
@@ -466,6 +489,20 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 					"error", err)
 				p.writeToDLQ(&tx, err, "sink")
 				processErrors = append(processErrors, fmt.Errorf("sink tx %s: %w", tx.ID, err))
+			}
+
+			// Write transformed DataSets from handler
+			if len(sinkOps) > 0 {
+				err := retry.DoWithName(ctx, func() error {
+					return p.sink.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("sink_ops_tx_%s", tx.ID))
+				if err != nil {
+					slog.Error("sink ops error",
+						"tx_id", tx.ID,
+						"error", err)
+					p.writeToDLQ(&tx, err, "sink_ops")
+					processErrors = append(processErrors, fmt.Errorf("sink ops tx %s: %w", tx.ID, err))
+				}
 			}
 		}
 	}
@@ -981,10 +1018,14 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 
 	// Process each transaction
 	for _, tx := range completeTxs {
+		var sinkOps []SinkOp
+
 		// Handler processing
 		if p.handler != nil {
+			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				return p.handler.Handle(tx)
+				sinkOps, handlerErr = p.handler.Handle(tx)
+				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("flush handler error",
@@ -1006,6 +1047,20 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(tx, err, "flush_sink")
+			}
+
+			// Write transformed DataSets from handler
+			if len(sinkOps) > 0 {
+				err := retry.DoWithName(ctx, func() error {
+					return p.sink.WriteOps(sinkOps)
+				}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_sink_ops_tx_%s", tx.ID))
+				if err != nil {
+					slog.Error("flush sink ops error",
+						"trace_id", tx.TraceID,
+						"tx_id", tx.ID,
+						"error", err)
+					p.writeToDLQ(tx, err, "flush_sink_ops")
+				}
 			}
 		}
 	}

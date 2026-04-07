@@ -95,11 +95,11 @@ func TestEngine_Handle(t *testing.T) {
 
 		tests := []struct {
 			op   core.Operation
-			want Operation
+			want core.Operation
 		}{
-			{core.OpInsert, Insert},
-			{core.OpUpdateAfter, Update},
-			{core.OpDelete, Delete},
+			{core.OpInsert, core.OpInsert},
+			{core.OpUpdateAfter, core.OpUpdateAfter},
+			{core.OpDelete, core.OpDelete},
 			{core.OpUpdateBefore, 0}, // Should be skipped
 		}
 
