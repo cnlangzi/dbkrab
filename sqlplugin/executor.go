@@ -3,7 +3,6 @@ package sqlplugin
 import (
 	"database/sql"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -15,18 +14,6 @@ type Executor struct {
 // NewExecutor creates a new SQL template executor
 func NewExecutor(db *sql.DB) *Executor {
 	return &Executor{db: db}
-}
-
-// parameterPatterns defines the supported parameter patterns
-var _ = parameterPatterns
-var parameterPatterns = //nolint:unused
- map[string]*regexp.Regexp{
-	"cdc_lsn":      regexp.MustCompile(`@cdc_lsn\b`),
-	"cdc_tx_id":    regexp.MustCompile(`@cdc_tx_id\b`),
-	"cdc_table":    regexp.MustCompile(`@cdc_table\b`),
-	"cdc_operation": regexp.MustCompile(`@cdc_operation\b`),
-	"table_ids":    regexp.MustCompile(`@(\w+)_ids\b`),
-	"field":        regexp.MustCompile(`@(\w+)\b`),
 }
 
 // Execute executes a SQL template with parameters
