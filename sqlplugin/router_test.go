@@ -23,7 +23,7 @@ func TestRouterGetSinkByName(t *testing.T) {
 	if sink == nil {
 		t.Error("expected to find sink orders_sink")
 	}
-	if sink.Output != "orders_output" {
+	if sink != nil && sink.Output != "orders_output" {
 		t.Errorf("expected output 'orders_output', got '%s'", sink.Output)
 	}
 
