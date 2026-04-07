@@ -11,28 +11,6 @@ func TestNewMapper(t *testing.T) {
 	}
 }
 
-func TestFieldToParamName(t *testing.T) {
-	mapper := NewMapper()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"order_id", "order_id"},
-		{"ORDER_ID", "order_id"},
-		{"OrderID", "orderid"},
-		{"customer_name", "customer_name"},
-		{"Amount", "amount"},
-	}
-
-	for _, tt := range tests {
-		result := mapper.fieldToParamName(tt.input)
-		if result != tt.expected {
-			t.Errorf("fieldToParamName(%q) = %q, want %q", tt.input, result, tt.expected)
-		}
-	}
-}
-
 func TestShortTableName(t *testing.T) {
 	mapper := NewMapper()
 
@@ -76,30 +54,114 @@ func TestGetChangesByTable(t *testing.T) {
 	}
 }
 
-func TestNewSQLTransaction(t *testing.T) {
-	tx := NewSQLTransaction("tx123", "0x0001")
-	if tx == nil {
-		t.Error("NewSQLTransaction() returned nil")
+func TestBuildParams_Basic(t *testing.T) {
+	mapper := NewMapper()
+
+	change := &ChangeItem{
+		Table:     "dbo.orders",
+		LSN:       "0x00001abc",
+		TxID:      "tx_12345",
+		Operation: Insert,
+		TableID:   100,
+		Data: map[string]interface{}{
+			"order_id": 100,
+			"amount":   50.00,
+			"status":   "pending",
+		},
 	}
-	if tx.TxID != "tx123" {
-		t.Errorf("expected TxID 'tx123', got '%s'", tx.TxID)
+
+	params, err := mapper.BuildParams(change)
+	if err != nil {
+		t.Fatalf("BuildParams error: %v", err)
 	}
-	if tx.LSN != "0x0001" {
-		t.Errorf("expected LSN '0x0001', got '%s'", tx.LSN)
+
+	// CDC metadata
+	if params["cdc_lsn"] != "0x00001abc" {
+		t.Errorf("cdc_lsn = %v, want 0x00001abc", params["cdc_lsn"])
 	}
-	if tx.Fields == nil {
-		t.Error("Fields should be initialized")
+	if params["cdc_tx_id"] != "tx_12345" {
+		t.Errorf("cdc_tx_id = %v, want tx_12345", params["cdc_tx_id"])
+	}
+	if params["cdc_table"] != "dbo.orders" {
+		t.Errorf("cdc_table = %v, want dbo.orders", params["cdc_table"])
+	}
+	if params["cdc_operation"] != int(Insert) {
+		t.Errorf("cdc_operation = %v, want %d", params["cdc_operation"], Insert)
+	}
+
+	// Auto-generated table ID
+	if params["orders_id"] != 100 {
+		t.Errorf("orders_id = %v, want 100", params["orders_id"])
+	}
+
+	// Data fields
+	if params["order_id"] != 100 {
+		t.Errorf("order_id = %v, want 100", params["order_id"])
+	}
+	if params["amount"] != 50.00 {
+		t.Errorf("amount = %v, want 50.00", params["amount"])
+	}
+	if params["status"] != "pending" {
+		t.Errorf("status = %v, want pending", params["status"])
 	}
 }
 
-func TestMapperOperationString(t *testing.T) {
-	if Operation(Insert).String() != "Insert" {
-		t.Errorf("Operation(Insert).String() = %s, want Insert", Operation(Insert).String())
+func TestBuildParams_DataOverwritesMetadata(t *testing.T) {
+	mapper := NewMapper()
+
+	// Data has same name as CDC metadata
+	change := &ChangeItem{
+		Table:     "dbo.orders",
+		LSN:       "0x00001abc",
+		TxID:      "tx_12345",
+		Operation: Insert,
+		TableID:   100,
+		Data: map[string]interface{}{
+			"cdc_lsn": "user-defined-lsn", // This should overwrite cdc_lsn
+			"order_id": 100,
+		},
 	}
-	if Operation(Update).String() != "Update" {
-		t.Errorf("Operation(Update).String() = %s, want Update", Operation(Update).String())
+
+	params, err := mapper.BuildParams(change)
+	if err != nil {
+		t.Fatalf("BuildParams error: %v", err)
 	}
-	if Operation(Delete).String() != "Delete" {
-		t.Errorf("Operation(Delete).String() = %s, want Delete", Operation(Delete).String())
+
+	// Data overwrites CDC metadata
+	if params["cdc_lsn"] != "user-defined-lsn" {
+		t.Errorf("cdc_lsn = %v, want user-defined-lsn (overwritten by Data)", params["cdc_lsn"])
 	}
 }
+
+func TestBuildParams_AutoGenerateTableID(t *testing.T) {
+	mapper := NewMapper()
+
+	tests := []struct {
+		table        string
+		expectedKey  string
+	}{
+		{"dbo.orders", "orders_id"},
+		{"dbo.order_items", "order_items_id"},
+		{"customers", "customers_id"},
+		{"sys.tables", "tables_id"},
+	}
+
+	for _, tt := range tests {
+		change := &ChangeItem{
+			Table:     tt.table,
+			LSN:       "0x001",
+			TxID:      "tx1",
+			Operation: Insert,
+			TableID:   1,
+			Data:      map[string]interface{}{},
+		}
+
+		params, _ := mapper.BuildParams(change)
+
+		if params[tt.expectedKey] != 1 {
+			t.Errorf("table=%s: %s = %v, want 1", tt.table, tt.expectedKey, params[tt.expectedKey])
+		}
+	}
+}
+
+
