@@ -196,7 +196,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	// Group changes by table and operation
 	changesByTable := make(map[string][]sqlplugin.ChangeItem)
 	for _, change := range tx.Changes {
-		opType := toOperation(change.Operation)
+		opType := change.Operation
 		item := sqlplugin.ChangeItem{
 			Table:     change.Table,
 			LSN:       fmt.Sprintf("%x", change.LSN),
@@ -212,7 +212,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 	// Process each table
 	for tableName, changes := range changesByTable {
 		for _, change := range changes {
-			opType := toOperation(change.Operation)
+			opType := change.Operation
 			sinkType := sqlplugin.OperationToSinkType(opType)
 
 			// Get sinks for this operation type
@@ -230,7 +230,7 @@ func (m *Manager) handleSQLPlugin(p *SQLPlugin, tx *core.Transaction) error {
 			// Build CDC parameters
 			params := sqlplugin.CDCParameters{
 				CDCLSN:       change.LSN,
-				CDCTxID:      change.TransactionID,
+				CDCTxID:      change.TxID,
 				CDCTable:     tableName,
 				CDCOperation: int(opType),
 				Fields:       change.Data,
