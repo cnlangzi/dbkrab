@@ -207,7 +207,7 @@ func (e *Executor) scanRows(rows *sql.Rows) (*DataSet, error) {
 	}, nil
 }
 
-// ExecuteInline executes inline SQL (without template substitution for stages)
+// ExecuteInline executes inline SQL (without parameter substitution)
 func (e *Executor) ExecuteInline(sql string) (*DataSet, error) {
 	rows, err := e.db.Query(sql)
 	if err != nil {
