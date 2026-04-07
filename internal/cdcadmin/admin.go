@@ -48,7 +48,8 @@ func (a *Admin) Connect() (*sql.DB, error) {
 }
 
 // ListTables returns all user tables in the database with CDC status
-func (a *Admin) ListTables() ([]TableInfo, error) {
+// trackedTables is the list of tables from config file to mark as Tracked
+func (a *Admin) ListTables(trackedTables []string) ([]TableInfo, error) {
 	db, err := a.Connect()
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
@@ -73,6 +74,12 @@ func (a *Admin) ListTables() ([]TableInfo, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
+	// Create a set of tracked tables for fast lookup
+	trackedSet := make(map[string]bool)
+	for _, t := range trackedTables {
+		trackedSet[strings.ToLower(t)] = true
+	}
+
 	var tables []TableInfo
 	for rows.Next() {
 		var ti TableInfo
@@ -81,6 +88,9 @@ func (a *Admin) ListTables() ([]TableInfo, error) {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		ti.CDCEnabled = cdcEnabled == 1
+		// Check if this table is in the tracked list (case-insensitive)
+		fullTable := fmt.Sprintf("%s.%s", ti.Schema, ti.Name)
+		ti.Tracked = trackedSet[strings.ToLower(fullTable)]
 		tables = append(tables, ti)
 	}
 
