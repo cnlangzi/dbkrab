@@ -13,9 +13,10 @@ description: Test SQL plugin
 on:
   - dbo.orders
   - dbo.order_items
-stages:
-  - name: stage1
+jobs:
+  - name: job1
     sql: SELECT * FROM dbo.orders
+    output: job1_table
 sinks:
   insert:
     - name: orders_sink
@@ -45,8 +46,8 @@ sinks:
 	if len(skill.On) != 2 {
 		t.Errorf("expected 2 tables, got %d", len(skill.On))
 	}
-	if len(skill.Stages) != 1 {
-		t.Errorf("expected 1 stage, got %d", len(skill.Stages))
+	if len(skill.Jobs) != 1 {
+		t.Errorf("expected 1 job, got %d", len(skill.Jobs))
 	}
 	if len(skill.Sinks.Insert) != 1 {
 		t.Errorf("expected 1 insert sink, got %d", len(skill.Sinks.Insert))

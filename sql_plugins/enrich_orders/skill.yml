@@ -4,26 +4,58 @@ description: "orders CDC with customer and product enrichment"
 on:
   - orders
 
-stages:
-  - name: join_customers
-    sql_file: step1_join_customers.sql
-    temp_table: customers_enriched
-    
-  - name: join_products
-    sql_file: step2_join_products.sql
+jobs:
+  - name: log_enrichment
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_tx_id,
+        @orders_order_id as order_id,
+        GETDATE() as enriched_at
+    output: enrichment_log
 
 sinks:
   insert:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM customers c
+        LEFT JOIN products p ON p.product_id = @orders_product_id
+        WHERE c.customer_id = @orders_customer_id;
       output: enriched_orders
       primary_key: order_id
 
   update:
     - name: sync
       sql: |
-        SELECT * FROM products_enriched;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM customers c
+        LEFT JOIN products p ON p.product_id = @orders_product_id
+        WHERE c.customer_id = @orders_customer_id;
       output: enriched_orders
       primary_key: order_id
 

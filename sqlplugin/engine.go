@@ -12,7 +12,7 @@ import (
 // Engine is the main SQL Plugin engine that orchestrates the entire flow
 type Engine struct {
 	skill    *Skill
-	executor *Executor // MSSQL executor for enrichment SQL
+	executor *Executor // MSSQL executor for SQL execution
 	writer   *Writer   // SQLite writer for sink output
 }
 
@@ -26,16 +26,16 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB, sqliteDB *sql.DB) *Engine {
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
-// It extracts CDC changes, executes optional stages and sink SQL against MSSQL, and writes results to SQLite
-// Each change (row) is processed individually - if there are 3 row changes, sink is executed 3 times
-// All sink operations are collected and written in one transaction at the end
+// It extracts CDC changes, executes jobs and sinks against MSSQL, and writes results to SQLite
+// Each change (row) is processed individually
+// All operations are collected and written in one transaction at the end
 func (e *Engine) Handle(tx *core.Transaction) error {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil
 	}
 
-	// Collect all sink operations for batch write
-	var allSinkOps []*SinkOp
+	// Collect all operations (jobs + sinks) for batch write
+	var allOps []*SinkOp
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
@@ -45,55 +45,63 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
-		// Get sinks for this operation
-		sinks := e.skill.GetSinks(sinkType)
-		if len(sinks) == 0 {
-			continue
-		}
-
 		// Build CDC params for this single change
 		cdcParams, err := e.buildCDCParams(&change)
 		if err != nil {
 			return fmt.Errorf("build params: %w", err)
 		}
+		sinkParams := e.cdcParamsToMap(cdcParams)
 
-		// Execute stages in memory if defined
-		var stageDataSet *DataSet
-		if len(e.skill.Stages) > 0 {
-			stageDataSet, err = e.executor.ExecuteStages(e.skill, cdcParams)
-			if err != nil {
-				return fmt.Errorf("execute stages: %w", err)
-			}
+		// Execute all jobs (parallel, independent)
+		jobResults, err := e.executor.ExecuteJobs(e.skill, cdcParams)
+		if err != nil {
+			return fmt.Errorf("execute jobs: %w", err)
 		}
 
-		// Build params for sink, including stage results if available
-		sinkParams := e.buildSinkParams(cdcParams, stageDataSet)
-
-		// Filter sinks by table and execute
-		for _, sink := range sinks {
-			if sink.On != "" && sink.On != change.Table {
-				continue
+		// Convert job results to sink operations
+		for _, jr := range jobResults {
+			jobSinkOp := &SinkOp{
+				Config: SinkConfig{
+					Name:       jr.Name,
+					Output:     jr.Output,
+					PrimaryKey: e.inferPrimaryKey(jr.DataSet),
+					OnConflict: "overwrite", // Jobs default to overwrite
+				},
+				DataSet: jr.DataSet,
+				OpType:  Insert, // Jobs always INSERT/upsert
 			}
+			allOps = append(allOps, jobSinkOp)
+		}
 
-			// Execute sink SQL against MSSQL
-			ds, err := e.executor.ExecuteDriver(sink.SQL, sinkParams)
-			if err != nil {
-				return fmt.Errorf("execute sink %s: %w", sink.Name, err)
-			}
+		// Get sinks for this operation
+		sinks := e.skill.GetSinks(sinkType)
+		if len(sinks) > 0 {
+			// Filter sinks by table and execute
+			for _, sink := range sinks {
+				if sink.On != "" && sink.On != change.Table {
+					continue
+				}
 
-			// Collect sink operation for batch write
-			sinkOp := &SinkOp{
-				Config:  sink,
-				DataSet: ds,
-				OpType:  sinkType,
+				// Execute sink SQL against MSSQL
+				ds, err := e.executor.ExecuteDriver(sink.SQL, sinkParams)
+				if err != nil {
+					return fmt.Errorf("execute sink %s: %w", sink.Name, err)
+				}
+
+				// Collect sink operation for batch write
+				sinkOp := &SinkOp{
+					Config:  sink,
+					DataSet: ds,
+					OpType:  sinkType,
+				}
+				allOps = append(allOps, sinkOp)
 			}
-			allSinkOps = append(allSinkOps, sinkOp)
 		}
 	}
 
-	// Write all sink operations in one transaction
-	if len(allSinkOps) > 0 {
-		if err := e.writer.WriteBatch(allSinkOps); err != nil {
+	// Write all operations in one transaction
+	if len(allOps) > 0 {
+		if err := e.writer.WriteBatch(allOps); err != nil {
 			return fmt.Errorf("write batch: %w", err)
 		}
 	}
@@ -125,43 +133,35 @@ func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 	return params, nil
 }
 
-// buildSinkParams builds parameters for sink execution, merging CDC params with stage results
-func (e *Engine) buildSinkParams(cdcParams CDCParameters, stageDataSet *DataSet) map[string]interface{} {
-	params := make(map[string]interface{})
-
-	// CDC metadata
-	params["cdc_lsn"] = cdcParams.CDCLSN
-	params["cdc_tx_id"] = cdcParams.CDCTxID
-	params["cdc_table"] = cdcParams.CDCTable
-	params["cdc_operation"] = cdcParams.CDCOperation
-
-	// CDC data fields
-	for k, v := range cdcParams.Fields {
-		params[k] = v
+// cdcParamsToMap converts CDCParameters to map[string]interface{} for ExecuteDriver
+func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
+	m := make(map[string]interface{})
+	m["cdc_lsn"] = params.CDCLSN
+	m["cdc_tx_id"] = params.CDCTxID
+	m["cdc_table"] = params.CDCTable
+	m["cdc_operation"] = params.CDCOperation
+	for k, v := range params.Fields {
+		m[k] = v
 	}
+	return m
+}
 
-	// Add stage results as @<stage_name>_<field> if available
-	if stageDataSet != nil && len(stageDataSet.Rows) > 0 {
-		// Get the last stage name
-		if len(e.skill.Stages) > 0 {
-			lastStage := e.skill.Stages[len(e.skill.Stages)-1]
-			stageName := lastStage.Name
-			if stageName == "" {
-				stageName = lastStage.TempTable
-			}
-
-			if stageName != "" {
-				row := stageDataSet.Rows[0]
-				for i, col := range stageDataSet.Columns {
-					if i < len(row) {
-						params[fmt.Sprintf("%s_%s", stageName, col)] = row[i]
-					}
-				}
-			}
+// inferPrimaryKey tries to infer the primary key from the DataSet columns
+func (e *Engine) inferPrimaryKey(ds *DataSet) string {
+	if ds == nil {
+		return "id"
+	}
+	// Common PK names
+	for _, col := range ds.Columns {
+		if col == "id" || col == "pk" || strings.HasSuffix(strings.ToLower(col), "_id") {
+			return col
 		}
 	}
-
-	return params
+	// Default to first column
+	if len(ds.Columns) > 0 {
+		return ds.Columns[0]
+	}
+	return "id"
 }
 
 // operationToSinkType converts core.Operation to sqlplugin.Operation

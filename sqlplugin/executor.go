@@ -68,69 +68,47 @@ func (e *Executor) ExecuteDriver(sqlTmpl string, params map[string]interface{}) 
 	return e.driver.Execute(sqlTmpl, params)
 }
 
-// ExecuteStages executes multi-step SQL stages in memory
-// Each stage receives the previous stage's DataSet as parameters
-// No temp tables in MSSQL - data flows as DataSet objects in Go memory
-func (e *Executor) ExecuteStages(skill *Skill, params CDCParameters) (*DataSet, error) {
-	if len(skill.Stages) == 0 {
+// ExecuteJobs executes all jobs in parallel and returns their results
+// Each job executes independently without referencing other job results
+func (e *Executor) ExecuteJobs(skill *Skill, params CDCParameters) ([]*JobResult, error) {
+	if len(skill.Jobs) == 0 {
 		return nil, nil
 	}
 
-	var currentDataSet *DataSet
-
-	for _, stage := range skill.Stages {
-		if stage.SQL == "" {
+	// Execute all jobs - they are independent and can run in parallel
+	var results []*JobResult
+	for _, job := range skill.Jobs {
+		if job.SQL == "" {
 			continue
 		}
 
-		// Build stage-specific params by merging CDC params with previous stage results
-		stageParams := e.buildStageParams(params, stage.Name, currentDataSet)
-
 		// Substitute parameters
-		sql, err := e.substituteParams(stage.SQL, stageParams)
+		sql, err := e.substituteParams(job.SQL, params)
 		if err != nil {
-			return nil, NewExecutionError(stage.SQL, nil, err)
+			return nil, NewExecutionError(job.SQL, nil, err)
 		}
 
-		// Execute the stage SQL
+		// Execute the job SQL
 		ds, err := e.executeQuery(sql)
 		if err != nil {
-			return nil, NewExecutionError(stage.SQL, nil, err)
+			return nil, NewExecutionError(job.SQL, nil, err)
 		}
 
-		currentDataSet = ds
+		results = append(results, &JobResult{
+			Name:    job.Name,
+			Output:  job.Output,
+			DataSet: ds,
+		})
 	}
 
-	return currentDataSet, nil
+	return results, nil
 }
 
-// buildStageParams builds parameters for a stage, merging CDC params with previous stage results
-// Previous stage results are injected as @<stage_name>_<field> parameters
-func (e *Executor) buildStageParams(cdcParams CDCParameters, stageName string, prevDataSet *DataSet) CDCParameters {
-	params := CDCParameters{
-		CDCLSN:       cdcParams.CDCLSN,
-		CDCTxID:      cdcParams.CDCTxID,
-		CDCTable:     cdcParams.CDCTable,
-		CDCOperation: cdcParams.CDCOperation,
-		Fields:       make(map[string]interface{}),
-	}
-
-	// Copy CDC fields
-	for k, v := range cdcParams.Fields {
-		params.Fields[k] = v
-	}
-
-	// Add previous stage results as @<stageName>_<field>
-	if prevDataSet != nil && stageName != "" && len(prevDataSet.Rows) > 0 {
-		row := prevDataSet.Rows[0] // Use first row
-		for i, col := range prevDataSet.Columns {
-			if i < len(row) {
-				params.Fields[fmt.Sprintf("%s_%s", stageName, col)] = row[i]
-			}
-		}
-	}
-
-	return params
+// JobResult represents the result of a job execution
+type JobResult struct {
+	Name    string   // Job name
+	Output  string   // Target table name in SQLite
+	DataSet *DataSet // Query results
 }
 
 // executeQuery executes a SELECT query and returns DataSet

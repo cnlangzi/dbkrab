@@ -5,26 +5,54 @@ on:
   - orders
   - order_items
 
-stages:
-  - name: join
-    sql_file: join_all.sql
-
-  - name: fanout
-    sql_file: fanout.sql
+jobs:
+  - name: log_order_flow
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_tx_id,
+        @cdc_table as cdc_table,
+        @orders_order_id as order_id,
+        GETDATE() as logged_at
+    output: order_flow_events
 
 sinks:
   insert:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT * FROM orders_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          @orders_amount as amount,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @order_items_product_id as product_id,
+          @order_items_quantity as quantity,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @order_items_product_id;
       output: order_items_enriched
       primary_key: id
 
@@ -32,14 +60,38 @@ sinks:
     - name: orders_sync
       on: orders
       sql: |
-        SELECT * FROM orders_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @orders_customer_id as customer_id,
+          @orders_amount as amount,
+          c.name as customer_name,
+          c.email as customer_email,
+          c.segment as customer_segment
+        FROM customers c
+        WHERE c.customer_id = @orders_customer_id;
       output: orders_enriched
       primary_key: order_id
 
     - name: order_items_sync
       on: order_items
       sql: |
-        SELECT * FROM order_items_view;
+        SELECT 
+          @cdc_lsn as cdc_lsn,
+          @cdc_tx_id as cdc_transaction_id,
+          @cdc_table as cdc_source_table,
+          @cdc_operation as cdc_operation,
+          @orders_order_id as order_id,
+          @order_items_product_id as product_id,
+          @order_items_quantity as quantity,
+          p.product_name,
+          p.category as product_category,
+          p.price as product_price
+        FROM products p
+        WHERE p.product_id = @order_items_product_id;
       output: order_items_enriched
       primary_key: id
 
