@@ -8,6 +8,7 @@ var (
 	ErrInvalidConfig     = fmt.Errorf("invalid plugin configuration")
 	ErrMissingField      = fmt.Errorf("missing required field")
 	ErrInvalidSQL        = fmt.Errorf("invalid SQL template")
+	ErrMissingParameter = fmt.Errorf("missing parameter in SQL template")
 	ErrSQLFileNotFound   = fmt.Errorf("SQL file not found")
 	ErrExecutionFailed  = fmt.Errorf("SQL execution failed")
 	ErrRoutingFailed    = fmt.Errorf("result routing failed")
