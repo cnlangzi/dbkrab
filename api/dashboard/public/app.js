@@ -4,20 +4,29 @@
 
 /**
  * Convert UTC time string to local timezone
- * @param {string} utcString - UTC time string (e.g., "2026-04-07 15:37:00")
+ * @param {string} timeString - Time string (UTC with Z, or with timezone offset)
  * @returns {string} Local time string in zh-CN format
  */
-function formatLocalTime(utcString) {
-    if (!utcString || utcString === 'null' || utcString === '-' || utcString === 'N/A' || utcString === 'Never') {
+function formatLocalTime(timeString) {
+    if (!timeString || timeString === 'null' || timeString === '-' || timeString === 'N/A' || timeString === 'Never') {
         return '-';
     }
-    // Add 'Z' suffix if not present to indicate UTC
-    const utcDate = utcString.endsWith('Z') ? utcString : utcString + 'Z';
+    
     try {
-        const date = new Date(utcDate);
-        if (isNaN(date.getTime())) {
-            return utcString;
+        let date;
+        // Check if the string already has timezone info
+        if (timeString.includes('+') || timeString.includes('-', 10) || timeString.endsWith('Z')) {
+            // Already has timezone info, parse directly
+            date = new Date(timeString);
+        } else {
+            // No timezone info, assume UTC and add Z
+            date = new Date(timeString + 'Z');
         }
+        
+        if (isNaN(date.getTime())) {
+            return timeString;
+        }
+        
         return date.toLocaleString('zh-CN', {
             year: 'numeric',
             month: '2-digit',
@@ -28,7 +37,7 @@ function formatLocalTime(utcString) {
             hour12: false
         });
     } catch (e) {
-        return utcString;
+        return timeString;
     }
 }
 
