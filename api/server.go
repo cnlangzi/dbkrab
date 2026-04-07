@@ -84,17 +84,9 @@ func (s *Server) Start() error {
 	// Create a mux to use with xun
 	s.mux = http.NewServeMux()
 
-	// Static files from public/ directory
-	publicFS, err := fs.Sub(dashboardFS, "dashboard/public")
-	if err != nil {
-		return fmt.Errorf("create public FS: %w", err)
-	}
-	fileServer := http.FileServer(http.FS(publicFS))
-	s.mux.Handle("/public/", http.StripPrefix("/public/", fileServer))
-
-
 	// Create xun app with our mux and template filesystem
 	// Use Sub FS so pages/layouts are at root level for xun
+	// Note: xun automatically serves files from "public/" directory
 	dashboardSubFS := getDashboardFS()
 	s.app = xun.New(
 		xun.WithFsys(dashboardSubFS),
