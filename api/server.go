@@ -160,7 +160,7 @@ func (s *Server) registerAPIRoutes() {
 	}
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
-	api.Get("/api/overview", s.handleOverview, xun.WithViewer(&xun.HtmlViewer{}))
+	api.Get("/overview", s.handleOverview)
 }
 
 // registerPageRoutes registers page routes
@@ -819,9 +819,11 @@ func (s *Server) handleOverview(c *xun.Context) error {
 	// Collect all metrics
 	metrics := s.collectOverviewMetrics()
 	
-	// Return HTML string - xun will render it with HtmlViewer
+	// Return HTML string directly
 	html := renderOverviewHTML(metrics)
-	return c.View(html)
+	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
+	_, err := c.Response.Write([]byte(html))
+	return err
 }
 
 // OverviewMetrics contains all dashboard overview metrics
