@@ -256,6 +256,15 @@ func (s *mockSink) Write(tx *Transaction) error {
 	return nil
 }
 
+func (s *mockSink) WriteOps(ops []SinkOp) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail {
+		return errors.New("simulated sink failure")
+	}
+	return nil
+}
+
 func (s *mockSink) Close() error {
 	return nil
 }
@@ -307,11 +316,11 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(tx *Transaction) error {
+func (h *mockHandler) Handle(tx *Transaction) ([]SinkOp, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {
-		return errors.New("simulated handler failure")
+		return nil, errors.New("simulated handler failure")
 	}
-	return nil
+	return nil, nil
 }

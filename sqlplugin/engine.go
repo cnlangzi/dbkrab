@@ -9,33 +9,32 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
-// Engine is the main SQL Plugin engine that orchestrates the entire flow
+// Engine is the SQL Plugin execution engine
+// It transforms CDC changes into DataSets through Jobs and Sinks
+// The caller (e.g., SQLite Sink) is responsible for writing the DataSets
 type Engine struct {
 	skill    *Skill
 	executor *Executor // MSSQL executor for SQL execution
-	writer   *Writer   // SQLite writer for sink output
 }
 
 // NewEngine creates a new SQL Plugin engine
-func NewEngine(skill *Skill, mssqlDB *sql.DB, sqliteDB *sql.DB) *Engine {
+func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 	return &Engine{
 		skill:    skill,
 		executor: NewExecutorWithDriver(mssqlDB, DriverMSSQL),
-		writer:   NewWriter(sqliteDB),
 	}
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
-// It extracts CDC changes, executes jobs and sinks against MSSQL, and writes results to SQLite
-// Each change (row) is processed individually
-// All operations are collected and written in one transaction at the end
-func (e *Engine) Handle(tx *core.Transaction) error {
+// It extracts CDC changes, executes jobs and sinks against MSSQL
+// Returns all operations (jobs + sinks) as []core.SinkOp for the caller to write
+func (e *Engine) Handle(tx *core.Transaction) ([]core.SinkOp, error) {
 	if tx == nil || len(tx.Changes) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	// Collect all operations (jobs + sinks) for batch write
-	var allOps []*SinkOp
+	// Collect all operations (jobs + sinks)
+	var allOps []core.SinkOp
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
@@ -48,34 +47,35 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 		// Build CDC params for this single change
 		cdcParams, err := e.buildCDCParams(&change)
 		if err != nil {
-			return fmt.Errorf("build params: %w", err)
+			return nil, fmt.Errorf("build params: %w", err)
 		}
-		sinkParams := e.cdcParamsToMap(cdcParams)
 
 		// Execute all jobs (parallel, independent)
 		jobResults, err := e.executor.ExecuteJobs(e.skill, cdcParams)
 		if err != nil {
-			return fmt.Errorf("execute jobs: %w", err)
+			return nil, fmt.Errorf("execute jobs: %w", err)
 		}
 
 		// Convert job results to sink operations
 		for _, jr := range jobResults {
-			jobSinkOp := &SinkOp{
-				Config: SinkConfig{
+			jobSinkOp := core.SinkOp{
+				Config: core.SinkOpConfig{
 					Name:       jr.Name,
 					Output:     jr.Output,
 					PrimaryKey: e.inferPrimaryKey(jr.DataSet),
 					OnConflict: "overwrite", // Jobs default to overwrite
 				},
-				DataSet: jr.DataSet,
-				OpType:  Insert, // Jobs always INSERT/upsert
+				DataSet: convertDataSet(jr.DataSet),
+				OpType:  core.OpInsert, // Jobs always INSERT/upsert
 			}
 			allOps = append(allOps, jobSinkOp)
 		}
 
 		// Get sinks for this operation
-		sinks := e.skill.GetSinks(sinkType)
+		sinks := e.skill.GetSinks(Operation(sinkType))
 		if len(sinks) > 0 {
+			sinkParams := e.cdcParamsToMap(cdcParams)
+
 			// Filter sinks by table and execute
 			for _, sink := range sinks {
 				if sink.On != "" && sink.On != change.Table {
@@ -85,13 +85,18 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 				// Execute sink SQL against MSSQL
 				ds, err := e.executor.ExecuteDriver(sink.SQL, sinkParams)
 				if err != nil {
-					return fmt.Errorf("execute sink %s: %w", sink.Name, err)
+					return nil, fmt.Errorf("execute sink %s: %w", sink.Name, err)
 				}
 
-				// Collect sink operation for batch write
-				sinkOp := &SinkOp{
-					Config:  sink,
-					DataSet: ds,
+				// Collect sink operation
+				sinkOp := core.SinkOp{
+					Config: core.SinkOpConfig{
+						Name:       sink.Name,
+						Output:     sink.Output,
+						PrimaryKey: sink.PrimaryKey,
+						OnConflict: sink.OnConflict,
+					},
+					DataSet: convertDataSet(ds),
 					OpType:  sinkType,
 				}
 				allOps = append(allOps, sinkOp)
@@ -99,14 +104,24 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 		}
 	}
 
-	// Write all operations in one transaction
-	if len(allOps) > 0 {
-		if err := e.writer.WriteBatch(allOps); err != nil {
-			return fmt.Errorf("write batch: %w", err)
-		}
-	}
+	return allOps, nil
+}
 
-	return nil
+// convertDataSet converts sqlplugin.DataSet to core.DataSet
+func convertDataSet(ds *DataSet) *core.DataSet {
+	if ds == nil {
+		return nil
+	}
+	// Convert [][]interface{} to [][]any
+	rows := make([][]any, len(ds.Rows))
+	for i, row := range ds.Rows {
+		rows[i] = make([]any, len(row))
+		copy(rows[i], row)
+	}
+	return &core.DataSet{
+		Columns: ds.Columns,
+		Rows:    rows,
+	}
 }
 
 // buildCDCParams builds CDC parameters from a single change
@@ -164,16 +179,16 @@ func (e *Engine) inferPrimaryKey(ds *DataSet) string {
 	return "id"
 }
 
-// operationToSinkType converts core.Operation to sqlplugin.Operation
+// operationToSinkType converts core.Operation to core.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToSinkType(op core.Operation) Operation {
+func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
 	switch op {
 	case core.OpInsert:
-		return Insert
+		return core.OpInsert
 	case core.OpUpdateAfter:
-		return Update
+		return core.OpUpdateAfter
 	case core.OpDelete:
-		return Delete
+		return core.OpDelete
 	default:
 		return 0 // 0 is not valid, indicates skip
 	}
