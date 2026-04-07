@@ -556,9 +556,7 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 			"error":   fmt.Sprintf("connect to MSSQL: %v", err),
 		})
 	}
-	defer func() {
-		_ = db.Close()
-	}()
+	defer db.Close() //nolint:errcheck
 
 	// Create gap detector with MSSQL connection
 	gapDetector := cdc.NewGapDetector(db)
