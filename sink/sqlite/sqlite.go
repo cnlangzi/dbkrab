@@ -280,3 +280,8 @@ func (s *Sink) GetChangesWithFilter(limit int, tableName, operation, txID string
 
 	return results, rows.Err()
 }
+
+// GetDB returns the underlying database connection
+func (s *Sink) GetDB() *sql.DB {
+	return s.db
+}
