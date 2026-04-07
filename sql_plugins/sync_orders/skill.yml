@@ -8,7 +8,7 @@ sinks:
   insert:
     - name: sync
       sql: |
-        SELECT 
+        SELECT
           @cdc_lsn as cdc_lsn,
           @cdc_tx_id as cdc_transaction_id,
           @cdc_table as cdc_source_table,
@@ -18,14 +18,14 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@order_ids);
+        WHERE o.order_id IN (@orders_order_id);
       output: order_sync
       primary_key: order_id
 
   update:
     - name: sync
       sql: |
-        SELECT 
+        SELECT
           @cdc_lsn as cdc_lsn,
           @cdc_tx_id as cdc_transaction_id,
           @cdc_table as cdc_source_table,
@@ -35,13 +35,13 @@ sinks:
           o.status,
           o.created_at
         FROM orders o
-        WHERE o.order_id IN (@order_ids);
+        WHERE o.order_id IN (@orders_order_id);
       output: order_sync
       primary_key: order_id
 
   delete:
     - name: sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @order_id as order_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id
       output: order_sync
       primary_key: order_id

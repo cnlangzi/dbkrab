@@ -41,12 +41,12 @@ sinks:
   delete:
     - name: customers_sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @customer_id as customer_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_customer_id as customer_id
       output: customers_sync
       primary_key: customer_id
 
     - name: products_sync
       sql: |
-        SELECT @cdc_lsn as cdc_lsn, @product_id as product_id
+        SELECT @cdc_lsn as cdc_lsn, @orders_product_id as product_id
       output: products_sync
       primary_key: product_id
