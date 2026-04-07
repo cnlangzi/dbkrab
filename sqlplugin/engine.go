@@ -27,25 +27,18 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB, sqliteDB *sql.DB) *Engine {
 
 // Handle processes a core.Transaction through the SQL Plugin
 // It extracts CDC changes, executes sink SQL against MSSQL, and writes results to SQLite
+// Each change (row) is processed individually - if there are 3 row changes, sink is executed 3 times
 func (e *Engine) Handle(tx *core.Transaction) error {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil
 	}
 
-	// Group changes by operation type
-	groups := groupChangesByOperation(tx.Changes)
-
-	// Process each operation group
-	for op, changes := range groups {
-		// Skip UpdateBefore - we only handle Insert, Update (after), Delete
-		if len(changes) == 0 {
-			continue
-		}
-
-		// Get corresponding sink type
-		sinkType := e.operationToSinkType(op)
+	// Process each change (row) individually
+	for _, change := range tx.Changes {
+		// Get corresponding sink type for this operation
+		sinkType := e.operationToSinkType(change.Operation)
 		if sinkType == 0 {
-			continue // Unknown operation
+			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
 		// Get sinks for this operation
@@ -54,19 +47,15 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 			continue
 		}
 
-		// Build batch parameters
-		params, err := e.buildBatchParams(tx, changes)
+		// Build params for this single change
+		params, err := e.buildParams(&change)
 		if err != nil {
-			return fmt.Errorf("build batch params: %w", err)
+			return fmt.Errorf("build params: %w", err)
 		}
 
-		// Get table name from first change
-		tableName := changes[0].Table
-
-		// Process each sink
+		// Filter sinks by table
 		for _, sink := range sinks {
-			// Filter by table if sink has 'on' filter
-			if sink.On != "" && sink.On != tableName {
+			if sink.On != "" && sink.On != change.Table {
 				continue
 			}
 
@@ -92,57 +81,26 @@ func (e *Engine) Handle(tx *core.Transaction) error {
 	return nil
 }
 
-// groupChangesByOperation groups changes by their operation type
-func groupChangesByOperation(changes []core.Change) map[core.Operation][]core.Change {
-	groups := make(map[core.Operation][]core.Change)
-	for _, c := range changes {
-		groups[c.Operation] = append(groups[c.Operation], c)
-	}
-	return groups
-}
 
-// buildBatchParams builds a parameter map from a transaction and changes
-// It collects all {table}_ids arrays and CDC metadata
-func (e *Engine) buildBatchParams(tx *core.Transaction, changes []core.Change) (map[string]interface{}, error) {
+// buildParams builds a parameter map from a single change
+// It extracts CDC metadata and data fields with table prefix
+func (e *Engine) buildParams(change *core.Change) (map[string]interface{}, error) {
 	params := make(map[string]interface{})
 
-	if len(changes) == 0 {
-		return params, nil
+	// CDC metadata
+	params["cdc_tx_id"] = change.TransactionID
+	params["cdc_lsn"] = hex.EncodeToString(change.LSN)
+	params["cdc_table"] = change.Table
+
+	// Add all data fields with table prefix
+	shortTable := shortTableName(change.Table)
+	for k, v := range change.Data {
+		params[fmt.Sprintf("%s_%s", shortTable, k)] = v
 	}
 
-	// CDC metadata from transaction
-	params["cdc_tx_id"] = tx.ID
-	params["cdc_lsn"] = txLsnToString(tx.Changes)
-	params["cdc_table"] = changes[0].Table
-
-	// Group data fields by table
-	tableData := make(map[string][]interface{})
-	for _, change := range changes {
-		shortTable := shortTableName(change.Table)
-
-		// Add all data fields with table prefix
-		for k, v := range change.Data {
-			key := fmt.Sprintf("%s_%s", shortTable, k)
-			params[key] = v
-		}
-
-		// Collect IDs for each table
-		if id, ok := change.Data["id"]; ok {
-			tableData[shortTable] = append(tableData[shortTable], id)
-		} else {
-			// Try to find any field that could be an ID
-			for fieldName, value := range change.Data {
-				if isIDField(fieldName) {
-					tableData[shortTable] = append(tableData[shortTable], value)
-					break
-				}
-			}
-		}
-	}
-
-	// Add {table}_ids arrays
-	for table, ids := range tableData {
-		params[table+"_ids"] = ids
+	// Add id field if exists
+	if id, ok := change.Data["id"]; ok {
+		params[shortTable+"_id"] = id
 	}
 
 	return params, nil
@@ -163,14 +121,6 @@ func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	}
 }
 
-// txLsnToString extracts the LSN from the last change in the transaction
-func txLsnToString(changes []core.Change) string {
-	if len(changes) == 0 {
-		return ""
-	}
-	// Use the last change's LSN
-	return hex.EncodeToString(changes[len(changes)-1].LSN)
-}
 
 // shortTableName extracts short table name (e.g., dbo.orders -> orders)
 func shortTableName(table string) string {
