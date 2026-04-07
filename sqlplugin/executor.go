@@ -151,7 +151,7 @@ func replaceIDsParam(sql, placeholder string, ids []interface{}) string {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%v", id))
+		fmt.Fprintf(&sb, "%v", id)
 	}
 	sb.WriteString(")")
 	return strings.ReplaceAll(sql, placeholder, sb.String())
