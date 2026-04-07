@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,18 +20,34 @@ type Sink struct {
 	path string
 }
 
-// NewSink creates a new SQLite sink
+// NewSink creates a new SQLite sink with WAL mode and optimized settings
 func NewSink(path string) (*Sink, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
+	// Build DSN with WAL mode and optimized parameters
+	params := url.Values{}
+	params.Add("_journal_mode", "WAL")           // WAL mode for concurrent read/write
+	params.Add("_synchronous", "NORMAL")          // Balance between safety and performance
+	params.Add("_busy_timeout", "5000")           // Wait 5s for locks
+	params.Add("_pragma", "temp_store(MEMORY)")   // Temp tables in memory
+	params.Add("_pragma", "cache_size(-100000)")  // ~100MB cache
+	params.Add("_pragma", "mmap_size(1000000000)") // 1GB mmap for faster reads
+	params.Add("cache", "shared")                 // Shared cache for concurrency
+
+	dsn := path + "?" + params.Encode()
+
 	// Open database
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// Set connection pool - writer needs single connection to avoid SQLITE_BUSY
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Create tables
 	if err := createTables(db); err != nil {
@@ -40,7 +57,16 @@ func NewSink(path string) (*Sink, error) {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
-	return &Sink{db: db, path: path}, nil
+	sink := &Sink{db: db, path: path}
+	// Initialize poller state
+	if err := sink.initPollerState(); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			slog.Warn("db.Close error", "error", closeErr)
+		}
+		return nil, fmt.Errorf("init poller state: %w", err)
+	}
+
+	return sink, nil
 }
 
 // createTables creates the necessary tables
@@ -54,12 +80,83 @@ func createTables(db *sql.DB) error {
 			data TEXT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
+
+		CREATE TABLE IF NOT EXISTS poller_state (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			last_poll_time TIMESTAMP,
+			last_lsn TEXT,
+			total_changes INTEGER DEFAULT 0,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
 		
 		CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
 		CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name);
 		CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
 	`)
 	return err
+}
+
+// initPollerState initializes the poller state row
+func (s *Sink) initPollerState() error {
+	_, err := s.db.Exec(`
+		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
+		VALUES (1, NULL, NULL, 0)
+	`)
+	return err
+}
+
+// UpdatePollerState updates the poller state after successful poll
+func (s *Sink) UpdatePollerState(lastLSN string, changeCount int) error {
+	// Use COALESCE to keep existing LSN if new one is empty
+	_, err := s.db.Exec(`
+		UPDATE poller_state 
+		SET last_poll_time = CURRENT_TIMESTAMP,
+			last_lsn = COALESCE(NULLIF(?, ''), last_lsn),
+			total_changes = total_changes + ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, lastLSN, changeCount)
+	return err
+}
+
+// GetPollerState returns the current poller state
+func (s *Sink) GetPollerState() (map[string]interface{}, error) {
+	row := s.db.QueryRow(`
+		SELECT last_poll_time, last_lsn, total_changes, updated_at
+		FROM poller_state
+		WHERE id = 1
+	`)
+
+	var lastPollTime, lastLSN, updatedAt sql.NullString
+	var totalChanges int
+
+	if err := row.Scan(&lastPollTime, &lastLSN, &totalChanges, &updatedAt); err != nil {
+		return nil, err
+	}
+
+	state := map[string]interface{}{
+		"total_changes": totalChanges,
+	}
+
+	if lastPollTime.Valid {
+		state["last_poll_time"] = lastPollTime.String
+	} else {
+		state["last_poll_time"] = nil
+	}
+
+	if lastLSN.Valid {
+		state["last_lsn"] = lastLSN.String
+	} else {
+		state["last_lsn"] = nil
+	}
+
+	if updatedAt.Valid {
+		state["updated_at"] = updatedAt.String
+	} else {
+		state["updated_at"] = nil
+	}
+
+	return state, nil
 }
 
 // Write writes a transaction to SQLite

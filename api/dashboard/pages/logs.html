@@ -39,7 +39,26 @@
         </div>
     </div>
 
-    <!-- Stats -->
+    <!-- Poller Status -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">🔍 Poller Status</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="p-4 bg-blue-50 rounded-lg">
+                <p class="text-sm text-gray-500">Last Poll Time</p>
+                <p id="last-poll-time" class="text-lg font-bold text-blue-600">-</p>
+            </div>
+            <div class="p-4 bg-green-50 rounded-lg">
+                <p class="text-sm text-gray-500">Last LSN</p>
+                <p id="last-lsn" class="text-lg font-bold text-green-600 font-mono text-sm">-</p>
+            </div>
+            <div class="p-4 bg-purple-50 rounded-lg">
+                <p class="text-sm text-gray-500">Total Changes Captured</p>
+                <p id="total-changes" class="text-lg font-bold text-purple-600">0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Stats -->
     <div class="bg-white rounded-lg shadow p-6">
         <div class="flex items-center justify-between">
             <div>
@@ -79,6 +98,23 @@
 
 <script>
 let currentLimit = 100;
+
+// Load poller status
+function loadPollerStatus() {
+    fetch('/api/cdc/status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.state) {
+                const state = data.state;
+                document.getElementById('last-poll-time').textContent = state.last_poll_time || 'Never';
+                document.getElementById('last-lsn').textContent = state.last_lsn || '-';
+                document.getElementById('total-changes').textContent = state.total_changes || 0;
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load poller status:', err);
+        });
+}
 
 function setLimit(limit) {
     currentLimit = limit;
@@ -164,5 +200,9 @@ function loadLogs() {
 
 // Load on page load
 loadLogs();
+loadPollerStatus();
+
+// Refresh poller status every 5 seconds
+setInterval(loadPollerStatus, 5000);
 </script>
 {{ end }}
