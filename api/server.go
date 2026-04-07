@@ -761,7 +761,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div><p class="text-textMuted text-sm">Status</p><p class="text-lg font-semibold ` + cdcTextClass + `">` + cdcStatusText + `</p></div>`)
 	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked))
 	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes)))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text">%s</p></div>`, m.LastSyncTime))
+	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime))
 	sb.WriteString(`</div>`)
 	if m.CDCMessage != "" {
 		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)

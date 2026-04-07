@@ -176,13 +176,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// Convert UTC time string to local timezone
+function formatLocalTime(utcString) {
+    if (!utcString || utcString === 'null' || utcString === '-') return '-';
+    // Add 'Z' suffix if not present to indicate UTC
+    const utcDate = utcString.endsWith('Z') ? utcString : utcString + 'Z';
+    try {
+        const date = new Date(utcDate);
+        return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (e) {
+        return utcString;
+    }
+}
+
 function loadPollerStatus() {
     fetch('/api/cdc/status')
         .then(r => r.json())
         .then(data => {
             if (data.success && data.state) {
                 const state = data.state;
-                document.getElementById('last-poll-time').textContent = state.last_poll_time || 'Never';
+                document.getElementById('last-poll-time').textContent = formatLocalTime(state.last_poll_time);
                 document.getElementById('last-lsn').textContent = state.last_lsn || '-';
                 document.getElementById('total-changes').textContent = state.total_changes || 0;
             }
@@ -323,7 +344,7 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${log.created_at || '-'}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.created_at)}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -365,7 +386,7 @@ function renderMobileCard(log) {
                     <div class="flex items-center gap-2 text-xs text-textMuted">
                         <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
                         <span class="text-border">•</span>
-                        <span class="whitespace-nowrap">${log.created_at || '-'}</span>
+                        <span class="whitespace-nowrap">${formatLocalTime(log.created_at)}</span>
                     </div>
                 </div>
             </div>

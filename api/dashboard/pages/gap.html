@@ -120,6 +120,26 @@
 </div>
 
 <script>
+// Convert UTC time string to local timezone
+function formatLocalTime(utcString) {
+    if (!utcString || utcString === 'null' || utcString === '-') return '-';
+    const utcDate = utcString.endsWith('Z') ? utcString : utcString + 'Z';
+    try {
+        const date = new Date(utcDate);
+        return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (e) {
+        return utcString;
+    }
+}
+
 let tableData = [];
 
 // Load data on page load
@@ -223,6 +243,7 @@ function renderTables(tables) {
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Max LSN</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Lag</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Duration</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Checked At</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -270,6 +291,9 @@ function renderDesktopRow(t) {
             <td class="px-6 py-4 whitespace-nowrap">
                 <div class="text-sm text-text">${formatDuration(t.lag_duration_secs)}</div>
             </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-textMuted">${formatLocalTime(t.checked_at)}</div>
+            </td>
         </tr>
     `;
 }
@@ -305,6 +329,10 @@ function renderMobileCard(t) {
                 <div>
                     <span class="text-textMuted text-xs">Duration:</span>
                     <div class="text-text">${formatDuration(t.lag_duration_secs)}</div>
+                </div>
+                <div class="col-span-2">
+                    <span class="text-textMuted text-xs">Checked At:</span>
+                    <div class="text-text text-xs">${formatLocalTime(t.checked_at)}</div>
                 </div>
             </div>
         </div>
