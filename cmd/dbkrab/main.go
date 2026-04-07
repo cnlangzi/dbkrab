@@ -110,7 +110,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create DLQ (use same SQLite path as sink for simplicity)
+	// Create DLQ (use same SQLite path as store for simplicity)
 	dlqStore, err := dlq.New(cfg.Sink.Path)
 	if err != nil {
 		slog.Error("failed to create DLQ", "error", err)

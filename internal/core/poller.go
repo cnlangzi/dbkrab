@@ -246,7 +246,7 @@ func (p *Poller) Stop() {
 }
 
 // poll performs one polling cycle
-// P0 fix: offset is only updated after sink successfully writes
+// P0 fix: offset is only updated after store successfully writes
 // P0 fix: multi-table sync via min LSN checkpoint
 // P0-6 fix: CDC queries have timeout to prevent blocking
 func (p *Poller) poll(ctx context.Context) error {
@@ -534,7 +534,7 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 		}
 	}
 
-	// Update poller state in sink for observability (even if no changes)
+	// Update poller state in store for observability (even if no changes)
 	var lastLSN string
 	if len(validResults) > 0 {
 		minLSN := validResults[0].lastLSN
