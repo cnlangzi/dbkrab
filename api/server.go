@@ -331,7 +331,14 @@ func (s *Server) handleCDCTables(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "CDC admin not initialized"})
 	}
 
-	tables, err := s.cdcAdmin.ListTables()
+	// Get tracked tables from config
+	var trackedTables []string
+	if s.configWatcher != nil {
+		cfg := s.configWatcher.Get()
+		trackedTables = cfg.Tables
+	}
+
+	tables, err := s.cdcAdmin.ListTables(trackedTables)
 	if err != nil {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
