@@ -128,17 +128,30 @@ func (s *Server) Stop() error {
 func (s *Server) registerAPIRoutes() {
 	api := s.app.Group("/api")
 	api.Get("/plugins", s.handlePlugins, xun.WithViewer(&xun.JsonViewer{}))
-	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
-	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
-	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/plugins/{name}", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Delete("/plugins/{name}", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/plugins/{name}/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
+
+	// Skills management routes
+	api.Get("/skills/list", s.handleSkillsList, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/files", s.handleSkillsFiles, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/files/html", s.handleSkillsFilesHTML) // HTML fragment for HTMX
+	api.Get("/skills/{name}", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/{name}/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Delete("/skills/{name}", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/validate", s.handleSkillValidate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/file/{path...}", s.handleSkillFileGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/file/{path}/save", s.handleSkillFileSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/folder", s.handleFolderCreate, xun.WithViewer(&xun.JsonViewer{}))
 
 	if s.dlq != nil {
 		api.Get("/dlq/list", s.handleDLQList, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/dlq/stats", s.handleDLQStats, xun.WithViewer(&xun.JsonViewer{}))
-		api.Get("/dlq/:id", s.handleDLQGet, xun.WithViewer(&xun.JsonViewer{}))
-		api.Post("/dlq/:id/replay", s.handleDLQReplay, xun.WithViewer(&xun.JsonViewer{}))
-		api.Post("/dlq/:id/ignore", s.handleDLQIgnore, xun.WithViewer(&xun.JsonViewer{}))
-		api.Delete("/dlq/:id", s.handleDLQDelete, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/dlq/{id}", s.handleDLQGet, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/dlq/{id}/replay", s.handleDLQReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/dlq/{id}/ignore", s.handleDLQIgnore, xun.WithViewer(&xun.JsonViewer{}))
+		api.Delete("/dlq/{id}", s.handleDLQDelete, xun.WithViewer(&xun.JsonViewer{}))
 	}
 
 	// CDC administration routes
@@ -171,6 +184,11 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
+	
+	// Register skills pages explicitly
+	s.app.Get("/skills", s.handleSkillsPage)
+	s.app.Get("/skills/new", s.handleSkillsNewPage)
+	s.app.Get("/skills/edit/{name}", s.handleSkillsEditPage)
 }
 
 // handlePlugins handles GET /api/plugins
@@ -179,9 +197,9 @@ func (s *Server) handlePlugins(c *xun.Context) error {
 	return c.View(resp)
 }
 
-// handlePluginGet handles GET /api/plugins/:name
+// handlePluginGet handles GET /api/plugins/{name}
 func (s *Server) handlePluginGet(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	resp := s.manager.HandleAPI("get", map[string]any{"name": name})
 	if !resp.Success {
 		c.WriteStatus(http.StatusNotFound)
@@ -189,16 +207,16 @@ func (s *Server) handlePluginGet(c *xun.Context) error {
 	return c.View(resp)
 }
 
-// handlePluginDelete handles DELETE /api/plugins/:name
+// handlePluginDelete handles DELETE /api/plugins/{name}
 func (s *Server) handlePluginDelete(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	resp := s.manager.HandleAPI("unload", map[string]any{"name": name})
 	return c.View(resp)
 }
 
-// handlePluginReload handles POST /api/plugins/:name/reload
+// handlePluginReload handles POST /api/plugins/{name}/reload
 func (s *Server) handlePluginReload(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	resp := s.manager.HandleAPI("reload", map[string]any{"name": name})
 	return c.View(resp)
 }
@@ -227,13 +245,13 @@ func (s *Server) handleDLQStats(c *xun.Context) error {
 	return c.View(map[string]any{"success": true, "stats": stats})
 }
 
-// handleDLQGet handles GET /api/dlq/:id
+// handleDLQGet handles GET /api/dlq/{id}
 func (s *Server) handleDLQGet(c *xun.Context) error {
 	if s.dlq == nil {
 		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Request.PathValue("id"), 10, 64)
 	if err != nil {
 		c.WriteStatus(http.StatusBadRequest)
 		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
@@ -248,13 +266,13 @@ func (s *Server) handleDLQGet(c *xun.Context) error {
 	return c.View(map[string]any{"success": true, "entry": entry})
 }
 
-// handleDLQReplay handles POST /api/dlq/:id/replay
+// handleDLQReplay handles POST /api/dlq/{id}/replay
 func (s *Server) handleDLQReplay(c *xun.Context) error {
 	if s.dlq == nil {
 		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Request.PathValue("id"), 10, 64)
 	if err != nil {
 		c.WriteStatus(http.StatusBadRequest)
 		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
@@ -268,13 +286,13 @@ func (s *Server) handleDLQReplay(c *xun.Context) error {
 	return c.View(map[string]any{"success": true, "message": "Entry replayed"})
 }
 
-// handleDLQDelete handles DELETE /api/dlq/:id
+// handleDLQDelete handles DELETE /api/dlq/{id}
 func (s *Server) handleDLQDelete(c *xun.Context) error {
 	if s.dlq == nil {
 		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Request.PathValue("id"), 10, 64)
 	if err != nil {
 		c.WriteStatus(http.StatusBadRequest)
 		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
@@ -319,7 +337,7 @@ func (s *Server) handleDLQIgnore(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "DLQ not initialized"})
 	}
 
-	id, err := strconv.ParseInt(c.Routing.Options.GetString("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Request.PathValue("id"), 10, 64)
 	if err != nil {
 		c.WriteStatus(http.StatusBadRequest)
 		return c.View(map[string]any{"success": false, "error": "invalid entry ID"})
