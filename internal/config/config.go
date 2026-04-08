@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/alert"
+	"github.com/cnlangzi/dbkrab/internal/logging"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +23,7 @@ type Config struct {
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
 	Plugins            PluginsConfig          `yaml:"plugins"`
+	Logging            logging.LoggingConfig  `yaml:"logging"`
 }
 
 // PluginsConfig contains plugin configuration
@@ -186,6 +188,32 @@ func Load(path string) (*Config, error) {
 		if cfg.GracefulDegradation.ReconnectMaxDelay == "" {
 			cfg.GracefulDegradation.ReconnectMaxDelay = "60s"
 		}
+	}
+
+	// Logging defaults
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "info"
+	}
+	if cfg.Logging.Format == "" {
+		cfg.Logging.Format = "json"
+	}
+	if cfg.Logging.File.Path == "" {
+		cfg.Logging.File.Path = "./logs/dbkrab.log"
+	}
+	if cfg.Logging.File.MaxSizeMB == 0 {
+		cfg.Logging.File.MaxSizeMB = 100
+	}
+	if cfg.Logging.File.MaxAgeDays == 0 {
+		cfg.Logging.File.MaxAgeDays = 7
+	}
+	if cfg.Logging.File.MaxFiles == 0 {
+		cfg.Logging.File.MaxFiles = 4
+	}
+	// Console enabled defaults to true if not specified
+	// File enabled defaults to true if not specified
+	if !cfg.Logging.Console.Enabled && !cfg.Logging.File.Enabled {
+		cfg.Logging.Console.Enabled = true
+		cfg.Logging.File.Enabled = true
 	}
 
 	return &cfg, nil
