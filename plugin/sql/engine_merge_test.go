@@ -325,14 +325,62 @@ func TestMergeSinks(t *testing.T) {
 			expect: []core.Sink{
 				{
 					Config: core.SinkConfig{
-						Name:       "sink1", // First sink's name
+						Name:       "sink1",
 						Output:     "users",
 						PrimaryKey: "id",
-						OnConflict: "skip", // First sink's conflict strategy
+						OnConflict: "skip",
 					},
 					DataSet: &core.DataSet{
 						Columns: []string{"email", "id", "name", "phone"},
 						Rows:    [][]any{{"alice@example.com", 1, "Alice", "123-456-7890"}},
+					},
+					OpType: core.OpInsert,
+				},
+			},
+		},
+		{
+			name: "two sinks with same table, same pk, different column order - should merge by name",
+			sinks: []core.Sink{
+				{
+					Config: core.SinkConfig{
+						Name:       "sink1",
+						Output:     "users",
+						PrimaryKey: "id",
+						OnConflict: "overwrite",
+					},
+					DataSet: &core.DataSet{
+						// id is at index 0
+						Columns: []string{"id", "name", "email"},
+						Rows:    [][]any{{1, "Alice", "alice@example.com"}},
+					},
+					OpType: core.OpInsert,
+				},
+				{
+					Config: core.SinkConfig{
+						Name:       "sink2",
+						Output:     "users",
+						PrimaryKey: "id",
+						OnConflict: "overwrite",
+					},
+					DataSet: &core.DataSet{
+						// id is at index 1 (different order!)
+						Columns: []string{"phone", "id", "address"},
+						Rows:    [][]any{{"123-456-7890", 1, "123 Main St"}},
+					},
+					OpType: core.OpInsert,
+				},
+			},
+			expect: []core.Sink{
+				{
+					Config: core.SinkConfig{
+						Name:       "sink1",
+						Output:     "users",
+						PrimaryKey: "id",
+						OnConflict: "overwrite",
+					},
+					DataSet: &core.DataSet{
+						Columns: []string{"address", "email", "id", "name", "phone"},
+						Rows:    [][]any{{"123 Main St", "alice@example.com", 1, "Alice", "123-456-7890"}},
 					},
 					OpType: core.OpInsert,
 				},
@@ -385,5 +433,42 @@ func TestMergeSinks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMergeSinksOnConflictInconsistent(t *testing.T) {
+	// When OnConflict is inconsistent, mergeSinks should log error and skip the group
+	sinks := []core.Sink{
+		{
+			Config: core.SinkConfig{
+				Name:       "sink1",
+				Output:     "users",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
+			},
+			DataSet: &core.DataSet{
+				Columns: []string{"id", "name"},
+				Rows:    [][]any{{1, "Alice"}},
+			},
+			OpType: core.OpInsert,
+		},
+		{
+			Config: core.SinkConfig{
+				Name:       "sink2",
+				Output:     "users",
+				PrimaryKey: "id",
+				OnConflict: "skip", // Different!
+			},
+			DataSet: &core.DataSet{
+				Columns: []string{"id", "email"},
+				Rows:    [][]any{{1, "alice@example.com"}},
+			},
+			OpType: core.OpInsert,
+		},
+	}
+	result := mergeSinks(sinks)
+	// Should skip the conflicting group, returning empty
+	if len(result) != 0 {
+		t.Errorf("mergeSinks() with inconsistent OnConflict got %d sinks, want 0", len(result))
 	}
 }
