@@ -2,7 +2,6 @@
 package logging
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,10 +11,9 @@ import (
 
 // LoggingConfig defines the logging configuration structure.
 type LoggingConfig struct {
-	Level   string          `yaml:"level"`   // debug|info|warn|error
-	Format  string          `yaml:"format"`  // text|json
-	File    FileLogConfig   `yaml:"file"`
-	Console ConsoleLogConfig `yaml:"console"`
+	Level   string            `yaml:"level"` // debug|info|warn|error
+	File    FileLogConfig     `yaml:"file"`
+	Console ConsoleLogConfig  `yaml:"console"`
 }
 
 // FileLogConfig defines file-based logging configuration.
@@ -114,14 +112,3 @@ func parseLevel(level string) slog.Level {
 	}
 }
 
-// WriterAdapter wraps lumberjack.Logger to implement io.Writer for compatibility.
-type WriterAdapter struct {
-	*lumberjack.Logger
-}
-
-var _ io.Writer = (*WriterAdapter)(nil)
-
-// Write implements io.Writer.
-func (w *WriterAdapter) Write(p []byte) (n int, err error) {
-	return w.Logger.Write(p)
-}
