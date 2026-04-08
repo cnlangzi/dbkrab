@@ -16,6 +16,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/logging"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/app/sqlite"
@@ -37,7 +38,13 @@ func main() {
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logging first, before any other initialization
+	if err := logging.Init(cfg.Logging); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logging: %v\n", err)
 		os.Exit(1)
 	}
 
