@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -9,10 +10,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	_ "modernc.org/sqlite"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -46,6 +50,7 @@ type Server struct {
 	configPath  string
 	config      *config.Config
 	configWatcher *config.Watcher
+	sinksRoot   *os.Root // Secure root for sinks directory access
 }
 
 // NewServer creates a new API server
@@ -101,6 +106,16 @@ func (s *Server) Start() error {
 	// Register routes
 	s.registerAPIRoutes()
 	s.registerPageRoutes()
+
+	// Initialize sinks root for secure file access
+	// os.Root provides safe access to files within a directory tree
+	if s.config != nil && s.config.Sinks.BasePath != "" {
+		var err error
+		s.sinksRoot, err = os.OpenRoot(s.config.Sinks.BasePath)
+		if err != nil {
+			slog.Warn("failed to open sinks root, sinks API will be limited", "error", err, "path", s.config.Sinks.BasePath)
+		}
+	}
 
 	// Start xun (this finalizes route registration)
 	s.app.Start()
@@ -177,6 +192,11 @@ func (s *Server) registerAPIRoutes() {
 		slog.Warn("CDC gap monitoring route skipped - cdcAdmin or sink is nil")
 	}
 
+	// Sinks management routes
+	api.Get("/sinks/list", s.handleSinksList, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/sinks/{name}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/sinks/{name}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
+
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
 }
@@ -189,6 +209,10 @@ func (s *Server) registerPageRoutes() {
 	s.app.Get("/skills", s.handleSkillsPage)
 	s.app.Get("/skills/new", s.handleSkillsNewPage)
 	s.app.Get("/skills/edit/{name}", s.handleSkillsEditPage)
+	
+	// Register sinks pages explicitly
+	s.app.Get("/sinks", s.handleSinksPage)
+	s.app.Get("/sinks/{name}", s.handleSinkQueryPage)
 }
 
 // handlePlugins handles GET /api/plugins
@@ -1024,4 +1048,340 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	}
 	
 	return metrics
+}
+
+// handleSinksList handles GET /api/sinks/list
+func (s *Server) handleSinksList(c *xun.Context) error {
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sinks directory not available",
+		})
+	}
+	
+	entries, err := fs.ReadDir(s.sinksRoot.FS(), ".")
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to read sinks directory: %v", err),
+		})
+	}
+	
+	var sinks []map[string]any
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Check for .db files inside the directory
+			dbFiles, err := fs.ReadDir(s.sinksRoot.FS(), entry.Name())
+			if err != nil {
+				continue
+			}
+			for _, dbFile := range dbFiles {
+				if strings.HasSuffix(strings.ToLower(dbFile.Name()), ".db") {
+					filePath := filepath.Join(entry.Name(), dbFile.Name())
+					info, err := s.sinksRoot.Stat(filePath)
+					if err != nil {
+						continue
+					}
+					sinks = append(sinks, map[string]any{
+						"name":      entry.Name(),
+						"file":      dbFile.Name(),
+						"path":      filePath,
+						"size":      info.Size(),
+						"sizeHuman": formatFileSize(info.Size()),
+						"modTime":   info.ModTime().Format(time.RFC3339),
+					})
+				}
+			}
+		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".db") {
+			// Direct .db file in sinks directory
+			info, err := s.sinksRoot.Stat(entry.Name())
+			if err != nil {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name(), ".db")
+			sinks = append(sinks, map[string]any{
+				"name":      name,
+				"file":      entry.Name(),
+				"path":      entry.Name(),
+				"size":      info.Size(),
+				"sizeHuman": formatFileSize(info.Size()),
+				"modTime":   info.ModTime().Format(time.RFC3339),
+			})
+		}
+	}
+	
+	return c.View(map[string]any{
+		"success": true,
+		"count":   len(sinks),
+		"sinks":   sinks,
+	})
+}
+
+// handleSinkTables handles GET /api/sinks/{name}/tables
+func (s *Server) handleSinkTables(c *xun.Context) error {
+	name := c.Request.PathValue("name")
+	if name == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink name is required",
+		})
+	}
+	
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sinks directory not available",
+		})
+	}
+	
+	// Validate name to prevent path traversal
+	// os.Root methods automatically reject paths that try to escape the root
+	if !filepath.IsLocal(name) {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid sink name",
+		})
+	}
+	
+	// Try to find the database file using os.Root for secure access
+	// First try: {name}/{name}.db
+	dbRelPath := filepath.Join(name, name+".db")
+	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+		// Second try: {name}.db
+		dbRelPath = name + ".db"
+		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+			return c.View(map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("sink database not found: %s", name),
+			})
+		}
+	}
+	
+	// Build full path for SQLite driver
+	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
+	
+	// Open read-only connection
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to open database: %v", err),
+		})
+	}
+	defer func() { _ = db.Close() }()
+	
+	// Query tables from sqlite_master
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to query tables: %v", err),
+		})
+	}
+	defer func() { _ = rows.Close() }()
+	
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			continue
+		}
+		// Skip internal SQLite tables
+		if !strings.HasPrefix(tableName, "sqlite_") {
+			tables = append(tables, tableName)
+		}
+	}
+	
+	return c.View(map[string]any{
+		"success": true,
+		"count":   len(tables),
+		"tables":  tables,
+	})
+}
+
+// handleSinkQuery handles POST /api/sinks/{name}/query
+func (s *Server) handleSinkQuery(c *xun.Context) error {
+	name := c.Request.PathValue("name")
+	if name == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink name is required",
+		})
+	}
+	
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sinks directory not available",
+		})
+	}
+	
+	// Validate name to prevent path traversal
+	// os.Root methods automatically reject paths that try to escape the root
+	if !filepath.IsLocal(name) {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid sink name",
+		})
+	}
+	
+	// Parse request body
+	var req struct {
+		Query string `json:"query"`
+	}
+	
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "failed to read request body",
+		})
+	}
+	defer func() { _ = c.Request.Body.Close() }()
+	
+	if err := json.Unmarshal(body, &req); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid request body",
+		})
+	}
+	
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "query is required",
+		})
+	}
+	
+	// Only allow SELECT statements
+	queryUpper := strings.ToUpper(query)
+	if !strings.HasPrefix(queryUpper, "SELECT") {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "only SELECT statements are allowed",
+		})
+	}
+	
+	// Try to find the database file using os.Root for secure access
+	// First try: {name}/{name}.db
+	dbRelPath := filepath.Join(name, name+".db")
+	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+		// Second try: {name}.db
+		dbRelPath = name + ".db"
+		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+			return c.View(map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("sink database not found: %s", name),
+			})
+		}
+	}
+	
+	// Build full path for SQLite driver
+	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
+	
+	// Open read-only connection
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to open database: %v", err),
+		})
+	}
+	defer func() { _ = db.Close() }()
+	
+	// Execute query with limit
+	limitQuery := query
+	if !strings.Contains(strings.ToUpper(query), "LIMIT") {
+		limitQuery = fmt.Sprintf("%s LIMIT 1000", query)
+	}
+	
+	rows, err := db.Query(limitQuery)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("query execution failed: %v", err),
+		})
+	}
+	defer func() { _ = rows.Close() }()
+	
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to get columns: %v", err),
+		})
+	}
+	
+	// Fetch results
+	var results []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return c.View(map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("failed to scan row: %v", err),
+			})
+		}
+		
+		rowMap := make(map[string]any)
+		for i, col := range columns {
+			rowMap[col] = values[i]
+		}
+		results = append(results, rowMap)
+	}
+	
+	return c.View(map[string]any{
+		"success": true,
+		"columns": columns,
+		"rows":    results,
+		"count":   len(results),
+	})
+}
+
+// handleSinksPage handles GET /sinks
+func (s *Server) handleSinksPage(c *xun.Context) error {
+	return c.View(map[string]any{
+		"activeTab": "sinks",
+		"title":     "Sinks",
+	})
+}
+
+// handleSinkQueryPage handles GET /sinks/{name}
+func (s *Server) handleSinkQueryPage(c *xun.Context) error {
+	name := c.Request.PathValue("name")
+	return c.View(map[string]any{
+		"activeTab": "sinks",
+		"title":     fmt.Sprintf("Sink: %s", name),
+		"sinkName":  name,
+	})
+}
+
+// formatFileSize formats file size in human-readable format
+func formatFileSize(size int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+	
+	switch {
+	case size >= GB:
+		return fmt.Sprintf("%.2f GB", float64(size)/float64(GB))
+	case size >= MB:
+		return fmt.Sprintf("%.2f MB", float64(size)/float64(MB))
+	case size >= KB:
+		return fmt.Sprintf("%.2f KB", float64(size)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", size)
+	}
 }
