@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -255,21 +256,41 @@ func (s *SQLiteSink) RunMigrations() error {
 		return nil // No migrations directory, skip
 	}
 
-	// Read migration files (format: 001_description.sql, 002_description.sql, etc.)
-	entries, err := os.ReadDir(migrationsDir)
+	// Read version directories (format: 1.0.0, 1.0.1, etc.)
+	versionEntries, err := os.ReadDir(migrationsDir)
 	if err != nil {
 		return fmt.Errorf("read migrations dir: %w", err)
 	}
 
-	// Filter and sort migration files
-	var migrationFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() {
+	// Filter and sort version directories
+	var versionDirs []string
+	for _, entry := range versionEntries {
+		if !entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		if strings.HasSuffix(name, ".sql") && isMigrationFile(name) {
-			migrationFiles = append(migrationFiles, name)
+		versionDirs = append(versionDirs, entry.Name())
+	}
+
+	// Sort version directories
+	sort.Strings(versionDirs)
+
+	// Collect migration files from all version directories
+	var migrationFiles []string
+	for _, versionDir := range versionDirs {
+		versionPath := filepath.Join(migrationsDir, versionDir)
+		entries, err := os.ReadDir(versionPath)
+		if err != nil {
+			return fmt.Errorf("read version dir %s: %w", versionDir, err)
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if strings.HasSuffix(name, ".sql") && isMigrationFile(name) {
+				migrationFiles = append(migrationFiles, filepath.Join(versionDir, name))
+			}
 		}
 	}
 
@@ -323,7 +344,7 @@ func (s *SQLiteSink) runMigrationFile(path string) error {
 	// Read migration content
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read file: %w", err)
+		return fmt.Errorf("read file %s: %w", path, err)
 	}
 
 	// Execute migration in a transaction
