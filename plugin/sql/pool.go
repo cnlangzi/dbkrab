@@ -73,7 +73,7 @@ func NewPool(name, sqlitePath string) (*Pool, error) {
 	readDSN := buildDSN(dbPath, false)
 	readDB, err := sql.Open("sqlite", readDSN)
 	if err != nil {
-		writeDB.Close()
+		_ = writeDB.Close() //nolint:errcheck
 		return nil, fmt.Errorf("open read database: %w", err)
 	}
 	// Read pool can have multiple connections for concurrent reads
