@@ -3,6 +3,7 @@ package sql
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Operation represents the CDC operation type
@@ -185,3 +186,31 @@ func (ds *DataSet) String() string {
 	}
 	return fmt.Sprintf("DataSet{Columns: %v, Rows: %d}", ds.Columns, len(ds.Rows))
 }
+
+// PluginMetadata contains metadata and file tracking information for a SQL plugin
+type PluginMetadata struct {
+	Name        string              `json:"name"`
+	Type        string              `json:"type"`         // "sql"
+	Status      string              `json:"status"`       // loaded | stale | error
+	NeedsReload bool                `json:"needs_reload"`
+	LoadCount   int                 `json:"load_count"`
+	LastError   string              `json:"last_error,omitempty"`
+	Files       map[string]FileMetadata `json:"files"`
+}
+
+// FileMetadata tracks the state of a single file (.yml or .sql)
+type FileMetadata struct {
+	Path        string    `json:"path"`
+	IsSQL       bool      `json:"is_sql"`
+	CurVersion  string    `json:"cur_version"`        // SHA256 hash of current loaded content
+	CurModTime  time.Time `json:"cur_mod_time"`
+	CurSize     int64     `json:"cur_size"`
+	CurLoadedAt time.Time `json:"cur_loaded_at"`
+	NewVersion  string    `json:"new_version"`        // SHA256 hash of new content (if changed)
+	NewModTime  time.Time `json:"new_mod_time"`
+	NewSize     int64     `json:"new_size"`
+	NeedsReload bool      `json:"needs_reload"`
+	IsDeleted   bool      `json:"is_deleted"`
+}
+
+

@@ -23,13 +23,12 @@ type Config struct {
 	Plugins            PluginsConfig          `yaml:"plugins"`
 }
 
-// PluginsConfig contains hierarchical plugin configuration
+// PluginsConfig contains plugin configuration
 type PluginsConfig struct {
-	WASM PluginConfig `yaml:"wasm"`
-	SQL  PluginConfig `yaml:"sql"`
+	SQL PluginConfig `yaml:"sql"`
 }
 
-// PluginConfig contains plugin configuration for both WASM and SQL plugins
+// PluginConfig contains plugin configuration for SQL plugins
 type PluginConfig struct {
 	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
 	Path    string `yaml:"path"`
@@ -162,10 +161,7 @@ func Load(path string) (*Config, error) {
 		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
 	}
 
-	// Plugin defaults: both disabled by default
-	if cfg.Plugins.WASM.Path == "" {
-		cfg.Plugins.WASM.Path = "./skills/wasm"
-	}
+	// Plugin defaults
 	if cfg.Plugins.SQL.Path == "" {
 		cfg.Plugins.SQL.Path = "./skills/sql"
 	}
