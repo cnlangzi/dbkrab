@@ -13,10 +13,6 @@ description: Test SQL plugin
 on:
   - dbo.orders
   - dbo.order_items
-jobs:
-  - name: job1
-    sql: SELECT * FROM dbo.orders
-    output: job1_table
 sinks:
   insert:
     - name: orders_sink
@@ -45,9 +41,6 @@ sinks:
 	}
 	if len(skill.On) != 2 {
 		t.Errorf("expected 2 tables, got %d", len(skill.On))
-	}
-	if len(skill.Jobs) != 1 {
-		t.Errorf("expected 1 job, got %d", len(skill.Jobs))
 	}
 	if len(skill.Sinks.Insert) != 1 {
 		t.Errorf("expected 1 insert sink, got %d", len(skill.Sinks.Insert))
@@ -123,7 +116,7 @@ func TestCDCParameters(t *testing.T) {
 	if params.CDCOperation != 1 {
 		t.Errorf("expected CDCOperation 1, got %d", params.CDCOperation)
 	}
-	}
+}
 
 func TestDataSet(t *testing.T) {
 	ds := DataSet{
@@ -157,15 +150,15 @@ func TestOperationString(t *testing.T) {
 	}
 }
 
-func TestOperationToSinkType(t *testing.T) {
-	if OperationToSinkType(Insert) != "insert" {
-		t.Errorf("OperationToSinkType(Insert) = %s, want insert", OperationToSinkType(Insert))
+func TestOperationToJobType(t *testing.T) {
+	if OperationToJobType(Insert) != "insert" {
+		t.Errorf("OperationToJobType(Insert) = %s, want insert", OperationToJobType(Insert))
 	}
-	if OperationToSinkType(Update) != "update" {
-		t.Errorf("OperationToSinkType(Update) = %s, want update", OperationToSinkType(Update))
+	if OperationToJobType(Update) != "update" {
+		t.Errorf("OperationToJobType(Update) = %s, want update", OperationToJobType(Update))
 	}
-	if OperationToSinkType(Delete) != "delete" {
-		t.Errorf("OperationToSinkType(Delete) = %s, want delete", OperationToSinkType(Delete))
+	if OperationToJobType(Delete) != "delete" {
+		t.Errorf("OperationToJobType(Delete) = %s, want delete", OperationToJobType(Delete))
 	}
 }
 
