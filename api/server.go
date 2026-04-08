@@ -86,11 +86,16 @@ func (s *Server) Start() error {
 
 	// Create xun app with our mux and template filesystem
 	// Use Sub FS so pages/layouts are at root level for xun
+	// Note: xun automatically serves files from "public/" directory
 	dashboardSubFS := getDashboardFS()
 	s.app = xun.New(
 		xun.WithFsys(dashboardSubFS),
 		xun.WithMux(s.mux),
 		xun.WithHandlerViewers(&xun.JsonViewer{}, &xun.HtmlViewer{}),
+		xun.WithBuildAssetURL(func(name string) bool {
+			// Enable asset hashing for JS and CSS files
+			return strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css")
+		}),
 	)
 
 	// Register routes
@@ -166,7 +171,6 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	// Manual registration for custom handlers if needed
 }
 
 // handlePlugins handles GET /api/plugins
@@ -761,7 +765,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div><p class="text-textMuted text-sm">Status</p><p class="text-lg font-semibold ` + cdcTextClass + `">` + cdcStatusText + `</p></div>`)
 	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked))
 	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes)))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text">%s</p></div>`, m.LastSyncTime))
+	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime))
 	sb.WriteString(`</div>`)
 	if m.CDCMessage != "" {
 		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)
