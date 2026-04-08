@@ -3,7 +3,7 @@
 <div class="space-y-6">
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h2 class="text-2xl font-bold text-text">Dead Letter Queue</h2>
-        <button onclick="window.location.reload()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
+        <button onclick="loadDLQ()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
             </svg>
@@ -12,7 +12,7 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border" hx-get="/api/dlq/stats" hx-trigger="load">
+    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
             <div class="p-6 rounded-xl bg-error/10 border border-error/20 hover:border-error/40 transition-all duration-200">
                 <div class="flex items-center justify-between mb-2">
@@ -53,7 +53,7 @@
     </div>
 
     <!-- DLQ List -->
-    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden" hx-get="/api/dlq/list" hx-trigger="load">
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-border">
                 <thead class="bg-surfaceHover">
@@ -61,13 +61,21 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">ID</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Error</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Created</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-border">
+                <tbody class="divide-y divide-border" id="dlq-container">
                     <tr>
-                        <td colspan="4" class="px-6 py-8 text-center text-textMuted">
-                            Loading...
+                        <td colspan="6" class="px-6 py-8 text-center text-textMuted">
+                            <div class="flex items-center justify-center gap-2">
+                                <svg class="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>Loading...</span>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
@@ -75,4 +83,106 @@
         </div>
     </div>
 </div>
+
+<script>
+function loadDLQ() {
+    // Load stats
+    fetch('/api/dlq/stats')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('dlq-pending').textContent = data.pending || 0;
+                document.getElementById('dlq-resolved').textContent = data.resolved || 0;
+                document.getElementById('dlq-ignored').textContent = data.ignored || 0;
+            }
+        })
+        .catch(err => console.error('Failed to load DLQ stats:', err));
+
+    // Load list
+    fetch('/api/dlq/list')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.entries) {
+                renderDLQEntries(data.entries);
+            } else {
+                document.getElementById('dlq-container').innerHTML = 
+                    '<tr><td colspan="6" class="px-6 py-8 text-center text-textMuted">No entries</td></tr>';
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load DLQ list:', err);
+            document.getElementById('dlq-container').innerHTML = 
+                '<tr><td colspan="6" class="px-6 py-8 text-center text-error">Failed to load</td></tr>';
+        });
+}
+
+function renderDLQEntries(entries) {
+    const container = document.getElementById('dlq-container');
+    
+    if (!entries || entries.length === 0) {
+        container.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-textMuted">No entries</td></tr>';
+        return;
+    }
+
+    container.innerHTML = entries.map(entry => {
+        const statusClass = entry.status === 'pending' ? 'bg-error/20 text-error' :
+                           entry.status === 'resolved' ? 'bg-success/20 text-success' :
+                           'bg-surfaceHover text-textMuted';
+        
+        const errorPreview = entry.error ? 
+            (entry.error.length > 50 ? entry.error.substring(0, 50) + '...' : entry.error) : 
+            '-';
+        
+        const created = entry.created_at ? formatLocalTime(entry.created_at) : '-';
+        
+        return `
+            <tr class="hover:bg-surfaceHover transition-colors">
+                <td class="px-6 py-4 text-sm text-text font-mono">${entry.id}</td>
+                <td class="px-6 py-4 text-sm text-text">${escapeHtml(entry.table_name || '-')}</td>
+                <td class="px-6 py-4 text-xs text-textMuted max-w-xs truncate" title="${escapeHtml(entry.error || '')}">${escapeHtml(errorPreview)}</td>
+                <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${created}</td>
+                <td class="px-6 py-4">
+                    <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusClass}">
+                        ${entry.status || 'pending'}
+                    </span>
+                </td>
+                <td class="px-6 py-4 text-xs">
+                    <button onclick="showDLQDetail(${entry.id})" class="text-primary hover:text-primaryHover">View</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function showDLQDetail(id) {
+    fetch(`/api/dlq/get?id=${id}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.entry) {
+                alert(JSON.stringify(data.entry, null, 2));
+            }
+        })
+        .catch(err => console.error('Failed to get DLQ entry:', err));
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatLocalTime(timeStr) {
+    if (!timeStr) return '-';
+    try {
+        const date = new Date(timeStr);
+        return date.toLocaleString();
+    } catch {
+        return timeStr;
+    }
+}
+
+// Load on page ready
+document.addEventListener('DOMContentLoaded', loadDLQ);
+</script>
 {{ end }}
