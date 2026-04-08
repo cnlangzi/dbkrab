@@ -5,7 +5,7 @@
         <h2 class="text-2xl font-bold text-text">Dead Letter Queue</h2>
         <button onclick="loadDLQ()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343-.029.68.083 1.01"/>
             </svg>
             Refresh
         </button>
@@ -55,7 +55,7 @@
     <!-- DLQ List -->
     <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
         <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border">
+            <table class="responsive-table min-w-full divide-y divide-border">
                 <thead class="bg-surfaceHover">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">ID</th>
@@ -83,6 +83,53 @@
         </div>
     </div>
 </div>
+
+<style>
+/* 移动端响应式表格 */
+@media (max-width: 767px) {
+    .responsive-table thead { display: none; }
+    
+    .responsive-table tbody tr {
+        display: block;
+        margin-bottom: 16px;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        background: #1f2937;
+    }
+    
+    .responsive-table tbody tr:last-child {
+        margin-bottom: 0;
+        border-bottom: 1px solid #374151;
+    }
+    
+    .responsive-table td {
+        display: block;
+        padding: 12px 16px;
+        position: relative;
+        padding-left: 50%;
+        border-bottom: 1px solid #374151;
+    }
+    
+    .responsive-table td:last-child {
+        border-bottom: none;
+    }
+    
+    .responsive-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-weight: 600;
+        color: #9ca3af;
+        font-size: 0.875rem;
+    }
+}
+
+@media (min-width: 768px) {
+    .responsive-table td::before { display: none; }
+}
+</style>
 
 <script>
 function loadDLQ() {
@@ -134,20 +181,21 @@ function renderDLQEntries(entries) {
             '-';
         
         const created = entry.created_at ? formatLocalTime(entry.created_at) : '-';
+        const id = entry.id || 0;
         
         return `
             <tr class="hover:bg-surfaceHover transition-colors">
-                <td class="px-6 py-4 text-sm text-text font-mono">${entry.id}</td>
-                <td class="px-6 py-4 text-sm text-text">${escapeHtml(entry.table_name || '-')}</td>
-                <td class="px-6 py-4 text-xs text-textMuted max-w-xs truncate" title="${escapeHtml(entry.error || '')}">${escapeHtml(errorPreview)}</td>
-                <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${created}</td>
-                <td class="px-6 py-4">
+                <td class="px-6 py-4 text-sm text-text font-mono" data-label="ID">${id}</td>
+                <td class="px-6 py-4 text-sm text-text" data-label="Table">${escapeHtml(entry.table_name || '-')}</td>
+                <td class="px-6 py-4 text-xs text-textMuted max-w-xs truncate" data-label="Error" title="${escapeHtml(entry.error || '')}">${escapeHtml(errorPreview)}</td>
+                <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap" data-label="Created">${created}</td>
+                <td class="px-6 py-4" data-label="Status">
                     <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusClass}">
                         ${entry.status || 'pending'}
                     </span>
                 </td>
-                <td class="px-6 py-4 text-xs">
-                    <button onclick="showDLQDetail(${entry.id})" class="text-primary hover:text-primaryHover">View</button>
+                <td class="px-6 py-4 text-xs" data-label="Actions">
+                    <button onclick="window.showDLQDetail(${id})" class="text-primary hover:text-primaryHover font-medium">View</button>
                 </td>
             </tr>
         `;
@@ -155,14 +203,34 @@ function renderDLQEntries(entries) {
 }
 
 function showDLQDetail(id) {
-    fetch(`/api/dlq/get?id=${id}`)
+    console.log('Viewing DLQ entry:', id);
+    fetch('/api/dlq/list')
         .then(r => r.json())
         .then(data => {
-            if (data.success && data.entry) {
-                alert(JSON.stringify(data.entry, null, 2));
+            if (data.success && data.entries) {
+                const entry = data.entries.find(e => e.id == id);
+                if (entry) {
+                    // Show detail in a nicer format
+                    const detail = `
+ID: ${entry.id}
+Table: ${entry.table_name || '-'}
+Status: ${entry.status || 'pending'}
+Created: ${entry.created_at || '-'}
+Error: ${entry.error || '-'}
+
+Full Data:
+${JSON.stringify(entry, null, 2)}
+                    `.trim();
+                    alert(detail);
+                } else {
+                    alert('Entry not found');
+                }
             }
         })
-        .catch(err => console.error('Failed to get DLQ entry:', err));
+        .catch(err => {
+            console.error('Failed to get DLQ entry:', err);
+            alert('Failed to load entry details');
+        });
 }
 
 function escapeHtml(text) {
@@ -181,6 +249,9 @@ function formatLocalTime(timeStr) {
         return timeStr;
     }
 }
+
+// Make function globally accessible
+window.showDLQDetail = showDLQDetail;
 
 // Load on page ready
 document.addEventListener('DOMContentLoaded', loadDLQ);
