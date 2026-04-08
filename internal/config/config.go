@@ -194,9 +194,6 @@ func Load(path string) (*Config, error) {
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
 	}
-	if cfg.Logging.Format == "" {
-		cfg.Logging.Format = "json"
-	}
 	if cfg.Logging.File.Path == "" {
 		cfg.Logging.File.Path = "./logs/dbkrab.log"
 	}
