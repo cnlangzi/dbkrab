@@ -182,13 +182,22 @@ func main() {
 		}
 	}()
 
-	// Watch plugin directory if configured
-	if cfg.Plugin != "" {
+	// Watch plugin directory if configured (WASM plugins)
+	if cfg.Plugins.WASM.Enabled && cfg.Plugins.WASM.Path != "" {
 		go func() {
-			if err := pluginManager.Watch(ctx, cfg.Plugin); err != nil {
+			if err := pluginManager.Watch(ctx, cfg.Plugins.WASM.Path); err != nil {
 				slog.Warn("plugin watch error", "error", err)
 			}
 		}()
+	}
+
+	// Initialize SQL plugins if configured
+	if cfg.Plugins.SQL.Enabled && cfg.Plugins.SQL.Path != "" {
+		if err := pluginManager.InitSQLPlugins(db, cfg.Plugins.SQL.Path); err != nil {
+			slog.Warn("failed to init SQL plugins", "error", err)
+		} else {
+			slog.Info("SQL plugins initialized", "path", cfg.Plugins.SQL.Path)
+		}
 	}
 
 	go func() {

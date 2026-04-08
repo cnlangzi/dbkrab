@@ -14,12 +14,31 @@ type Config struct {
 	Tables             []string               `yaml:"tables"`
 	Interval           string                 `yaml:"polling_interval"`
 	Offset             OffsetConfig           `yaml:"offset"`
-	Plugin             string                 `yaml:"plugin"`
+	Plugin             string                 `yaml:"plugin"` // Deprecated: use Plugins.WASM.Path
 	APIPort            int                    `yaml:"api_port"`
 	Sink               SinkConfig             `yaml:"sink"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
+	Plugins            PluginsConfig          `yaml:"plugins"`
+}
+
+// PluginsConfig contains hierarchical plugin configuration
+type PluginsConfig struct {
+	WASM PluginSection    `yaml:"wasm"`
+	SQL  SQLPluginSection `yaml:"sql"`
+}
+
+// PluginSection contains WASM plugin configuration
+type PluginSection struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+}
+
+// SQLPluginSection contains SQL plugin configuration
+type SQLPluginSection struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
 }
 
 type MSSQLConfig struct {
@@ -138,6 +157,27 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.TransactionBuffer.MaxBatchBytes == 0 {
 		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
+	}
+
+	// Plugin defaults (hierarchical)
+	// WASM plugins disabled by default, SQL plugins enabled by default
+	if cfg.Plugins.WASM.Path == "" && cfg.Plugin != "" {
+		// Backward compatibility: use old Plugin field for WASM path
+		cfg.Plugins.WASM.Path = cfg.Plugin
+		cfg.Plugins.WASM.Enabled = true
+	}
+	if cfg.Plugins.WASM.Path == "" {
+		cfg.Plugins.WASM.Path = "./plugins"
+	}
+	// WASM plugins disabled by default (Enabled=false is the zero value)
+	if cfg.Plugins.SQL.Path == "" {
+		cfg.Plugins.SQL.Path = "./sql_plugins"
+	}
+	// SQL plugins enabled by default (set Enabled=true unless explicitly disabled)
+	if !cfg.Plugins.SQL.Enabled {
+		// Only enable by default if no explicit setting was made
+		// Check if this is the first load (path was just set to default)
+		cfg.Plugins.SQL.Enabled = true
 	}
 
 	// Graceful degradation defaults

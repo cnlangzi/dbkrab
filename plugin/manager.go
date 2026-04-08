@@ -229,20 +229,10 @@ type PluginInfo struct {
 	Type     string    `json:"type"` // "sql" or "wasm"
 }
 
-// Watch watches a directory for new plugins and auto-loads them
+// Watch watches a directory for new plugins and auto-loads them (WASM only)
+// SQL plugins are initialized separately via InitSQLPlugins
 func (m *Manager) Watch(ctx context.Context, dir string) error {
-	// First, check for SQL plugins
-	sqlPluginsDir := filepath.Join(dir, "..", "sql_plugins")
-	if _, err := os.Stat(sqlPluginsDir); err == nil {
-		// SQL plugins directory exists, load all SQL plugins
-		if m.mssqlDB != nil {
-			if err := m.InitSQLPlugins(m.mssqlDB, sqlPluginsDir); err != nil {
-				fmt.Printf("Warning: failed to load SQL plugins: %v\n", err)
-			}
-		}
-	}
-
-	// Then watch for WASM plugins
+	// Watch for WASM plugins only
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read plugin dir: %w", err)
