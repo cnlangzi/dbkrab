@@ -51,6 +51,7 @@ type Server struct {
 	config      *config.Config
 	configWatcher *config.Watcher
 	sinksRoot   *os.Root // Secure root for sinks directory access
+	skillsPath  string // Path to SQL skills directory from config
 }
 
 // NewServer creates a new API server
@@ -72,6 +73,12 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 
 // NewServerWithCDC creates a new API server with CDC admin support
 func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *app.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+	// Get skills path from config, default to ./skills/sql if not configured
+	skillsPath := cfg.Plugins.SQL.Path
+	if skillsPath == "" {
+		skillsPath = "./skills/sql"
+	}
+	
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,
@@ -81,6 +88,7 @@ func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdca
 		configPath:    configPath,
 		config:        cfg,
 		configWatcher: watcher,
+		skillsPath:    skillsPath,
 	}
 }
 
