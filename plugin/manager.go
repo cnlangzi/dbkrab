@@ -14,13 +14,13 @@ import (
 	"github.com/cnlangzi/dbkrab/plugin/wasm"
 )
 
-// Manager manages both WASM and SQL plugins with hot-reload support for WASM.
+// Manager manages both WASM and SQL plugins with hot-reload support.
 type Manager struct {
-	plugins    map[string]Plugin        // unified plugin registry
-	sqlLoader  *sql.Loader               // SQL plugin loader
-	mu         sync.RWMutex
+	plugins     map[string]Plugin        // unified plugin registry
+	sqlLoader   *sql.Loader              // SQL plugin loader
+	mu          sync.RWMutex
 	watchCancel context.CancelFunc       // cancel WASM file watching
-	watchDone   chan struct{}             // closed when watchLoop exits
+	watchDone   chan struct{}            // closed when watchLoop exits
 }
 
 // NewManager creates a new plugin manager
@@ -48,9 +48,14 @@ func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 		if err != nil {
 			return fmt.Errorf("load SQL plugins: %w", err)
 		}
+
 		for name, skill := range skills {
-			m.plugins[name] = sql.NewPlugin(name, skill, loader, db)
+			plug := sql.NewPlugin(name, skill, loader, db)
+			// Each plugin manages its own file watching internally
+			plug.StartWatch()
+			m.plugins[name] = plug
 		}
+
 		m.sqlLoader = loader
 	}
 
@@ -153,7 +158,7 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Reload reloads a WASM plugin (hot-reload)
+// Reload reloads a plugin (hot-reload for WASM, manual/scheduled for SQL)
 func (m *Manager) Reload(name string) error {
 	m.mu.RLock()
 	plug, exists := m.plugins[name]
@@ -163,8 +168,17 @@ func (m *Manager) Reload(name string) error {
 		return fmt.Errorf("plugin %s not found", name)
 	}
 
+	if plug.Type() == "sql" {
+		// For SQL plugins, call their Reload method directly
+		splug, ok := plug.(*sql.Plugin)
+		if !ok {
+			return fmt.Errorf("internal error: plugin type mismatch")
+		}
+		return splug.Reload()
+	}
+
 	if plug.Type() != "wasm" {
-		return fmt.Errorf("cannot reload non-WASM plugin %s", name)
+		return fmt.Errorf("cannot reload plugin %s of unknown type", name)
 	}
 
 	// For WASM plugins, reload with same path and config
@@ -191,11 +205,13 @@ func (m *Manager) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	for _, p := range m.plugins {
 		switch p.Type() {
 		case "sql":
-			sinkOps, err := p.(interface {
-				Handle(*core.Transaction) ([]core.Sink, error)
-			}).Handle(tx)
+			splug, ok := p.(*sql.Plugin)
+			if !ok {
+				continue
+			}
+			sinkOps, err := splug.Handle(tx)
 			if err != nil {
-				return nil, fmt.Errorf("SQL plugin %s handle: %w", p.Name(), err)
+				return nil, fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
 			}
 			allOps = append(allOps, sinkOps...)
 		case "wasm":
