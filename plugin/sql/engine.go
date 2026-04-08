@@ -140,24 +140,6 @@ func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
 	return m
 }
 
-// inferPrimaryKey tries to infer the primary key from the DataSet columns
-func (e *Engine) inferPrimaryKey(ds *DataSet) string {
-	if ds == nil {
-		return "id"
-	}
-	// Common PK names
-	for _, col := range ds.Columns {
-		if col == "id" || col == "pk" || strings.HasSuffix(strings.ToLower(col), "_id") {
-			return col
-		}
-	}
-	// Default to first column
-	if len(ds.Columns) > 0 {
-		return ds.Columns[0]
-	}
-	return "id"
-}
-
 // operationToJobType converts core.Operation to core.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
 func (e *Engine) operationToJobType(op core.Operation) core.Operation {
