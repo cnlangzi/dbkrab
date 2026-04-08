@@ -680,41 +680,6 @@ func formatLSN(lsn []byte) string {
 	return sb.String()
 }
 
-// formatBytes formats bytes into human-readable format
-func formatBytes(bytes int64) string {
-	if bytes <= 0 {
-		return "0 B"
-	}
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-// formatDuration formats duration string
-func formatDuration(dur string) string {
-	if dur == "" {
-		return "N/A"
-	}
-	d, err := time.ParseDuration(dur)
-	if err != nil {
-		return dur
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
 
 // handleOverview handles GET /api/overview - returns HTML fragment with dashboard overview
 func (s *Server) handleOverview(c *xun.Context) error {
