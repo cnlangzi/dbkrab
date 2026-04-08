@@ -106,9 +106,8 @@ func (s *Server) handleSkillsNewPage(c *xun.Context) error {
 
 // handleSkillsEditPage handles GET /skills/edit/:name
 func (s *Server) handleSkillsEditPage(c *xun.Context) error {
-	// Parse name from URL path: /skills/edit/:name
-	path := strings.TrimPrefix(c.Request.URL.Path, "/skills/edit/")
-	name := strings.TrimSuffix(path, "/")
+	// Use Go 1.22+ native PathValue for route params
+	name := c.Request.PathValue("name")
 	
 	if name == "" {
 		return c.View(map[string]any{
