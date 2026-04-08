@@ -5,17 +5,6 @@ on:
   - orders
   - order_items
 
-jobs:
-  - name: log_order_flow
-    sql: |
-      SELECT 
-        @cdc_lsn as cdc_lsn,
-        @cdc_tx_id as cdc_tx_id,
-        @cdc_table as cdc_table,
-        @orders_order_id as order_id,
-        GETDATE() as logged_at
-    output: order_flow_events
-
 sinks:
   insert:
     - name: orders_sync

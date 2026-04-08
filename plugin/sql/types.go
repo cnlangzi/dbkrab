@@ -73,37 +73,28 @@ type Skill struct {
 	Description string      `yaml:"description"`
 	On          []string    `yaml:"on"`            // Tables to monitor
 	SQLite      string      `yaml:"sqlite"`        // Path to SQLite sink database (resolves to data/sinks/{name}/{name}.db)
-	Jobs        []Job       `yaml:"jobs"`          // Optional parallel SQL jobs (executed before sinks)
-	Sinks       SinksConfig `yaml:"sinks"`         // Sink configuration
+	Sinks       SinksConfig `yaml:"sinks"`
 }
 
-// Job represents a SQL job that executes in parallel with other jobs
-type Job struct {
-	Name    string `yaml:"name"`      // Job name, used as identifier
-	SQL     string `yaml:"sql"`       // Inline SQL template
-	SQLFile string `yaml:"sql_file"`  // External SQL file path
-	Output  string `yaml:"output"`    // Target table name in SQLite
-}
-
-// SinksConfig represents sink configuration
+// SinksConfig represents job configuration
 type SinksConfig struct {
 	Insert []SinkConfig `yaml:"insert"`  // Insert operations
 	Update []SinkConfig `yaml:"update"`  // Update operations
 	Delete []SinkConfig `yaml:"delete"`  // Delete operations
 }
 
-// SinkConfig represents a single sink configuration
+// SinkConfig represents a single job configuration
 type SinkConfig struct {
-	Name        string `yaml:"name"`          // Sink name
+	Name        string `yaml:"name"`          // Job name
 	On          string `yaml:"on"`            // Table filter (required for multi-table)
-	SQL         string `yaml:"sql"`           // Inline SQL
+	SQL         string `yaml:"sql"`           // Inline SQL template
 	SQLFile     string `yaml:"sql_file"`      // External SQL file path
 	Output      string `yaml:"output"`        // Target table name
 	PrimaryKey  string `yaml:"primary_key"`   // Primary key column
 	OnConflict  string `yaml:"on_conflict"`   // Conflict strategy: overwrite | skip | error (default: skip)
 }
 
-// GetOnConflict returns the OnConflictStrategy for this sink
+// GetOnConflict returns the OnConflictStrategy for this job
 func (s *SinkConfig) GetOnConflict() OnConflictStrategy {
 	return ParseOnConflictStrategy(s.OnConflict)
 }
@@ -123,8 +114,8 @@ type DataSet struct {
 	Rows    [][]interface{}
 }
 
-// OperationToSinkType converts Operation to sink type string
-func OperationToSinkType(op Operation) string {
+// OperationToJobType converts Operation to job type string
+func OperationToJobType(op Operation) string {
 	switch op {
 	case Insert:
 		return "insert"
@@ -137,7 +128,7 @@ func OperationToSinkType(op Operation) string {
 	}
 }
 
-// GetSinks returns sinks for the given operation type
+// GetSinks returns jobs for the given operation type
 func (s *Skill) GetSinks(opType Operation) []SinkConfig {
 	switch opType {
 	case Insert:
@@ -151,15 +142,15 @@ func (s *Skill) GetSinks(opType Operation) []SinkConfig {
 	}
 }
 
-// FilterSinks filters sinks by table name (for multi-table CDC)
-func FilterSinks(sinks []SinkConfig, tableName string) []SinkConfig {
+// FilterSinks filters jobs by table name (for multi-table CDC)
+func FilterSinks(jobs []SinkConfig, tableName string) []SinkConfig {
 	if tableName == "" {
-		return sinks
+		return jobs
 	}
 	var filtered []SinkConfig
-	for _, sink := range sinks {
-		if sink.On == "" || sink.On == tableName {
-			filtered = append(filtered, sink)
+	for _, job := range jobs {
+		if job.On == "" || job.On == tableName {
+			filtered = append(filtered, job)
 		}
 	}
 	return filtered

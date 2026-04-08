@@ -26,21 +26,21 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
-// It extracts CDC changes, executes jobs and sinks against MSSQL
-// Returns all operations (jobs + sinks) as []core.Sink for the caller to write
+// It extracts CDC changes, executes jobs against MSSQL
+// Returns all job operations as []core.Sink for the caller to write
 func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
 	}
 
-	// Collect all operations (jobs + sinks)
+	// Collect all job operations
 	var allOps []core.Sink
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
-		// Get corresponding sink type for this operation
-		sinkType := e.operationToSinkType(change.Operation)
-		if sinkType == 0 {
+		// Get corresponding job type for this operation
+		jobType := e.operationToJobType(change.Operation)
+		if jobType == 0 {
 			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
@@ -50,56 +50,35 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 			return nil, fmt.Errorf("build params: %w", err)
 		}
 
-		// Execute all jobs (parallel, independent)
-		jobResults, err := e.executor.ExecuteJobs(e.skill, cdcParams)
-		if err != nil {
-			return nil, fmt.Errorf("execute jobs: %w", err)
-		}
+		// Get jobs for this operation
+		jobs := e.skill.GetSinks(Operation(jobType))
+		if len(jobs) > 0 {
+			jobParams := e.cdcParamsToMap(cdcParams)
 
-		// Convert job results to sink operations
-		for _, jr := range jobResults {
-			jobSinkOp := core.Sink{
-				Config: core.SinkConfig{
-					Name:       jr.Name,
-					Output:     jr.Output,
-					PrimaryKey: e.inferPrimaryKey(jr.DataSet),
-					OnConflict: "overwrite", // Jobs default to overwrite
-				},
-				DataSet: convertDataSet(jr.DataSet),
-				OpType:  core.OpInsert, // Jobs always INSERT/upsert
-			}
-			allOps = append(allOps, jobSinkOp)
-		}
-
-		// Get sinks for this operation
-		sinks := e.skill.GetSinks(Operation(sinkType))
-		if len(sinks) > 0 {
-			sinkParams := e.cdcParamsToMap(cdcParams)
-
-			// Filter sinks by table and execute
-			for _, sink := range sinks {
-				if sink.On != "" && sink.On != change.Table {
+			// Filter jobs by table and execute
+			for _, job := range jobs {
+				if job.On != "" && job.On != change.Table {
 					continue
 				}
 
-				// Execute sink SQL against MSSQL
-				ds, err := e.executor.ExecuteDriver(sink.SQL, sinkParams)
+				// Execute job SQL against MSSQL
+				ds, err := e.executor.ExecuteDriver(job.SQL, jobParams)
 				if err != nil {
-					return nil, fmt.Errorf("execute sink %s: %w", sink.Name, err)
+					return nil, fmt.Errorf("execute job %s: %w", job.Name, err)
 				}
 
-				// Collect sink operation
-				sinkOp := core.Sink{
+				// Collect job operation
+				jobOp := core.Sink{
 					Config: core.SinkConfig{
-						Name:       sink.Name,
-						Output:     sink.Output,
-						PrimaryKey: sink.PrimaryKey,
-						OnConflict: sink.OnConflict,
+						Name:       job.Name,
+						Output:     job.Output,
+						PrimaryKey: job.PrimaryKey,
+						OnConflict: job.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  sinkType,
+					OpType:  jobType,
 				}
-				allOps = append(allOps, sinkOp)
+				allOps = append(allOps, jobOp)
 			}
 		}
 	}
@@ -179,9 +158,9 @@ func (e *Engine) inferPrimaryKey(ds *DataSet) string {
 	return "id"
 }
 
-// operationToSinkType converts core.Operation to core.Operation
+// operationToJobType converts core.Operation to core.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
+func (e *Engine) operationToJobType(op core.Operation) core.Operation {
 	switch op {
 	case core.OpInsert:
 		return core.OpInsert

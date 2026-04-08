@@ -75,29 +75,16 @@ func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
 	// This allows skills to organize their SQL files in subdirectories if needed
 
 	// Load job SQL files
-	for i := range skill.Jobs {
-		job := &skill.Jobs[i]
-		if job.SQLFile != "" {
-			sqlPath := filepath.Join(skillDir, job.SQLFile)
-			data, err := os.ReadFile(sqlPath)
-			if err != nil {
-				return fmt.Errorf("read job SQL file %s: %w", job.SQLFile, ErrSQLFileNotFound)
-			}
-			job.SQL = string(data)
-		}
-	}
-
-	// Load sink SQL files
-	for _, sinkType := range [][]SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-		for i := range sinkType {
-			sink := &sinkType[i]
-			if sink.SQLFile != "" {
-				sqlPath := filepath.Join(skillDir, sink.SQLFile)
+	for _, jobType := range [][]SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
+		for i := range jobType {
+			job := &jobType[i]
+			if job.SQLFile != "" {
+				sqlPath := filepath.Join(skillDir, job.SQLFile)
 				data, err := os.ReadFile(sqlPath)
 				if err != nil {
-					return fmt.Errorf("read sink SQL file %s: %w", sink.SQLFile, ErrSQLFileNotFound)
+					return fmt.Errorf("read job SQL file %s: %w", job.SQLFile, ErrSQLFileNotFound)
 				}
-				sink.SQL = string(data)
+				job.SQL = string(data)
 			}
 		}
 	}
