@@ -20,7 +20,7 @@
                         <p class="text-xs text-textMuted">skills</p>
                     </div>
                 </div>
-                {{ if .PluginsSQLEnabled }}
+                {{ if .Data.PluginsSQLEnabled }}
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
                 {{ else }}
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
@@ -42,7 +42,7 @@
                         <p class="text-xs text-textMuted">skills/wasm</p>
                     </div>
                 </div>
-                {{ if .PluginsWASMEnabled }}
+                {{ if .Data.PluginsWASMEnabled }}
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
                 {{ else }}
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
