@@ -54,21 +54,20 @@ type Poller struct {
 // Store interface for storing changes
 type Store interface {
 	Write(tx *Transaction) error
-	WriteOps(ops []Sink) error
 	Close() error
 }
 
 // Handler interface for custom processing
-// Handle returns transformed operations for the caller to write via Store
+// Handle processes a transaction. Plugin implementations write to their own sinks.
 type Handler interface {
-	Handle(tx *Transaction) ([]Sink, error)
+	Handle(tx *Transaction) error
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(tx *Transaction) ([]Sink, error)
+type PluginHandler func(tx *Transaction) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(tx *Transaction) ([]Sink, error) {
+func (h PluginHandler) Handle(tx *Transaction) error {
 	return h(tx)
 }
 
@@ -395,13 +394,11 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 	// Process complete transactions
 	var processErrors []error
 	for _, tx := range completeTxs {
-		var sinkOps []Sink
-
-		// Handler processing with retry
+		// Handler processing with retry (plugin writes to its own sink)
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				sinkOps, handlerErr = p.handler.Handle(tx)
+				handlerErr = p.handler.Handle(tx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
@@ -413,7 +410,7 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 			}
 		}
 
-		// Store processing with retry
+		// Store processing with retry (platform store - CDC tracking only)
 		if p.store != nil {
 			err := retry.DoWithName(ctx, func() error {
 				return p.store.Write(tx)
@@ -425,21 +422,6 @@ func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, res
 					"error", err)
 				p.writeToDLQ(tx, err, "store")
 				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-			}
-
-			// Write transformed DataSets from handler
-			if len(sinkOps) > 0 {
-				err := retry.DoWithName(ctx, func() error {
-					return p.store.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("store_ops_tx_%s", tx.ID))
-				if err != nil {
-					slog.Error("store ops error",
-						"trace_id", tx.TraceID,
-						"tx_id", tx.ID,
-						"error", err)
-					p.writeToDLQ(tx, err, "store_ops")
-					processErrors = append(processErrors, fmt.Errorf("store ops tx %s: %w", tx.ID, err))
-				}
 			}
 		}
 	}
@@ -462,13 +444,12 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Process all transactions
 	var processErrors []error
 	for _, tx := range txs {
-		var sinkOps []Sink
-
 		// Handler processing with retry (non-blocking: continue even if handler fails)
+		// Plugin writes to its own sink
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				sinkOps, handlerErr = p.handler.Handle(&tx)
+				handlerErr = p.handler.Handle(&tx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
@@ -490,20 +471,6 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 					"error", err)
 				p.writeToDLQ(&tx, err, "store")
 				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-			}
-
-			// Write transformed DataSets from handler
-			if len(sinkOps) > 0 {
-				err := retry.DoWithName(ctx, func() error {
-					return p.store.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("store_ops_tx_%s", tx.ID))
-				if err != nil {
-					slog.Error("store ops error",
-						"tx_id", tx.ID,
-						"error", err)
-					p.writeToDLQ(&tx, err, "store_ops")
-					processErrors = append(processErrors, fmt.Errorf("store ops tx %s: %w", tx.ID, err))
-				}
 			}
 		}
 	}
@@ -1020,13 +987,11 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 
 	// Process each transaction
 	for _, tx := range completeTxs {
-		var sinkOps []Sink
-
-		// Handler processing
+		// Handler processing (plugin writes to its own sink)
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				sinkOps, handlerErr = p.handler.Handle(tx)
+				handlerErr = p.handler.Handle(tx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_handler_tx_%s", tx.ID))
 			if err != nil {
@@ -1049,20 +1014,6 @@ func (p *Poller) flushBuffer(ctx context.Context) {
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(tx, err, "flush_store")
-			}
-
-			// Write transformed DataSets from handler
-			if len(sinkOps) > 0 {
-				err := retry.DoWithName(ctx, func() error {
-					return p.store.WriteOps(sinkOps)
-				}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_store_ops_tx_%s", tx.ID))
-				if err != nil {
-					slog.Error("flush store ops error",
-						"trace_id", tx.TraceID,
-						"tx_id", tx.ID,
-						"error", err)
-					p.writeToDLQ(tx, err, "flush_store_ops")
-				}
 			}
 		}
 	}
