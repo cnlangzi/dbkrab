@@ -111,8 +111,14 @@ func (m *Manager) List() []PluginInfo {
 
 	var list []PluginInfo
 	for _, p := range m.plugins {
+		splug, ok := p.(*sql.Plugin)
+		if !ok {
+			continue
+		}
 		list = append(list, PluginInfo{
-			Name:     p.Name(),
+			Name:     splug.YamlName(),
+			Id:       splug.SkillId(),
+			File:     splug.SkillFile(),
 			Path:     m.pluginPath(p),
 			LoadedAt: m.pluginLoadedAt(p),
 			Type:     p.Type(),
@@ -166,10 +172,12 @@ func (m *Manager) pluginLoadedAt(p Plugin) time.Time {
 
 // PluginInfo contains plugin metadata (used by API)
 type PluginInfo struct {
-	Name     string    `json:"name"`
+	Name     string    `json:"name"`        // YAML name field
+	Id       string    `json:"id"`          // SHA256(file)[:12]
+	File     string    `json:"file"`        // Relative file path
 	Path     string    `json:"path"`
 	LoadedAt time.Time `json:"loaded_at"`
-	Type     string    `json:"type"` // "sql"
+	Type     string    `json:"type"`        // "sql"
 }
 
 // HandleAPI handles plugin management via HTTP API
