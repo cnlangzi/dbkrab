@@ -119,8 +119,16 @@ function loadDLQ() {
         .then(r => r.json())
         .then(data => {
             if (data.success && data.entries) {
-                renderDLQDesktop(data.entries);
-                renderDLQMobile(data.entries);
+                try {
+                    renderDLQDesktop(data.entries);
+                    renderDLQMobile(data.entries);
+                } catch (err) {
+                    console.error('Failed to render DLQ list:', err);
+                    document.getElementById('dlq-container-desktop').innerHTML = 
+                        '<tr><td colspan="7" class="px-6 py-8 text-center text-error">Render error: ' + err.message + '</td></tr>';
+                    document.getElementById('dlq-container-mobile').innerHTML = 
+                        '<div class="p-6 text-center text-error">Render error: ' + err.message + '</div>';
+                }
             } else {
                 document.getElementById('dlq-container-desktop').innerHTML = 
                     '<tr><td colspan="7" class="px-6 py-8 text-center text-textMuted">No entries</td></tr>';
