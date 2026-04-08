@@ -126,20 +126,36 @@ All writes happen in one transaction
 ## Directory Structure
 
 ```
-skills/sql/
-└── plugin_name/
-    └── skill.yml
+skills/
+├── plugin_name.yml        # Flat structure: YAML at root, filename = skill ID
+├── enrich_orders.yml
+├── sync_orders.yml
+├── sync_order_flow.yml
+└── sync_orders_split.yml
 ```
 
-Each plugin is a directory containing a `skill.yml` configuration file.
+**Flattened structure**: YAML files are placed directly in `skills/` root, with filename = skill ID.
+
+### Skill Self-Organizes SQL Files
+
+The loader doesn't restrict folder structure - the skill decides how to organize its SQL files:
+
+```
+skills/
+├── enrich_orders.yml          # sql_file: "enrich_orders/fetch.sql"
+├── enrich_orders/
+│   └── fetch.sql
+├── sync_orders.yml            # sql_file: "sync.sql" (flat also OK)
+└── sync_orders.sql
+```
 
 ---
 
 ## skill.yml Schema
 
 ```yaml
-name: plugin_name
-description: "Plugin description"
+name: plugin_name              # Display name (can differ from filename)
+description: "Plugin description"  # Optional
 
 # Tables to monitor (CDC source)
 on:
@@ -147,20 +163,20 @@ on:
 
 # Optional parallel SQL jobs (executed before sinks, for all operation types)
 jobs:
-  - name: job_name          # Job identifier
-    sql_file: job.sql        # Path to external SQL file
-    sql: |                     # Or inline SQL
+  - name: job_name              # Job identifier
+    sql_file: job.sql           # Path to external SQL file (relative to skill.yml)
+    sql: |                      # Or inline SQL
       SELECT ... FROM table WHERE id = @table_id;
-    output: job_output_table   # Target table in SQLite
+    output: job_output_table    # Target table in SQLite
 
 # Sink configurations (one for each operation type)
 sinks:
   insert:
     - name: sink_name
-      on: table_name         # Optional: filter by source table
+      on: table_name            # Optional: filter by source table
       sql: |
         SELECT ... FROM source_table WHERE id = @table_id;
-      output: target_table      # SQLite table name
+      output: target_table       # SQLite table name
       primary_key: id
 
   update:
@@ -256,9 +272,8 @@ Monitor `orders` table, enrich with full row data, sync to `order_sync` table.
 ### Directory Structure
 
 ```
-skills/sql/
-└── sync_orders/
-    └── skill.yml
+skills/
+└── sync_orders.yml
 ```
 
 ### skill.yml
@@ -324,9 +339,8 @@ Monitor `orders` table. Use jobs to pre-fetch related data. Join with customers 
 ### Directory Structure
 
 ```
-skills/sql/
-└── enrich_orders/
-    └── skill.yml
+skills/
+└── enrich_orders.yml
 ```
 
 ### skill.yml

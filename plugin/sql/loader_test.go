@@ -8,13 +8,8 @@ import (
 
 func TestLoadSkill(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Create plugin directory structure: pluginsDir/plugin_name/skill.yml
-	skillDir := filepath.Join(tmpDir, "test_load")
-	err := os.MkdirAll(skillDir, 0755)
-	if err != nil {
-		t.Fatalf("failed to create skill directory: %v", err)
-	}
-	skillFile := filepath.Join(skillDir, "skill.yml")
+	// Create flat structure: pluginsDir/test_load.yml
+	skillFile := filepath.Join(tmpDir, "test_load.yml")
 	skillContent := `name: test_load
 description: Test skill loading
 on:
@@ -55,13 +50,9 @@ func TestLoadAllSkills(t *testing.T) {
 		"skill2": "name: skill2\ndescription: Second skill\non:\n  - dbo.table2\nsinks:\n  insert: []",
 	}
 
+	// Flat structure: pluginsDir/{name}.yml
 	for name, content := range skills {
-		skillDir := filepath.Join(tmpDir, name)
-		mkErr := os.MkdirAll(skillDir, 0755)
-		if mkErr != nil {
-			t.Fatalf("failed to create skill directory: %v", mkErr)
-		}
-		writeErr := os.WriteFile(filepath.Join(skillDir, "skill.yml"), []byte(content), 0644)
+		writeErr := os.WriteFile(filepath.Join(tmpDir, name+".yml"), []byte(content), 0644)
 		if writeErr != nil {
 			t.Fatalf("failed to write skill file: %v", writeErr)
 		}
