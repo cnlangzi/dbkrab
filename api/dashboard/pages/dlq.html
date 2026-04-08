@@ -119,8 +119,16 @@ function loadDLQ() {
         .then(r => r.json())
         .then(data => {
             if (data.success && data.entries) {
-                renderDLQDesktop(data.entries);
-                renderDLQMobile(data.entries);
+                try {
+                    renderDLQDesktop(data.entries);
+                    renderDLQMobile(data.entries);
+                } catch (err) {
+                    console.error('Failed to render DLQ list:', err);
+                    document.getElementById('dlq-container-desktop').innerHTML = 
+                        '<tr><td colspan="7" class="px-6 py-8 text-center text-error">Render error: ' + err.message + '</td></tr>';
+                    document.getElementById('dlq-container-mobile').innerHTML = 
+                        '<div class="p-6 text-center text-error">Render error: ' + err.message + '</div>';
+                }
             } else {
                 document.getElementById('dlq-container-desktop').innerHTML = 
                     '<tr><td colspan="7" class="px-6 py-8 text-center text-textMuted">No entries</td></tr>';
@@ -176,7 +184,7 @@ function renderDLQDesktop(entries) {
                     </span>
                 </td>
                 <td class="px-6 py-4 text-xs">
-                    <button onclick="toggleDetail(this, '${escapeHtml(dataJSON)}')" class="text-primary hover:text-primaryHover font-medium inline-flex items-center gap-1">
+                    <button onclick="toggleDetail(this)" data-json='${JSON.stringify(entry).replace(/\x27/g, "&apos;")}' class="text-primary hover:text-primaryHover font-medium inline-flex items-center gap-1">
                         <svg class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
@@ -255,9 +263,10 @@ function renderDLQMobile(entries) {
     }).join('');
 }
 
-function toggleDetail(btn, dataJSON) {
+function toggleDetail(btn) {
     const row = btn.closest('tr');
     const detailRow = row.nextElementSibling;
+    const dataJSON = btn.getAttribute('data-json');
     
     if (detailRow && detailRow.classList.contains('detail-row')) {
         const isHidden = detailRow.classList.contains('hidden');
@@ -269,6 +278,12 @@ function toggleDetail(btn, dataJSON) {
             `<svg class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
             </svg> View`;
+        
+        // Update code content
+        const codeEl = detailRow.querySelector('code');
+        if (codeEl && dataJSON) {
+            codeEl.textContent = dataJSON;
+        }
     }
 }
 
