@@ -134,6 +134,17 @@ func mergeSinks(sinks []core.Sink) []core.Sink {
 		}
 	}
 
+	// Sort for deterministic output: by table, then pk, then opType
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].Config.Output != merged[j].Config.Output {
+			return merged[i].Config.Output < merged[j].Config.Output
+		}
+		if merged[i].Config.PrimaryKey != merged[j].Config.PrimaryKey {
+			return merged[i].Config.PrimaryKey < merged[j].Config.PrimaryKey
+		}
+		return merged[i].OpType < merged[j].OpType
+	})
+
 	return merged
 }
 
