@@ -44,7 +44,7 @@
             <div class="text-sm text-text">
                 <p class="font-medium text-text mb-1">Editing Tips</p>
                 <ul class="text-textMuted space-y-1">
-                    <li>• Changes are saved to <code class="px-1 py-0.5 bg-surfaceHover rounded">skills/{{.Name}}.yml</code></li>
+                    <li>• Changes are saved to <code class="px-1 py-0.5 bg-surfaceHover rounded">skills/{{.Data.Name}}.yml</code></li>
                     <li>• Plugin will auto-reload after ~1 second</li>
                     <li>• Make sure <code class="px-1 py-0.5 bg-surfaceHover rounded">name</code> field matches filename</li>
                     <li>• At least one table must be specified in <code class="px-1 py-0.5 bg-surfaceHover rounded">on</code> field</li>
@@ -63,7 +63,7 @@
 </div>
 
 <script>
-const skillName = '{{.Name}}';
+const skillName = '{{.Data.Name}}';
 
 // Load skill content
 async function loadSkill() {

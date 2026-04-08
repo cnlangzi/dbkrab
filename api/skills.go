@@ -85,10 +85,6 @@ func (s *Server) handleSkillsPage(c *xun.Context) error {
 	return c.View(map[string]any{
 		"title":     "Skills",
 		"activeTab": "skills",
-		"Data": map[string]any{
-			"title":     "Skills",
-			"activeTab": "skills",
-		},
 	})
 }
 
@@ -97,14 +93,10 @@ func (s *Server) handleSkillsNewPage(c *xun.Context) error {
 	return c.View(map[string]any{
 		"title":     "New Skill",
 		"activeTab": "skills",
-		"Data": map[string]any{
-			"title":     "New Skill",
-			"activeTab": "skills",
-		},
 	})
 }
 
-// handleSkillsEditPage handles GET /skills/edit/:name
+// handleSkillsEditPage handles GET /skills/edit/{name}
 func (s *Server) handleSkillsEditPage(c *xun.Context) error {
 	// Use Go 1.22+ native PathValue for route params
 	name := c.Request.PathValue("name")
@@ -113,23 +105,15 @@ func (s *Server) handleSkillsEditPage(c *xun.Context) error {
 		return c.View(map[string]any{
 			"title":     "Edit Skill",
 			"activeTab": "skills",
-			"Data": map[string]any{
-				"title":     "Edit Skill",
-				"activeTab": "skills",
-				"Name":      "",
-				"Error":     "Skill name required",
-			},
+			"Name":      "",
+			"Error":     "Skill name required",
 		})
 	}
 	
 	return c.View(map[string]any{
 		"title":     "Edit: " + name,
 		"activeTab": "skills",
-		"Data": map[string]any{
-			"title":     "Edit: " + name,
-			"activeTab": "skills",
-			"Name":      name,
-		},
+		"Name":      name,
 	})
 }
 
