@@ -182,14 +182,8 @@ func main() {
 		}
 	}()
 
-	// Initialize all plugins via unified Init (WASM + SQL)
+	// Initialize SQL plugins
 	if err := pluginManager.Init(ctx, db, struct {
-		Enabled bool
-		Path    string
-	}{
-		Enabled: config.IsEnabled(cfg.Plugins.WASM.Enabled),
-		Path:    cfg.Plugins.WASM.Path,
-	}, struct {
 		Enabled bool
 		Path    string
 	}{
