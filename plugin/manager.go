@@ -86,26 +86,22 @@ func (m *Manager) Unload(name string) error {
 }
 
 // Handle processes a transaction through all SQL plugins.
-// SQL plugins return []core.Sink.
-func (m *Manager) Handle(tx *core.Transaction) ([]core.Sink, error) {
+// Each plugin writes to its own sink if configured.
+func (m *Manager) Handle(tx *core.Transaction) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	var allOps []core.Sink
 
 	for _, p := range m.plugins {
 		splug, ok := p.(*sql.Plugin)
 		if !ok {
 			continue
 		}
-		sinkOps, err := splug.Handle(tx)
-		if err != nil {
-			return nil, fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
+		if err := splug.Handle(tx); err != nil {
+			return fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
 		}
-		allOps = append(allOps, sinkOps...)
 	}
 
-	return allOps, nil
+	return nil
 }
 
 // List returns all loaded plugins

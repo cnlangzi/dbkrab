@@ -18,7 +18,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/plugin"
-	"github.com/cnlangzi/dbkrab/sink/sqlite"
+	"github.com/cnlangzi/dbkrab/app/sqlite"
 	"github.com/yaitoo/xun"
 )
 
@@ -39,7 +39,7 @@ type Server struct {
 	manager     *plugin.Manager
 	dlq         *dlq.DLQ
 	cdcAdmin    *cdcadmin.Admin
-	store       *sqlite.Store
+	store       *app.Store
 	port        int
 	app         *xun.App
 	mux         *http.ServeMux
@@ -66,7 +66,7 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *sqlite.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *app.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,

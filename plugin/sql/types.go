@@ -71,9 +71,10 @@ func (o Operation) String() string {
 type Skill struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
-	On          []string    `yaml:"on"`           // Tables to monitor
-	Jobs        []Job       `yaml:"jobs"`         // Optional parallel SQL jobs (executed before sinks)
-	Sinks       SinksConfig `yaml:"sinks"`        // Sink configuration
+	On          []string    `yaml:"on"`            // Tables to monitor
+	SQLite      string      `yaml:"sqlite"`        // Path to SQLite sink database (resolves to data/sinks/{name}/{name}.db)
+	Jobs        []Job       `yaml:"jobs"`          // Optional parallel SQL jobs (executed before sinks)
+	Sinks       SinksConfig `yaml:"sinks"`         // Sink configuration
 }
 
 // Job represents a SQL job that executes in parallel with other jobs

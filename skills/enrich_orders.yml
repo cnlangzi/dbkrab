@@ -1,5 +1,6 @@
 name: enrich_orders
 description: "orders CDC with customer and product enrichment"
+sqlite: ./data/sinks/business.db
 
 on:
   - orders

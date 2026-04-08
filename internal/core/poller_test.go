@@ -316,11 +316,11 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(tx *Transaction) ([]Sink, error) {
+func (h *mockHandler) Handle(tx *Transaction) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {
-		return nil, errors.New("simulated handler failure")
+		return errors.New("simulated handler failure")
 	}
-	return nil, nil
+	return nil
 }
