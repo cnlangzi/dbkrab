@@ -1,4 +1,4 @@
-package sqlplugin
+package sql
 
 import (
 	"os"

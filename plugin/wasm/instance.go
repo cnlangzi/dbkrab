@@ -1,4 +1,4 @@
-package plugin
+package wasm
 
 import (
 	"encoding/json"
@@ -8,8 +8,8 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
-// WasmInstance represents a loaded WASM plugin instance
-type WasmInstance struct {
+// Instance represents a loaded WASM plugin instance
+type Instance struct {
 	path string
 	mu   sync.Mutex
 
@@ -18,8 +18,8 @@ type WasmInstance struct {
 	handler func(*core.Transaction) error
 }
 
-// NewWasmInstance loads a WASM plugin from file
-func NewWasmInstance(path string) (*WasmInstance, error) {
+// NewInstance loads a WASM plugin from file
+func NewInstance(path string) (*Instance, error) {
 	// TODO: Implement actual WASM loading with wasmtime/wasmer
 	// For now, we return a stub that can be extended
 
@@ -29,13 +29,13 @@ func NewWasmInstance(path string) (*WasmInstance, error) {
 	//     return nil, fmt.Errorf("read wasm file: %w", err)
 	// }
 
-	return &WasmInstance{
+	return &Instance{
 		path: path,
 	}, nil
 }
 
 // Init calls the plugin's Init function
-func (w *WasmInstance) Init(config string) error {
+func (w *Instance) Init(config string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -47,7 +47,7 @@ func (w *WasmInstance) Init(config string) error {
 }
 
 // Handle calls the plugin's Handle function with a transaction
-func (w *WasmInstance) Handle(tx *core.Transaction) error {
+func (w *Instance) Handle(tx *core.Transaction) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -59,13 +59,13 @@ func (w *WasmInstance) Handle(tx *core.Transaction) error {
 
 	// Default: just log the transaction
 	txJSON, _ := json.Marshal(tx)
-	fmt.Printf("[Plugin %s] Transaction: %s\n", w.path, string(txJSON))
+	fmt.Printf("[WASM Plugin %s] Transaction: %s\n", w.path, string(txJSON))
 
 	return nil
 }
 
 // Close calls the plugin's Close function
-func (w *WasmInstance) Close() error {
+func (w *Instance) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -77,13 +77,13 @@ func (w *WasmInstance) Close() error {
 
 // SetHandler sets a custom Go handler (for native plugins)
 // This allows mixing native Go plugins with WASM plugins
-func (w *WasmInstance) SetHandler(h func(*core.Transaction) error) {
+func (w *Instance) SetHandler(h func(*core.Transaction) error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.handler = h
 }
 
 // Path returns the plugin file path
-func (w *WasmInstance) Path() string {
+func (w *Instance) Path() string {
 	return w.path
 }
