@@ -50,7 +50,7 @@ func (l *Loader) Load(name string) (*Skill, error) {
 	}
 
 	// Load external SQL files (skillDir is the directory containing the skill.yml)
-	skillDir := filepath.Join(l.pluginsDir, name)
+	skillDir := l.pluginsDir
 	if err := l.loadSQLFiles(&skill, skillDir); err != nil {
 		return nil, err
 	}

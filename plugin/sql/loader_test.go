@@ -69,6 +69,46 @@ func TestLoadAllSkills(t *testing.T) {
 	}
 }
 
+func TestLoadSkillWithSQLFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create flat structure: pluginsDir/skill_with_file.yml
+	skillFile := filepath.Join(tmpDir, "skill_with_file.yml")
+	skillContent := `name: skill_with_file
+description: Test skill with external sql_file
+on:
+  - dbo.orders
+sinks:
+  insert:
+    - name: sink1
+      sql_file: fetch.sql
+      output: out
+      primary_key: id
+`
+	if err := os.WriteFile(skillFile, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("failed to write skill file: %v", err)
+	}
+
+	// Create external SQL file at pluginsDir/fetch.sql (flat structure)
+	sqlContent := "SELECT * FROM orders WHERE order_id = @orders_order_id"
+	if err := os.WriteFile(filepath.Join(tmpDir, "fetch.sql"), []byte(sqlContent), 0644); err != nil {
+		t.Fatalf("failed to write sql file: %v", err)
+	}
+
+	loader := NewLoader(tmpDir)
+	skill, err := loader.Load("skill_with_file")
+	if err != nil {
+		t.Fatalf("failed to load skill: %v", err)
+	}
+
+	if len(skill.Sinks.Insert) == 0 {
+		t.Fatal("expected at least one sink")
+	}
+	if skill.Sinks.Insert[0].SQL != sqlContent {
+		t.Errorf("expected SQL to be loaded from external file, got: %s", skill.Sinks.Insert[0].SQL)
+	}
+}
+
 func TestLoadNonExistentSkill(t *testing.T) {
 	tmpDir := t.TempDir()
 	loader := NewLoader(tmpDir)
