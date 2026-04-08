@@ -23,9 +23,14 @@ offset:
   json_path: ./data/offset.json
   sqlite_path: ./data/offset.db
 
-# Plugin directory (WASM files, hot-reload enabled)
-# Leave empty to disable plugin watching
-plugin: ./plugins
+# Plugin configuration (both disabled by default)
+plugins:
+  wasm:
+    enabled: false
+    path: ./skills/wasm
+  sql:
+    enabled: true
+    path: ./skills/sql
 
 # API server port for plugin management
 # Endpoints:
