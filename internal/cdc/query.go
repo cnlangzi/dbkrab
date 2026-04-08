@@ -1,6 +1,7 @@
 package cdc
 
 import (
+	"time"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -23,6 +24,7 @@ type Change struct {
 	TransactionID string
 	LSN           []byte
 	Operation     int // 1=DELETE, 2=INSERT, 3=UPDATE(before), 4=UPDATE(after)
+	CommitTime    time.Time // Transaction commit time from LSN
 	Data          map[string]interface{}
 }
 
@@ -75,8 +77,10 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 	}
 
 	// Note: Use * only to avoid duplicate columns (CDC function already returns metadata)
+	// Also convert LSN to transaction time
 	query := fmt.Sprintf(`
-		SELECT * FROM %s(@from_lsn, @to_lsn, N'all')
+		SELECT *, sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS __$commit_time
+		FROM %s(@from_lsn, @to_lsn, N'all')
 		ORDER BY __$start_lsn
 	`, fnName)
 
@@ -141,6 +145,17 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			op, _ = values[idx].(int64)
 		}
 
+		// Get commit time from LSN
+		var commitTime time.Time
+		if idx, ok := colIndex["__$commit_time"]; ok {
+			switch v := values[idx].(type) {
+			case time.Time:
+				commitTime = v
+			case string:
+				commitTime, _ = time.Parse(time.RFC3339Nano, v)
+			}
+		}
+
 		// Build data map from all columns (including metadata for completeness)
 		data := make(map[string]interface{})
 		for i, col := range columns {
@@ -162,6 +177,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			TransactionID: txID,
 			LSN:           lsn,
 			Operation:     int(op),
+			CommitTime:    commitTime,
 			Data:          data,
 		})
 	}

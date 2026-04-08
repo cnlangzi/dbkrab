@@ -40,6 +40,7 @@ type Change struct {
 	LSN           []byte                 `json:"lsn"`
 	Operation     Operation              `json:"operation"`
 	Data          map[string]interface{} `json:"data"`
+	CommitTime    time.Time              `json:"commit_time"` // Transaction commit time from source database
 }
 
 // Transaction represents a group of changes in the same transaction
