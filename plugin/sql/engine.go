@@ -125,7 +125,12 @@ func mergeSinks(sinks []core.Sink) []core.Sink {
 		if len(group) == 1 {
 			merged = append(merged, group[0])
 		} else {
-			merged = append(merged, mergeSinkGroup(key, group))
+			mergedSink, err := mergeSinkGroup(key, group)
+			if err != nil {
+				fmt.Printf("[ERROR] mergeSinks: %v\n", err)
+				continue // Skip this group on error
+			}
+			merged = append(merged, mergedSink)
 		}
 	}
 
@@ -134,7 +139,8 @@ func mergeSinks(sinks []core.Sink) []core.Sink {
 
 // mergeSinkGroup merges multiple sinks with the same (table, pk, opType)
 // into a single sink with combined columns and merged rows.
-func mergeSinkGroup(key sinkKey, sinks []core.Sink) core.Sink {
+// Returns error if OnConflict strategies are inconsistent or pk not found.
+func mergeSinkGroup(key sinkKey, sinks []core.Sink) (core.Sink, error) {
 	// Collect all unique columns from all sinks, sorted for determinism
 	columnSet := make(map[string]bool)
 	for _, sink := range sinks {
@@ -148,44 +154,50 @@ func mergeSinkGroup(key sinkKey, sinks []core.Sink) core.Sink {
 	}
 	sort.Strings(columns)
 
-	// Find primary key column index (should be same for all sinks in group)
-	pkIndex := -1
-	for i, col := range sinks[0].DataSet.Columns {
-		if col == key.pk {
-			pkIndex = i
-			break
+	// Build merged column index map
+	mergedColIndex := make(map[string]int)
+	for i, col := range columns {
+		mergedColIndex[col] = i
+	}
+
+	// Validate OnConflict consistency
+	firstOnConflict := sinks[0].Config.OnConflict
+	for _, sink := range sinks[1:] {
+		if sink.Config.OnConflict != firstOnConflict {
+			return core.Sink{}, fmt.Errorf("inconsistent OnConflict for table %s pk %s: %s vs %s",
+				key.table, key.pk, firstOnConflict, sink.Config.OnConflict)
 		}
 	}
 
-	// Build column index map for fast lookup
-	colIndexMap := make(map[string]int)
-	for i, col := range columns {
-		colIndexMap[col] = i
-	}
-
-	// Merge rows by primary key value
-	// For each unique pk value, collect all column values from all sinks
+	// Build per-sink column index maps and merge rows
 	mergedRowsMap := make(map[any][]any)
 	for _, sink := range sinks {
+		// Build column index map for this sink
+		sinkColIndex := make(map[string]int)
+		for i, col := range sink.DataSet.Columns {
+			sinkColIndex[col] = i
+		}
+		// Find pk column by name in this sink
+		pkIdx, pkExists := sinkColIndex[key.pk]
+		if !pkExists {
+			return core.Sink{}, fmt.Errorf("pk column %s not found in sink %s for table %s",
+				key.pk, sink.Config.Name, key.table)
+		}
 		for _, row := range sink.DataSet.Rows {
-			if pkIndex < 0 || pkIndex >= len(row) {
-				continue
-			}
-			pkValue := row[pkIndex]
+			pkValue := row[pkIdx]
 			if _, exists := mergedRowsMap[pkValue]; !exists {
-				// Initialize with nil values
 				mergedRowsMap[pkValue] = make([]any, len(columns))
 			}
-			// Fill in values from this sink's columns
+			// Fill in values using field names
 			for colIdx, col := range sink.DataSet.Columns {
 				if colIdx < len(row) {
-					mergedRowsMap[pkValue][colIndexMap[col]] = row[colIdx]
+					mergedRowsMap[pkValue][mergedColIndex[col]] = row[colIdx]
 				}
 			}
 		}
 	}
 
-	// Convert map to sorted slice (sort by pk value for determinism)
+	// Convert map to sorted slice
 	pkValues := make([]any, 0, len(mergedRowsMap))
 	for pk := range mergedRowsMap {
 		pkValues = append(pkValues, pk)
@@ -201,17 +213,17 @@ func mergeSinkGroup(key sinkKey, sinks []core.Sink) core.Sink {
 
 	return core.Sink{
 		Config: core.SinkConfig{
-			Name:       sinks[0].Config.Name, // Use first sink's name
+			Name:       sinks[0].Config.Name,
 			Output:     key.table,
 			PrimaryKey: key.pk,
-			OnConflict: sinks[0].Config.OnConflict, // Use first sink's conflict strategy
+			OnConflict: firstOnConflict,
 		},
 		DataSet: &core.DataSet{
 			Columns: columns,
 			Rows:    mergedRows,
 		},
 		OpType: key.opType,
-	}
+	}, nil
 }
 
 // convertDataSet converts sqlplugin.DataSet to core.DataSet
