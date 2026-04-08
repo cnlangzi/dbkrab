@@ -1,6 +1,8 @@
 package sql
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,15 +21,34 @@ func NewLoader(pluginsDir string) *Loader {
 	return &Loader{pluginsDir: pluginsDir}
 }
 
-// Load loads and parses a SQL plugin from the given name
-func (l *Loader) Load(name string) (*Skill, error) {
-	// Flattened structure: skills/{name}.yml
-	skillPath := filepath.Join(l.pluginsDir, name+".yml")
+// hashFile generates a 12-character ID from a file path using SHA256
+func hashFile(file string) string {
+	h := sha256.Sum256([]byte(file))
+	return hex.EncodeToString(h[:])[:12]
+}
+
+// Load loads and parses a SQL plugin from the given relative file path.
+// The file parameter is a relative path from the plugins directory (e.g., "orders.yml" or "f9/orders.yml").
+func (l *Loader) Load(file string) (*Skill, error) {
+	root, err := os.OpenRoot(l.pluginsDir)
+	if err != nil {
+		return nil, fmt.Errorf("create root: %w", err)
+	}
+
+	// Validate that file path doesn't escape the root directory (prevents path traversal)
+	if _, err := root.Stat(file); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrPluginNotFound, file)
+		}
+		return nil, fmt.Errorf("validate path: %w", err)
+	}
+
+	skillPath := filepath.Join(l.pluginsDir, file)
 
 	// Check if skill.yml exists
 	if _, err := os.Stat(skillPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrPluginNotFound, name)
+			return nil, fmt.Errorf("%w: %s", ErrPluginNotFound, file)
 		}
 		return nil, fmt.Errorf("check skill file: %w", err)
 	}
@@ -44,13 +65,12 @@ func (l *Loader) Load(name string) (*Skill, error) {
 		return nil, fmt.Errorf("parse skill file: %w", err)
 	}
 
-	// Validate required fields
-	if err := l.validate(&skill); err != nil {
-		return nil, err
-	}
+	// Auto-assign File and Id
+	skill.File = file
+	skill.Id = hashFile(file)
 
 	// Load external SQL files (skillDir is the directory containing the skill.yml)
-	skillDir := l.pluginsDir
+	skillDir := filepath.Dir(skillPath)
 	if err := l.loadSQLFiles(&skill, skillDir); err != nil {
 		return nil, err
 	}
@@ -58,20 +78,9 @@ func (l *Loader) Load(name string) (*Skill, error) {
 	return &skill, nil
 }
 
-// validate validates the skill configuration
-func (l *Loader) validate(skill *Skill) error {
-	if skill.Name == "" {
-		return NewConfigError("name", "name is required")
-	}
-	if len(skill.On) == 0 {
-		return NewConfigError("on", "at least one table must be specified")
-	}
-	return nil
-}
-
 // loadSQLFiles loads external SQL files referenced in jobs and sinks
 func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
-	// skillDir is passed in - for flat structure, it's skills/{skillName}
+	// skillDir is passed in - it's the directory containing the skill.yml file
 	// This allows skills to organize their SQL files in subdirectories if needed
 
 	// Load job SQL files
@@ -92,46 +101,64 @@ func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
 	return nil
 }
 
-// LoadAll loads all SQL plugins from the plugins directory
+// LoadAll loads all SQL plugins from the plugins directory and its subdirectories.
+// It scans for *.yml files recursively and returns a map keyed by file path.
 func (l *Loader) LoadAll() (map[string]*Skill, error) {
 	plugins := make(map[string]*Skill)
 
-	// Read plugin directory for *.yml files (flattened structure)
-	entries, err := os.ReadDir(l.pluginsDir)
-	if err != nil {
-		return nil, fmt.Errorf("read plugins dir: %w", err)
-	}
+	// Walk the plugins directory recursively for *.yml files
+	err := filepath.Walk(l.pluginsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		// Skip directories
+		if info.IsDir() {
+			return nil
 		}
 
 		// Only process .yml files
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".yml") {
-			continue
+		if !strings.HasSuffix(info.Name(), ".yml") {
+			return nil
 		}
 
-		// Extract skill name from filename (e.g., "enrich_orders.yml" -> "enrich_orders")
-		skillName := strings.TrimSuffix(name, ".yml")
+		// Get relative path from pluginsDir
+		relPath, err := filepath.Rel(l.pluginsDir, path)
+		if err != nil {
+			return nil
+		}
 
-		skill, err := l.Load(skillName)
+		skill, err := l.Load(relPath)
 		if err != nil {
 			// Log error but continue loading other plugins
-			fmt.Printf("Warning: failed to load plugin %s: %v\n", skillName, err)
-			continue
+			fmt.Printf("Warning: failed to load plugin %s: %v\n", relPath, err)
+			return nil
 		}
 
-		plugins[skillName] = skill
+		plugins[relPath] = skill
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("walk plugins dir: %w", err)
 	}
 
 	return plugins, nil
 }
 
-// Exists checks if a plugin exists
-func (l *Loader) Exists(name string) bool {
-	skillPath := filepath.Join(l.pluginsDir, name+".yml")
-	_, err := os.Stat(skillPath)
+// Exists checks if a plugin file exists at the given relative path
+func (l *Loader) Exists(file string) bool {
+	root, err := os.OpenRoot(l.pluginsDir)
+	if err != nil {
+		return false
+	}
+
+	// Validate that file path doesn't escape the root directory
+	if _, err := root.Stat(file); err != nil {
+		return false
+	}
+
+	skillPath := filepath.Join(l.pluginsDir, file)
+	_, err = os.Stat(skillPath)
 	return err == nil
 }

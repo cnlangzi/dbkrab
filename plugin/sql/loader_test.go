@@ -29,7 +29,7 @@ sinks:
 	}
 
 	loader := NewLoader(tmpDir)
-	skill, loadErr := loader.Load("test_load")
+	skill, loadErr := loader.Load("test_load.yml")
 	if loadErr != nil {
 		t.Fatalf("failed to load skill: %v", loadErr)
 	}
@@ -96,7 +96,7 @@ sinks:
 	}
 
 	loader := NewLoader(tmpDir)
-	skill, err := loader.Load("skill_with_file")
+	skill, err := loader.Load("skill_with_file.yml")
 	if err != nil {
 		t.Fatalf("failed to load skill: %v", err)
 	}
@@ -119,39 +119,3 @@ func TestLoadNonExistentSkill(t *testing.T) {
 	}
 }
 
-func TestValidateRequiredFields(t *testing.T) {
-	loader := NewLoader("")
-
-	// Test 1: valid skill
-	skill1 := Skill{
-		Name: "test",
-		On:   []string{"dbo.table1"},
-		Sinks: SinksConfig{
-			Insert: []SinkConfig{{Name: "sink", On: "dbo.table1", Output: "out", PrimaryKey: "id"}},
-		},
-	}
-	err := loader.validate(&skill1)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	// Test 2: missing name
-	skill2 := Skill{
-		On: []string{"dbo.table1"},
-		Sinks: SinksConfig{Insert: []SinkConfig{{Name: "sink"}}},
-	}
-	err = loader.validate(&skill2)
-	if err == nil {
-		t.Error("expected error for missing name")
-	}
-
-	// Test 3: missing tables
-	skill3 := Skill{
-		Name: "test",
-		Sinks: SinksConfig{Insert: []SinkConfig{{Name: "sink"}}},
-	}
-	err = loader.validate(&skill3)
-	if err == nil {
-		t.Error("expected error for missing tables")
-	}
-}

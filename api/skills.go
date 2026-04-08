@@ -39,9 +39,11 @@ type SkillListResponse struct {
 // SkillInfo contains skill metadata
 type SkillInfo struct {
 	Name        string   `json:"name"`
+	Id          string   `json:"id"`            // SHA256(file)[:12]
+	File        string   `json:"file"`          // Relative path from config.plugins.sql.path
 	Description string   `json:"description"`
 	Tables      []string `json:"tables"`
-	Status      string   `json:"status"` // loaded, error, not_loaded
+	Status      string   `json:"status"`        // loaded, error, not_loaded
 	Version     string   `json:"version"`
 	LoadTime    string   `json:"load_time,omitempty"`
 	Files       []string `json:"files"`
@@ -134,37 +136,15 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 			continue
 		}
 
-		// Load skill metadata from file
-		skillPath := filepath.Join(s.skillsPath, p.Name+".yml")
+		// Use metadata from manager (already loaded from skill file)
 		skillInfo := SkillInfo{
-			Name:   p.Name, // Default to filename
-			Status: "loaded",
-			Files:  []string{p.Name + ".yml"},
-		}
-
-		// Try to read skill file for metadata
-		if data, err := os.ReadFile(skillPath); err == nil {
-			var skill sql.Skill
-			if err := yaml.Unmarshal(data, &skill); err == nil {
-				// Use YAML name if available, otherwise use filename
-				if skill.Name != "" {
-					skillInfo.Name = skill.Name
-				}
-				skillInfo.Description = skill.Description
-				skillInfo.Tables = skill.On
-
-				// Collect SQL files referenced in the skill
-				for _, jobType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-					for _, job := range jobType {
-						if job.SQLFile != "" {
-							skillInfo.Files = append(skillInfo.Files, job.SQLFile)
-						}
-					}
-				}
-			}
-		} else {
-			skillInfo.Status = "error"
-			skillInfo.Error = "Failed to read skill file"
+			Name:        p.Name,   // YAML name field
+			Id:          p.Id,     // SHA256(file)[:12]
+			File:        p.File,   // Relative file path
+			Status:      "loaded",
+			Files:       []string{p.File},
+			Description: "", // Will be populated from skill if needed
+			Tables:      nil,  // Will be populated from skill if needed
 		}
 
 		skills = append(skills, skillInfo)
@@ -185,7 +165,7 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 // handleSkillsFilesHTML handles GET /api/skills/files/html
 // Returns HTML fragment for HTMX (like handleOverview pattern)
 func (s *Server) handleSkillsFilesHTML(c *xun.Context) error {
-	skillsDir := s.skillsPath
+	skillsDir := "skills"
 
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -205,7 +185,7 @@ func (s *Server) handleSkillsFilesHTML(c *xun.Context) error {
 
 		fileInfo := SkillFileInfo{
 			Name:    entry.Name(),
-			Path:    entry.Name(),
+			Path:    filepath.Join(skillsDir, entry.Name()),
 			ModTime: info.ModTime().Format(time.RFC3339),
 		}
 
@@ -295,7 +275,7 @@ func renderSkillsFilesHTML(files []SkillFileInfo) string {
 }
 // Returns JSON for API clients
 func (s *Server) handleSkillsFiles(c *xun.Context) error {
-	skillsDir := s.skillsPath
+	skillsDir := "skills"
 
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -315,7 +295,7 @@ func (s *Server) handleSkillsFiles(c *xun.Context) error {
 
 		fileInfo := SkillFileInfo{
 			Name:    entry.Name(),
-			Path:    entry.Name(),
+			Path:    filepath.Join(skillsDir, entry.Name()),
 			ModTime: info.ModTime().Format(time.RFC3339),
 		}
 
@@ -360,7 +340,7 @@ func (s *Server) handleSkillGet(c *xun.Context) error {
 		})
 	}
 
-	skillPath := filepath.Join(s.skillsPath, name+".yml")
+	skillPath := filepath.Join("skills", name+".yml")
 
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -409,7 +389,7 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	}
 
 	// Check if skill already exists
-	skillPath := filepath.Join(s.skillsPath, req.Name+".yml")
+	skillPath := filepath.Join("skills", req.Name+".yml")
 	if _, err := os.Stat(skillPath); err == nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -503,10 +483,18 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 		})
 	}
 
+	// Note: YAML name no longer needs to match filename (issue #60)
+
+	// Determine file path: use skill.File if set (loaded from subdir), else URL name
+	filePath := name
+	if skill.File != "" {
+		filePath = skill.File
+	}
+
 	// Security: ensure path is within skills directory
-	skillPath := filepath.Join(s.skillsPath, name+".yml")
+	skillPath := filepath.Join("skills", filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean(s.skillsPath)) {
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -551,9 +539,9 @@ func (s *Server) handleSkillDelete(c *xun.Context) error {
 	}
 
 	// Security: ensure path is within skills directory
-	skillPath := filepath.Join(s.skillsPath, name+".yml")
+	skillPath := filepath.Join("skills", name+".yml")
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean(s.skillsPath)) {
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -673,8 +661,8 @@ func (s *Server) handleSkillFileGet(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join(s.skillsPath, filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean(s.skillsPath)) {
+	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -715,8 +703,8 @@ func (s *Server) handleSkillFileSave(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join(s.skillsPath, filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean(s.skillsPath)) {
+	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -773,9 +761,9 @@ func (s *Server) handleFolderCreate(c *xun.Context) error {
 	}
 
 	// Security: ensure path is within skills directory
-	folderPath := filepath.Join(s.skillsPath, req.Name)
+	folderPath := filepath.Join("skills", req.Name)
 	cleanPath := filepath.Clean(folderPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean(s.skillsPath)) {
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
