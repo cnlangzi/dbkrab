@@ -54,7 +54,6 @@ type Poller struct {
 // Store interface for storing changes
 type Store interface {
 	Write(tx *Transaction) error
-	WriteOps(ops []Sink) error
 	Close() error
 }
 

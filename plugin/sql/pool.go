@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
@@ -22,7 +23,7 @@ type Pool struct {
 	writeDB *sql.DB // single write connection
 	readDB  *sql.DB // read connection pool (WAL concurrent reads)
 	mu      sync.RWMutex
-	closed  bool
+	closed  atomic.Bool
 }
 
 // NewPool creates a new SQLite connection pool for a sink.
@@ -139,13 +140,13 @@ func (p *Pool) MigrationsPath() string {
 
 // Close closes all database connections
 func (p *Pool) Close() error {
+	// Use atomic swap to avoid deadlock with Read/Write using RLock
+	if p.closed.Swap(true) {
+		return nil // already closed
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	if p.closed {
-		return nil
-	}
-	p.closed = true
 
 	var errs []error
 	if p.writeDB != nil {
