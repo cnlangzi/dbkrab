@@ -14,18 +14,18 @@ on:
   - dbo.orders
   - dbo.order_items
 sinks:
-  insert:
-    - name: orders_sink
-      on: dbo.orders
-      sql: SELECT * FROM orders
-      output: orders
-      primary_key: order_id
-  delete:
-    - name: orders_delete
-      on: dbo.orders
-      sql: SELECT order_id FROM deleted_orders
-      output: deleted_orders
-      primary_key: order_id
+  - name: orders_sink
+    when: [insert, update]
+    on: dbo.orders
+    sql: SELECT * FROM orders
+    output: orders
+    primary_key: order_id
+  - name: orders_delete
+    when: [delete]
+    on: dbo.orders
+    sql: SELECT order_id FROM deleted_orders
+    output: deleted_orders
+    primary_key: order_id
 `
 	var skill Skill
 	err := yaml.Unmarshal([]byte(yamlContent), &skill)
@@ -42,11 +42,30 @@ sinks:
 	if len(skill.On) != 2 {
 		t.Errorf("expected 2 tables, got %d", len(skill.On))
 	}
-	if len(skill.Sinks.Insert) != 1 {
-		t.Errorf("expected 1 insert sink, got %d", len(skill.Sinks.Insert))
+	if len(skill.Sinks) != 2 {
+		t.Errorf("expected 2 sinks, got %d", len(skill.Sinks))
 	}
-	if len(skill.Sinks.Delete) != 1 {
-		t.Errorf("expected 1 delete sink, got %d", len(skill.Sinks.Delete))
+
+	// Test FilterByOperation
+	insertSinks := skill.FilterByOperation(Insert)
+	if len(insertSinks) != 1 {
+		t.Errorf("expected 1 insert sink, got %d", len(insertSinks))
+	}
+	if insertSinks[0].Name != "orders_sink" {
+		t.Errorf("expected insert sink name 'orders_sink', got '%s'", insertSinks[0].Name)
+	}
+
+	deleteSinks := skill.FilterByOperation(Delete)
+	if len(deleteSinks) != 1 {
+		t.Errorf("expected 1 delete sink, got %d", len(deleteSinks))
+	}
+	if deleteSinks[0].Name != "orders_delete" {
+		t.Errorf("expected delete sink name 'orders_delete', got '%s'", deleteSinks[0].Name)
+	}
+
+	updateSinks := skill.FilterByOperation(Update)
+	if len(updateSinks) != 1 {
+		t.Errorf("expected 1 update sink, got %d", len(updateSinks))
 	}
 }
 
@@ -56,12 +75,12 @@ name: inline_test
 on:
   - dbo.test
 sinks:
-  insert:
-    - name: test_sink
-      on: dbo.test
-      sql: SELECT * FROM test_table WHERE id = @id
-      output: test_output
-      primary_key: id
+  - name: test_sink
+    when: [insert, update]
+    on: dbo.test
+    sql: SELECT * FROM test_table WHERE id = @id
+    output: test_output
+    primary_key: id
 `
 	var skill Skill
 	err := yaml.Unmarshal([]byte(yamlContent), &skill)
@@ -69,8 +88,8 @@ sinks:
 		t.Fatalf("failed to parse skill: %v", err)
 	}
 
-	if skill.Sinks.Insert[0].SQL != "SELECT * FROM test_table WHERE id = @id" {
-		t.Errorf("expected inline SQL, got '%s'", skill.Sinks.Insert[0].SQL)
+	if skill.Sinks[0].SQL != "SELECT * FROM test_table WHERE id = @id" {
+		t.Errorf("expected inline SQL, got '%s'", skill.Sinks[0].SQL)
 	}
 }
 
@@ -80,12 +99,12 @@ name: file_test
 on:
   - dbo.test
 sinks:
-  insert:
-    - name: test_sink
-      on: dbo.test
-      sql_file: ./sql/test.sql
-      output: test_output
-      primary_key: id
+  - name: test_sink
+    when: [insert, update]
+    on: dbo.test
+    sql_file: ./sql/test.sql
+    output: test_output
+    primary_key: id
 `
 	var skill Skill
 	err := yaml.Unmarshal([]byte(yamlContent), &skill)
@@ -93,8 +112,8 @@ sinks:
 		t.Fatalf("failed to parse skill: %v", err)
 	}
 
-	if skill.Sinks.Insert[0].SQLFile != "./sql/test.sql" {
-		t.Errorf("expected sql_file './sql/test.sql', got '%s'", skill.Sinks.Insert[0].SQLFile)
+	if skill.Sinks[0].SQLFile != "./sql/test.sql" {
+		t.Errorf("expected sql_file './sql/test.sql', got '%s'", skill.Sinks[0].SQLFile)
 	}
 }
 
@@ -162,25 +181,35 @@ func TestOperationToJobType(t *testing.T) {
 	}
 }
 
-func TestSkillGetSinks(t *testing.T) {
+func TestSkillFilterByOperation(t *testing.T) {
 	skill := &Skill{
 		Name: "test",
 		On:   []string{"dbo.orders"},
-		Sinks: SinksConfig{
-			Insert: []SinkConfig{{Name: "insert_sink"}},
-			Update: []SinkConfig{{Name: "update_sink"}},
-			Delete: []SinkConfig{{Name: "delete_sink"}},
+		Sinks: []Sink{
+			{SinkConfig: SinkConfig{Name: "insert_update_sink"}, When: []string{"insert", "update"}},
+			{SinkConfig: SinkConfig{Name: "delete_sink"}, When: []string{"delete"}},
 		},
 	}
 
-	if len(skill.GetSinks(Insert)) != 1 {
-		t.Errorf("expected 1 insert sink, got %d", len(skill.GetSinks(Insert)))
+	insertSinks := skill.FilterByOperation(Insert)
+	if len(insertSinks) != 1 {
+		t.Errorf("expected 1 insert sink, got %d", len(insertSinks))
 	}
-	if len(skill.GetSinks(Update)) != 1 {
-		t.Errorf("expected 1 update sink, got %d", len(skill.GetSinks(Update)))
+	if insertSinks[0].Name != "insert_update_sink" {
+		t.Errorf("expected insert sink name 'insert_update_sink', got '%s'", insertSinks[0].Name)
 	}
-	if len(skill.GetSinks(Delete)) != 1 {
-		t.Errorf("expected 1 delete sink, got %d", len(skill.GetSinks(Delete)))
+
+	updateSinks := skill.FilterByOperation(Update)
+	if len(updateSinks) != 1 {
+		t.Errorf("expected 1 update sink, got %d", len(updateSinks))
+	}
+
+	deleteSinks := skill.FilterByOperation(Delete)
+	if len(deleteSinks) != 1 {
+		t.Errorf("expected 1 delete sink, got %d", len(deleteSinks))
+	}
+	if deleteSinks[0].Name != "delete_sink" {
+		t.Errorf("expected delete sink name 'delete_sink', got '%s'", deleteSinks[0].Name)
 	}
 }
 
@@ -188,19 +217,20 @@ func TestFilterSinks(t *testing.T) {
 	sinks := []SinkConfig{
 		{Name: "sink1", On: "dbo.orders"},
 		{Name: "sink2", On: "dbo.order_items"},
-		{Name: "sink_all", On: "*"},
+		{Name: "sink_all", On: ""},
 	}
 
-	// Filter for specific table (exact match or wildcard *)
+	// Filter for specific table (exact match or empty = all tables)
+	// Empty On means "all tables", so it should be included in results
 	filtered := FilterSinks(sinks, "dbo.orders")
-	if len(filtered) != 1 {
-		t.Errorf("expected 1 sink for dbo.orders, got %d", len(filtered))
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 sinks for dbo.orders (exact + wildcard), got %d", len(filtered))
 	}
 
 	// Filter for another table
 	filtered = FilterSinks(sinks, "dbo.order_items")
-	if len(filtered) != 1 {
-		t.Errorf("expected 1 sink for dbo.order_items, got %d", len(filtered))
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 sinks for dbo.order_items (exact + wildcard), got %d", len(filtered))
 	}
 }
 
@@ -220,4 +250,110 @@ func TestDataSetToMap(t *testing.T) {
 	if result[0]["id"].(int) != 1 {
 		t.Errorf("expected id 1, got %v", result[0]["id"])
 	}
+}
+
+func TestValidateSinks(t *testing.T) {
+	tests := []struct {
+		name    string
+		skill   Skill
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid insert_update sink",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid delete sink",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"delete"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing when field",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "sink[0].when is required",
+		},
+		{
+			name: "invalid when value",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"invalid"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid value 'invalid'",
+		},
+		{
+			name: "mixed insert and delete",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"insert", "delete"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "cannot mix delete with insert/update",
+		},
+		{
+			name: "only insert without update",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"insert"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "insert requires update",
+		},
+		{
+			name: "only update without insert",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"update"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "update requires insert",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.skill.ValidateSinks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSinks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil {
+				if !contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateSinks() error = %v, should contain %v", err, tt.errMsg)
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
