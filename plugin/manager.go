@@ -168,72 +168,6 @@ func (m *Manager) pluginLoadedAt(p Plugin) time.Time {
 	return time.Time{}
 }
 
-// reloadPlugin reloads a specific plugin by name
-func (m *Manager) reloadPlugin(name string) APIResponse {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	plug, exists := m.plugins[name]
-	if !exists {
-		return APIResponse{Success: false, Error: "plugin not found"}
-	}
-
-	// Stop the existing plugin
-	if err := plug.Stop(); err != nil {
-		return APIResponse{Success: false, Error: fmt.Sprintf("stop plugin: %v", err)}
-	}
-
-	// Reload from disk
-	if m.sqlLoader == nil {
-		return APIResponse{Success: false, Error: "loader not initialized"}
-	}
-
-	skill, err := m.sqlLoader.Load(name)
-	if err != nil {
-		return APIResponse{Success: false, Error: fmt.Sprintf("load skill: %v", err)}
-	}
-
-	// Create new plugin instance
-	newPlug := sql.NewPlugin(name, skill, m.sqlLoader, nil)
-	newPlug.StartWatch()
-	m.plugins[name] = newPlug
-
-	return APIResponse{Success: true}
-}
-
-// reloadAll reloads all plugins from disk
-func (m *Manager) reloadAll() APIResponse {
-	if m.sqlLoader == nil {
-		return APIResponse{Success: false, Error: "loader not initialized"}
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Stop all existing plugins
-	for name, plug := range m.plugins {
-		if err := plug.Stop(); err != nil {
-			fmt.Printf("Warning: failed to stop plugin %s: %v\n", name, err)
-		}
-	}
-
-	// Reload all plugins from disk
-	skills, err := m.sqlLoader.LoadAll()
-	if err != nil {
-		return APIResponse{Success: false, Error: fmt.Sprintf("load all skills: %v", err)}
-	}
-
-	// Clear and rebuild plugin registry
-	m.plugins = make(map[string]Plugin)
-	for name, skill := range skills {
-		plug := sql.NewPlugin(name, skill, m.sqlLoader, nil)
-		plug.StartWatch()
-		m.plugins[name] = plug
-	}
-
-	return APIResponse{Success: true}
-}
-
 // PluginInfo contains plugin metadata (used by API)
 type PluginInfo struct {
 	Name     string    `json:"name"`
@@ -279,16 +213,6 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 			return APIResponse{Success: false, Error: err.Error()}
 		}
 		return APIResponse{Success: true}
-
-	case "reload":
-		// Reload all plugins from disk (for use after skill file changes)
-		name, _ := params["name"].(string)
-		if name == "" {
-			// Reload all plugins
-			return m.reloadAll()
-		}
-		// Reload specific plugin
-		return m.reloadPlugin(name)
 
 	default:
 		return APIResponse{Success: false, Error: "unknown action"}
