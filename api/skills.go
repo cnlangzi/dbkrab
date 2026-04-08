@@ -150,15 +150,10 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 				skillInfo.Tables = skill.On
 
 				// Collect SQL files referenced in the skill
-				for _, job := range skill.Jobs {
-					if job.SQLFile != "" {
-						skillInfo.Files = append(skillInfo.Files, job.SQLFile)
-					}
-				}
-				for _, sinkType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-					for _, sink := range sinkType {
-						if sink.SQLFile != "" {
-							skillInfo.Files = append(skillInfo.Files, sink.SQLFile)
+				for _, jobType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
+					for _, job := range jobType {
+						if job.SQLFile != "" {
+							skillInfo.Files = append(skillInfo.Files, job.SQLFile)
 						}
 					}
 				}
@@ -637,22 +632,12 @@ func (s *Server) handleSkillValidate(c *xun.Context) error {
 		}
 
 		// Validate SQL syntax in jobs
-		for _, job := range skill.Jobs {
-			if job.SQL != "" {
-				// Basic SQL validation - check for common syntax issues
-				if err := validateSQLBasic(job.SQL); err != nil {
-					response.Errors = append(response.Errors, fmt.Sprintf("Job SQL error: %s", err.Error()))
-					response.Valid = false
-				}
-			}
-		}
-
-		// Validate SQL syntax in sinks
-		for _, sinkType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-			for _, sink := range sinkType {
-				if sink.SQL != "" {
-					if err := validateSQLBasic(sink.SQL); err != nil {
-						response.Errors = append(response.Errors, fmt.Sprintf("Sink SQL error: %s", err.Error()))
+		for _, jobType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
+			for _, job := range jobType {
+				if job.SQL != "" {
+					// Basic SQL validation - check for common syntax issues
+					if err := validateSQLBasic(job.SQL); err != nil {
+						response.Errors = append(response.Errors, fmt.Sprintf("Job SQL error: %s", err.Error()))
 						response.Valid = false
 					}
 				}
