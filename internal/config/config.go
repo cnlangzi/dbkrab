@@ -14,7 +14,7 @@ type Config struct {
 	Tables             []string               `yaml:"tables"`
 	Interval           string                 `yaml:"polling_interval"`
 	Offset             OffsetConfig           `yaml:"offset"`
-	Plugin             string                 `yaml:"plugin"` // Deprecated: use Plugins.WASM.Path
+
 	APIPort            int                    `yaml:"api_port"`
 	Sink               SinkConfig             `yaml:"sink"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
@@ -168,21 +168,13 @@ func Load(path string) (*Config, error) {
 		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
 	}
 
-	// Plugin defaults (hierarchical)
-	// Both WASM and SQL plugins are DISABLED by default
-	// Only explicitly set true/on/1 enables them
-	if cfg.Plugins.WASM.Path == "" && cfg.Plugin != "" {
-		// Backward compatibility: use old Plugin field for WASM path
-		cfg.Plugins.WASM.Path = cfg.Plugin
-		// Keep disabled unless already set
-	}
+	// Plugin defaults: both disabled by default
 	if cfg.Plugins.WASM.Path == "" {
 		cfg.Plugins.WASM.Path = "./plugins"
 	}
 	if cfg.Plugins.SQL.Path == "" {
 		cfg.Plugins.SQL.Path = "./sql_plugins"
 	}
-	// Both are disabled by default (Enabled=nil means not set)
 
 	// Graceful degradation defaults
 	if cfg.GracefulDegradation.Enabled {
