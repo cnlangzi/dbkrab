@@ -1,0 +1,151 @@
+<!--layout:dashboard-->
+{{define "content"}}
+<div class="max-w-7xl mx-auto">
+    <!-- Page Header -->
+    <div class="mb-6">
+        <h2 class="text-2xl sm:text-3xl font-bold text-text mb-2">Sinks Browser</h2>
+        <p class="text-sm text-textMuted">Browse and query SQLite sink databases</p>
+    </div>
+
+    <!-- Sinks List -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <!-- Header -->
+        <div class="p-4 sm:p-6 border-b border-border">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h3 class="text-base sm:text-xl font-semibold text-text">Sink Databases</h3>
+                <button onclick="loadSinks()" class="flex items-center justify-center gap-2 px-4 py-2 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                    </svg>
+                    <span>Refresh</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sinks Container -->
+        <div id="sinks-container" class="p-0">
+            <!-- Skeleton Loader -->
+            <div class="p-4 sm:p-6 space-y-3">
+                <div class="animate-pulse space-y-2">
+                    <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+                    <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Message -->
+    <div id="status-message" class="hidden mt-6 p-4 rounded-xl border" role="alert" aria-live="polite"></div>
+</div>
+
+<script>
+// Load sinks on page load
+document.addEventListener('DOMContentLoaded', loadSinks);
+
+async function loadSinks() {
+    const container = document.getElementById('sinks-container');
+    container.innerHTML = `
+        <div class="p-4 sm:p-6 space-y-3">
+            <div class="animate-pulse space-y-2">
+                <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+                <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+                <div class="h-16 sm:h-20 bg-surfaceHover rounded-lg"></div>
+            </div>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/api/sinks/list');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderSinks(data.sinks);
+        } else {
+            showError('Failed to load sinks: ' + data.error);
+        }
+    } catch (err) {
+        showError('Error loading sinks: ' + err.message);
+    }
+}
+
+function renderSinks(sinks) {
+    const container = document.getElementById('sinks-container');
+    
+    if (sinks.length === 0) {
+        container.innerHTML = `
+            <div class="p-8 text-center">
+                <svg class="mx-auto h-12 w-12 text-textMuted mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                </svg>
+                <p class="text-textMuted">No sink databases found</p>
+                <p class="text-textMuted text-sm mt-1">Sink databases will appear here when SQL plugins write data</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="divide-y divide-border">
+            ${sinks.map(sink => `
+                <div class="p-4 sm:p-6 hover:bg-surfaceHover/50 transition-colors cursor-pointer" 
+                     onclick="window.location.href='/sinks/${encodeURIComponent(sink.name)}'">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4 flex-1 min-w-0">
+                            <div class="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                                </svg>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h4 class="text-base sm:text-lg font-semibold text-text truncate">${escapeHtml(sink.name)}</h4>
+                                <p class="text-sm text-textMuted truncate">${escapeHtml(sink.file)}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4 text-sm text-textMuted">
+                            <div class="hidden sm:block text-right">
+                                <p class="text-text font-medium">${sink.sizeHuman}</p>
+                                <p class="text-xs">${formatDate(sink.modTime)}</p>
+                            </div>
+                            <svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <!-- Mobile-only size/time -->
+                    <div class="sm:hidden mt-3 flex items-center gap-4 text-xs text-textMuted">
+                        <span>📁 ${sink.sizeHuman}</span>
+                        <span>🕐 ${formatDate(sink.modTime)}</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatDate(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+
+function showError(message) {
+    const statusEl = document.getElementById('status-message');
+    statusEl.className = 'mt-6 p-4 rounded-xl border border-error/30 bg-error/10 text-error';
+    statusEl.innerHTML = `
+        <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span>${escapeHtml(message)}</span>
+        </div>
+    `;
+    statusEl.classList.remove('hidden');
+}
+</script>
+{{end}}
