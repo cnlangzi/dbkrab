@@ -143,10 +143,10 @@ offset_file: ./data/offset.json
 plugins:
   wasm:
     enabled: true
-    path: ./plugins     # WASM plugins (hot-reload enabled)
+    path: ./skills/wasm
   sql:
     enabled: true
-    path: ./sql_plugins # SQL plugins (data enrichment engine)
+    path: ./skills/sql
 
 # API server for plugin management
 api_port: 9020

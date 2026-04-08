@@ -164,10 +164,10 @@ func Load(path string) (*Config, error) {
 
 	// Plugin defaults: both disabled by default
 	if cfg.Plugins.WASM.Path == "" {
-		cfg.Plugins.WASM.Path = "./plugins"
+		cfg.Plugins.WASM.Path = "./skills/wasm"
 	}
 	if cfg.Plugins.SQL.Path == "" {
-		cfg.Plugins.SQL.Path = "./sql_plugins"
+		cfg.Plugins.SQL.Path = "./skills/sql"
 	}
 
 	// Graceful degradation defaults

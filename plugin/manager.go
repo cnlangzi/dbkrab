@@ -230,7 +230,7 @@ func (m *Manager) pluginPath(p Plugin) string {
 	case *wasm.Plugin:
 		return plug.Path()
 	case *sql.Plugin:
-		return "sql_plugins/" + plug.Name()
+		return "skills/sql/" + plug.Name()
 	}
 	return ""
 }

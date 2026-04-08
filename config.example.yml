@@ -26,11 +26,11 @@ offset:
 # Plugin configuration (both disabled by default)
 plugins:
   wasm:
-    enabled: false           # WASM plugins disabled by default
-    path: ./plugins          # WASM plugin directory (hot-reload enabled)
+    enabled: false
+    path: ./skills/wasm
   sql:
-    enabled: true           # SQL plugins enabled by default
-    path: ./sql_plugins     # SQL plugin directory
+    enabled: true
+    path: ./skills/sql
 
 # API server port for plugin management
 # Endpoints:
