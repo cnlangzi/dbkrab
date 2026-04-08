@@ -856,7 +856,8 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 
 	entry := &dlq.DLQEntry{
-		TraceID:     tx.TraceID,
+		TraceID:      tx.TraceID,
+		Source:       source,
 		LSN:          lsn,
 		TableName:    tableName,
 		Operation:    operation,
