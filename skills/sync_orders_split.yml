@@ -4,16 +4,6 @@ description: "orders CDC enrich and fanout to two tables"
 on:
   - orders
 
-jobs:
-  - name: log_split_event
-    sql: |
-      SELECT 
-        @cdc_lsn as cdc_lsn,
-        @cdc_tx_id as cdc_tx_id,
-        @orders_order_id as order_id,
-        GETDATE() as logged_at
-    output: split_events
-
 sinks:
   insert:
     - name: customers_sync
