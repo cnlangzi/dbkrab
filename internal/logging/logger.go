@@ -2,6 +2,7 @@
 package logging
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,43 +12,24 @@ import (
 
 // LoggingConfig defines the logging configuration structure.
 type LoggingConfig struct {
-	Level   string            `yaml:"level"` // debug|info|warn|error
-	File    FileLogConfig     `yaml:"file"`
-	Console ConsoleLogConfig  `yaml:"console"`
+	Level   string           `yaml:"level"` // debug|info|warn|error
+	File    FileLogConfig    `yaml:"file"`
+	Console ConsoleLogConfig `yaml:"console"`
 }
 
 // FileLogConfig defines file-based logging configuration.
 type FileLogConfig struct {
 	Enabled    bool   `yaml:"enabled"`
-	Path       string `yaml:"path"`        // ./logs/dbkrab.log
-	MaxSizeMB  int    `yaml:"max_size_mb"` // 100MB
+	Path       string `yaml:"path"`         // ./logs/dbkrab.log
+	MaxSizeMB  int    `yaml:"max_size_mb"`  // 100MB
 	MaxAgeDays int    `yaml:"max_age_days"` // 7
-	MaxFiles   int    `yaml:"max_files"`   // 4
-	Compress   bool   `yaml:"compress"`    // gzip
+	MaxFiles   int    `yaml:"max_files"`    // 4
+	Compress   bool   `yaml:"compress"`     // gzip
 }
 
 // ConsoleLogConfig defines console logging configuration.
 type ConsoleLogConfig struct {
 	Enabled bool `yaml:"enabled"`
-}
-
-// DefaultLoggingConfig returns the default logging configuration.
-func DefaultLoggingConfig() LoggingConfig {
-	return LoggingConfig{
-		Level:  "info",
-		Format: "json",
-		File: FileLogConfig{
-			Enabled:    true,
-			Path:       "./logs/dbkrab.log",
-			MaxSizeMB:  100,
-			MaxAgeDays: 7,
-			MaxFiles:   4,
-			Compress:   true,
-		},
-		Console: ConsoleLogConfig{
-			Enabled: true,
-		},
-	}
 }
 
 // Init initializes the global slog logger with console and file handlers using lumberjack.
@@ -89,11 +71,50 @@ func Init(cfg LoggingConfig) error {
 	if len(handlers) == 1 {
 		handler = handlers[0]
 	} else {
-		handler = slog.NewMultiHandler(handlers...)
+		handler = newMultiHandler(handlers...)
 	}
 
 	slog.SetDefault(slog.New(handler))
 	return nil
+}
+
+// multiHandler implements slog.Handler by dispatching to multiple handlers.
+type multiHandler struct {
+	handlers []slog.Handler
+}
+
+// newMultiHandler creates a handler that writes to all provided handlers.
+func newMultiHandler(handlers ...slog.Handler) slog.Handler {
+	return &multiHandler{handlers: handlers}
+}
+
+func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return true
+}
+
+func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {
+	for _, handler := range h.handlers {
+		if err := handler.Handle(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	handlers := make([]slog.Handler, len(h.handlers))
+	for i, handler := range h.handlers {
+		handlers[i] = handler.WithAttrs(attrs)
+	}
+	return &multiHandler{handlers: handlers}
+}
+
+func (h *multiHandler) WithGroup(name string) slog.Handler {
+	handlers := make([]slog.Handler, len(h.handlers))
+	for i, handler := range h.handlers {
+		handlers[i] = handler.WithGroup(name)
+	}
+	return &multiHandler{handlers: handlers}
 }
 
 // parseLevel converts a level string to slog.Level.
@@ -111,4 +132,3 @@ func parseLevel(level string) slog.Level {
 		return slog.LevelInfo
 	}
 }
-
