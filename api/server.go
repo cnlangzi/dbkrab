@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
 	"github.com/yaitoo/xun"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed all:dashboard
@@ -131,6 +133,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/plugins/:name/toggle", s.handlePluginToggle, xun.WithViewer(&xun.JsonViewer{}))
 
 	if s.dlq != nil {
 		api.Get("/dlq/list", s.handleDLQList, xun.WithViewer(&xun.JsonViewer{}))
@@ -176,9 +179,13 @@ func (s *Server) registerPageRoutes() {
 // handlePlugins handles GET /api/plugins
 func (s *Server) handlePlugins(c *xun.Context) error {
 	// Return simple status of plugin types
-	status := map[string]bool{
-		"sql":  s.manager.HasSQLPlugins(),
-		"wasm": s.manager.HasWASMPlugins(),
+	status := map[string]any{
+		"sql": map[string]any{
+			"enabled": s.manager.HasSQLPlugins(),
+		},
+		"wasm": map[string]any{
+			"enabled": s.manager.HasWASMPlugins(),
+		},
 	}
 	return c.View(map[string]any{"success": true, "data": status})
 }
@@ -205,6 +212,70 @@ func (s *Server) handlePluginReload(c *xun.Context) error {
 	name := c.Routing.Options.GetString("name")
 	resp := s.manager.HandleAPI("reload", map[string]any{"name": name})
 	return c.View(resp)
+}
+
+// handlePluginToggle handles POST /api/plugins/:name/toggle
+func (s *Server) handlePluginToggle(c *xun.Context) error {
+	name := c.Routing.Options.GetString("name")
+	if name != "sql" && name != "wasm" {
+		return c.View(map[string]any{"success": false, "error": "invalid plugin name"})
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(c.Request.Body).Decode(&body); err != nil {
+		return c.View(map[string]any{"success": false, "error": "invalid request body"})
+	}
+
+	// Update config file
+	if err := updatePluginConfig(name, body.Enabled); err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "message": fmt.Sprintf("Plugin %s %s", name, map[string]string{"true": "enabled", "false": "disabled"}[strconv.FormatBool(body.Enabled)])})
+}
+
+// updatePluginConfig updates the plugin configuration in the config file
+func updatePluginConfig(pluginName string, enabled bool) error {
+	// Read current config
+	cfgPath := "/opt/dbkrab/config.yaml"
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	// Parse YAML
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+
+	// Update plugins section
+	plugins, ok := cfg["plugins"].(map[string]any)
+	if !ok {
+		plugins = make(map[string]any)
+		cfg["plugins"] = plugins
+	}
+
+	pluginCfg, ok := plugins[pluginName].(map[string]any)
+	if !ok {
+		pluginCfg = make(map[string]any)
+		plugins[pluginName] = pluginCfg
+	}
+	pluginCfg["enabled"] = enabled
+
+	// Write back
+	newData, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(cfgPath, newData, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	return nil
 }
 
 // handleDLQList handles GET /api/dlq/list
@@ -811,10 +882,30 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	// Plugin Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">Plugins</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Active</p><p class="text-2xl font-bold text-primary">%d</p></div>`, m.PluginsActive))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">SQL Plugins</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.PluginsSQL))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">WASM Plugins</p><p class="text-2xl font-bold text-warning">%d</p></div>`, m.PluginsWASM))
+	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">`)
+	
+	// SQL Plugin
+	sqlStatus := "Disabled"
+	sqlDotClass := "bg-surfaceHover"
+	if m.PluginsSQLEnabled {
+		sqlStatus = "Enabled"
+		sqlDotClass = "bg-success"
+	}
+	sb.WriteString(`<div class="flex items-center justify-between p-3 rounded-lg bg-surfaceHover">`)
+	sb.WriteString(`<div><p class="text-textMuted text-xs">SQL Plugin</p><p class="text-sm font-medium text-text">` + sqlStatus + `</p></div>`)
+	sb.WriteString(`<div class="w-2 h-2 rounded-full ` + sqlDotClass + `"></div></div>`)
+	
+	// WASM Plugin
+	wasmStatus := "Disabled"
+	wasmDotClass := "bg-surfaceHover"
+	if m.PluginsWASMEnabled {
+		wasmStatus = "Enabled"
+		wasmDotClass = "bg-success"
+	}
+	sb.WriteString(`<div class="flex items-center justify-between p-3 rounded-lg bg-surfaceHover">`)
+	sb.WriteString(`<div><p class="text-textMuted text-xs">WASM Plugin</p><p class="text-sm font-medium text-text">` + wasmStatus + `</p></div>`)
+	sb.WriteString(`<div class="w-2 h-2 rounded-full ` + wasmDotClass + `"></div></div>`)
+	
 	sb.WriteString(`</div></div>`)
 	
 	sb.WriteString(`</div>`)
@@ -859,9 +950,11 @@ type OverviewMetrics struct {
 	DLQIgnored int
 	
 	// Plugin Status
-	PluginsActive int
-	PluginsSQL int
-	PluginsWASM int
+	PluginsActive     int
+	PluginsSQL        int
+	PluginsWASM       int
+	PluginsSQLEnabled bool
+	PluginsWASMEnabled bool
 	
 	// System Info
 	Uptime string
@@ -1004,6 +1097,8 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	if s.manager != nil {
 		plugins := s.manager.List()
 		metrics.PluginsActive = len(plugins)
+		metrics.PluginsSQLEnabled = s.manager.HasSQLPlugins()
+		metrics.PluginsWASMEnabled = s.manager.HasWASMPlugins()
 		for _, p := range plugins {
 			if p.Type == "sql" {
 				metrics.PluginsSQL++
