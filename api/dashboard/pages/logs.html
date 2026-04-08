@@ -11,7 +11,7 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
             </svg>
-            <span class="hidden sm:inline">Refresh</span>
+            Refresh
         </button>
     </div>
 
@@ -115,7 +115,8 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Operation</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Transaction ID</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Time</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Changed At</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Pulled At</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Data</th>
                     </tr>
                 </thead>
@@ -182,7 +183,7 @@ function loadPollerStatus() {
         .then(data => {
             if (data.success && data.state) {
                 const state = data.state;
-                document.getElementById('last-poll-time').textContent = state.last_poll_time || 'Never';
+                document.getElementById('last-poll-time').textContent = formatLocalTime(state.last_poll_time);
                 document.getElementById('last-lsn').textContent = state.last_lsn || '-';
                 document.getElementById('total-changes').textContent = state.total_changes || 0;
             }
@@ -323,7 +324,8 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${log.created_at || '-'}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -364,8 +366,10 @@ function renderMobileCard(log) {
                     </div>
                     <div class="flex items-center gap-2 text-xs text-textMuted">
                         <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
-                        <span class="text-border">•</span>
-                        <span class="whitespace-nowrap">${log.created_at || '-'}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 mt-2 text-xs">
+                        <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(log.changed_at)}</div>
+                        <div><span class="text-textMuted">Pulled:</span> ${formatLocalTime(log.pulled_at)}</div>
                     </div>
                 </div>
             </div>

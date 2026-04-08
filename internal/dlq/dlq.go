@@ -16,6 +16,8 @@ import (
 const Schema = `
 CREATE TABLE IF NOT EXISTS dlq_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT,
+    source TEXT,
     lsn TEXT NOT NULL,
     table_name TEXT NOT NULL,
     operation TEXT NOT NULL,
@@ -49,11 +51,12 @@ const (
 // DLQEntry represents a dead letter queue entry
 type DLQEntry struct {
 	ID           int64     `json:"id"`
-	TraceID      string    `json:"trace_id"` // Trace ID for log correlation
+	TraceID      string    `json:"trace_id"`      // Trace ID for log correlation
+	Source       string    `json:"source"`        // Error source: handler, store, flush_handler, etc.
 	LSN          string    `json:"lsn"`
 	TableName    string    `json:"table_name"`
 	Operation    string    `json:"operation"`
-	ChangeData   string    `json:"change_data"` // JSON-encoded change data
+	ChangeData   string    `json:"change_data"`   // JSON-encoded change data
 	ErrorMessage string    `json:"error_message"`
 	RetryCount   int       `json:"retry_count"`
 	Status       Status    `json:"status"`
@@ -185,7 +188,7 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 
 	if status != "" {
 		query = `
-			SELECT id, lsn, table_name, operation, change_data, error_message,
+			SELECT id, trace_id, source, lsn, table_name, operation, change_data, error_message,
 				   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 			FROM dlq_entries
 			WHERE status = ?
@@ -194,7 +197,7 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 		args = []interface{}{status}
 	} else {
 		query = `
-			SELECT id, lsn, table_name, operation, change_data, error_message,
+			SELECT id, trace_id, source, lsn, table_name, operation, change_data, error_message,
 				   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 			FROM dlq_entries
 			ORDER BY created_at DESC
@@ -214,11 +217,11 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 	var entries []*DLQEntry
 	for rows.Next() {
 		entry := &DLQEntry{}
-		var resolvedBy, resolvedNote sql.NullString
+		var traceID, source, resolvedBy, resolvedNote sql.NullString
 		var resolvedAt sql.NullTime
 
 		err := rows.Scan(
-			&entry.ID, &entry.LSN, &entry.TableName, &entry.Operation,
+			&entry.ID, &traceID, &source, &entry.LSN, &entry.TableName, &entry.Operation,
 			&entry.ChangeData, &entry.ErrorMessage, &entry.RetryCount,
 			&entry.Status, &entry.CreatedAt, &entry.UpdatedAt,
 			&resolvedBy, &resolvedAt, &resolvedNote,
@@ -227,6 +230,12 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
 
+		if traceID.Valid {
+			entry.TraceID = traceID.String
+		}
+		if source.Valid {
+			entry.Source = source.String
+		}
 		if resolvedBy.Valid {
 			entry.ResolvedBy = resolvedBy.String
 		}

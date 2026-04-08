@@ -330,6 +330,7 @@ func (p *Poller) poll(ctx context.Context) error {
 				LSN:           c.LSN,
 				Operation:     Operation(c.Operation),
 				Data:          c.Data,
+				CommitTime:    c.CommitTime,
 			}
 		}
 
@@ -855,7 +856,8 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	}
 
 	entry := &dlq.DLQEntry{
-		TraceID:     tx.TraceID,
+		TraceID:      tx.TraceID,
+		Source:       source,
 		LSN:          lsn,
 		TableName:    tableName,
 		Operation:    operation,
