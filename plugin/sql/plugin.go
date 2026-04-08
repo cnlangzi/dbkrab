@@ -444,6 +444,7 @@ func calcFileSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	//nolint:errcheck
 	defer file.Close()
 
 	hash := sha256.New()
