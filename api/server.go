@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/cnlangzi/dbkrab/sink/sqlite"
 	"github.com/yaitoo/xun"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed all:dashboard
@@ -133,7 +131,6 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
-	api.Post("/plugins/:name/toggle", s.handlePluginToggle, xun.WithViewer(&xun.JsonViewer{}))
 
 	if s.dlq != nil {
 		api.Get("/dlq/list", s.handleDLQList, xun.WithViewer(&xun.JsonViewer{}))
@@ -212,70 +209,6 @@ func (s *Server) handlePluginReload(c *xun.Context) error {
 	name := c.Routing.Options.GetString("name")
 	resp := s.manager.HandleAPI("reload", map[string]any{"name": name})
 	return c.View(resp)
-}
-
-// handlePluginToggle handles POST /api/plugins/:name/toggle
-func (s *Server) handlePluginToggle(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
-	if name != "sql" && name != "wasm" {
-		return c.View(map[string]any{"success": false, "error": "invalid plugin name"})
-	}
-
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(c.Request.Body).Decode(&body); err != nil {
-		return c.View(map[string]any{"success": false, "error": "invalid request body"})
-	}
-
-	// Update config file
-	if err := updatePluginConfig(name, body.Enabled); err != nil {
-		return c.View(map[string]any{"success": false, "error": err.Error()})
-	}
-
-	return c.View(map[string]any{"success": true, "message": fmt.Sprintf("Plugin %s %s", name, map[string]string{"true": "enabled", "false": "disabled"}[strconv.FormatBool(body.Enabled)])})
-}
-
-// updatePluginConfig updates the plugin configuration in the config file
-func updatePluginConfig(pluginName string, enabled bool) error {
-	// Read current config
-	cfgPath := "/opt/dbkrab/config.yaml"
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-
-	// Parse YAML
-	var cfg map[string]any
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
-	}
-
-	// Update plugins section
-	plugins, ok := cfg["plugins"].(map[string]any)
-	if !ok {
-		plugins = make(map[string]any)
-		cfg["plugins"] = plugins
-	}
-
-	pluginCfg, ok := plugins[pluginName].(map[string]any)
-	if !ok {
-		pluginCfg = make(map[string]any)
-		plugins[pluginName] = pluginCfg
-	}
-	pluginCfg["enabled"] = enabled
-
-	// Write back
-	newData, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(cfgPath, newData, 0644); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-
-	return nil
 }
 
 // handleDLQList handles GET /api/dlq/list
