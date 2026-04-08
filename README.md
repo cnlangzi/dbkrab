@@ -16,7 +16,7 @@ dbkrab is a pure Go implementation of MSSQL CDC (Change Data Capture). It reads 
 - **Transaction Boundary**: Changes within the same transaction are grouped together
 - **Batch + Stream (Initial Load + CDC)**: Full consistency via SNAPSHOT isolation
 - **Multi-table Monitoring**: Concurrent polling with cross-table transaction correlation
-- **Dynamic Plugin System**: Load/unload WASM plugins without restarting
+- **Dynamic Plugin System**: Load/unload WASM and SQL plugins without restarting
 - **Minimal Dependencies**: Pure Go + MSSQL driver only
 
 ## Architecture
@@ -36,7 +36,7 @@ MSSQL CDC Tables
 ┌─────────────────────────────────────────┐
 │     Plugin Manager (Hot-Reload)         │
 │  • Load/unload WASM plugins             │
-│  • Watch directory for new plugins      │
+│  • Load SQL plugins with DB access      │
 │  • REST API for plugin management       │
 └─────────────────────────────────────────┘
     │
@@ -71,7 +71,7 @@ curl -X DELETE http://localhost:9020/api/plugins/my-plugin
 
 ### Auto-Load from Directory
 
-Configure `plugin: ./plugins` in `config.yml`. dbkrab will:
+Configure `plugins:` in `config.yml`. dbkrab will:
 1. Scan the directory on startup and load all `.wasm` files
 2. Watch for new/modified `.wasm` files and auto-load/reload
 
@@ -139,8 +139,14 @@ tables:
 polling_interval: 500ms
 offset_file: ./data/offset.json
 
-# Plugin directory (hot-reload enabled)
-plugin: ./plugins
+# Plugin configuration (hierarchical, both disabled by default)
+plugins:
+  wasm:
+    enabled: true
+    path: ./plugins     # WASM plugins (hot-reload enabled)
+  sql:
+    enabled: true
+    path: ./sql_plugins # SQL plugins (data enrichment engine)
 
 # API server for plugin management
 api_port: 9020
