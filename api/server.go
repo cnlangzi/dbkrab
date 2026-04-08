@@ -50,6 +50,7 @@ type Server struct {
 	configPath  string
 	config      *config.Config
 	configWatcher *config.Watcher
+	sinksRoot   *os.Root // Secure root for sinks directory access
 }
 
 // NewServer creates a new API server
@@ -105,6 +106,16 @@ func (s *Server) Start() error {
 	// Register routes
 	s.registerAPIRoutes()
 	s.registerPageRoutes()
+
+	// Initialize sinks root for secure file access
+	// os.Root provides safe access to files within a directory tree
+	if s.config != nil && s.config.Sinks.BasePath != "" {
+		var err error
+		s.sinksRoot, err = os.OpenRoot(s.config.Sinks.BasePath)
+		if err != nil {
+			slog.Warn("failed to open sinks root, sinks API will be limited", "error", err, "path", s.config.Sinks.BasePath)
+		}
+	}
 
 	// Start xun (this finalizes route registration)
 	s.app.Start()
@@ -1041,19 +1052,15 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 
 // handleSinksList handles GET /api/sinks/list
 func (s *Server) handleSinksList(c *xun.Context) error {
-	// Scan ./data/sinks/ directory for .db files
-	sinksDir := "./data/sinks"
-	
-	// Check if directory exists
-	if _, err := os.Stat(sinksDir); os.IsNotExist(err) {
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
 		return c.View(map[string]any{
-			"success": true,
-			"count":   0,
-			"sinks":   []map[string]any{},
+			"success": false,
+			"error":   "sinks directory not available",
 		})
 	}
 	
-	entries, err := os.ReadDir(sinksDir)
+	entries, err := fs.ReadDir(s.sinksRoot.FS(), ".")
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1065,21 +1072,21 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// Check for .db files inside the directory
-			dbFiles, err := os.ReadDir(filepath.Join(sinksDir, entry.Name()))
+			dbFiles, err := fs.ReadDir(s.sinksRoot.FS(), entry.Name())
 			if err != nil {
 				continue
 			}
 			for _, dbFile := range dbFiles {
 				if strings.HasSuffix(strings.ToLower(dbFile.Name()), ".db") {
-					filePath := filepath.Join(sinksDir, entry.Name(), dbFile.Name())
-					info, err := os.Stat(filePath)
+					filePath := filepath.Join(entry.Name(), dbFile.Name())
+					info, err := s.sinksRoot.Stat(filePath)
 					if err != nil {
 						continue
 					}
 					sinks = append(sinks, map[string]any{
 						"name":      entry.Name(),
 						"file":      dbFile.Name(),
-						"path":      filepath.Join(entry.Name(), dbFile.Name()),
+						"path":      filePath,
 						"size":      info.Size(),
 						"sizeHuman": formatFileSize(info.Size()),
 						"modTime":   info.ModTime().Format(time.RFC3339),
@@ -1088,8 +1095,7 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 			}
 		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".db") {
 			// Direct .db file in sinks directory
-			filePath := filepath.Join(sinksDir, entry.Name())
-			info, err := os.Stat(filePath)
+			info, err := s.sinksRoot.Stat(entry.Name())
 			if err != nil {
 				continue
 			}
@@ -1122,20 +1128,39 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		})
 	}
 	
-	// Get the database path
-	dbPath := filepath.Join("./data/sinks", name, name+".db")
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sinks directory not available",
+		})
+	}
 	
-	// Check if file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		// Try direct path
-		dbPath = filepath.Join("./data/sinks", name+".db")
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	// Validate name to prevent path traversal
+	// os.Root methods automatically reject paths that try to escape the root
+	if !filepath.IsLocal(name) {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid sink name",
+		})
+	}
+	
+	// Try to find the database file using os.Root for secure access
+	// First try: {name}/{name}.db
+	dbRelPath := filepath.Join(name, name+".db")
+	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+		// Second try: {name}.db
+		dbRelPath = name + ".db"
+		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
 			return c.View(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("sink database not found: %s", name),
 			})
 		}
 	}
+	
+	// Build full path for SQLite driver
+	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
 	
 	// Open read-only connection
 	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
@@ -1186,6 +1211,23 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 	
+	// Check if sinks root is available
+	if s.sinksRoot == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sinks directory not available",
+		})
+	}
+	
+	// Validate name to prevent path traversal
+	// os.Root methods automatically reject paths that try to escape the root
+	if !filepath.IsLocal(name) {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid sink name",
+		})
+	}
+	
 	// Parse request body
 	var req struct {
 		Query string `json:"query"`
@@ -1224,20 +1266,22 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 	
-	// Get the database path
-	dbPath := filepath.Join("./data/sinks", name, name+".db")
-	
-	// Check if file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		// Try direct path
-		dbPath = filepath.Join("./data/sinks", name+".db")
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	// Try to find the database file using os.Root for secure access
+	// First try: {name}/{name}.db
+	dbRelPath := filepath.Join(name, name+".db")
+	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
+		// Second try: {name}.db
+		dbRelPath = name + ".db"
+		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
 			return c.View(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("sink database not found: %s", name),
 			})
 		}
 	}
+	
+	// Build full path for SQLite driver
+	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
 	
 	// Open read-only connection
 	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
