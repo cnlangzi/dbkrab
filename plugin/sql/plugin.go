@@ -507,7 +507,7 @@ func (p *Plugin) Handle(tx *core.Transaction) error {
 
 	// If sink is configured, write to it; otherwise just transform
 	if p.sink != nil && len(ops) > 0 {
-		return p.sink.WriteOps(ops)
+		return p.sink.Write(ops)
 	}
 
 	return nil

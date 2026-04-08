@@ -31,8 +31,8 @@ func NewSQLiteSink(skill *Skill, pool *Pool) *SQLiteSink {
 	}
 }
 
-// WriteOps writes transformed DataSets to the sink database
-func (s *SQLiteSink) WriteOps(ops []core.Sink) error {
+// Write writes transformed DataSets to the sink database
+func (s *SQLiteSink) Write(ops []core.Sink) error {
 	if len(ops) == 0 {
 		return nil
 	}
