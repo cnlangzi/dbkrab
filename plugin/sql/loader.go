@@ -75,6 +75,11 @@ func (l *Loader) Load(file string) (*Skill, error) {
 		return nil, err
 	}
 
+	// Validate sinks configuration
+	if err := skill.ValidateSinks(); err != nil {
+		return nil, fmt.Errorf("validate sinks: %w", err)
+	}
+
 	return &skill, nil
 }
 
