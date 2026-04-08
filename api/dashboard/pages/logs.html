@@ -115,7 +115,8 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Operation</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Transaction ID</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Time</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Changed At</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Pulled At</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Data</th>
                     </tr>
                 </thead>
@@ -324,6 +325,7 @@ function renderDesktopRow(log) {
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
             <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -364,8 +366,10 @@ function renderMobileCard(log) {
                     </div>
                     <div class="flex items-center gap-2 text-xs text-textMuted">
                         <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
-                        <span class="text-border">•</span>
-                        <span class="whitespace-nowrap">${formatLocalTime(log.changed_at)}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 mt-2 text-xs">
+                        <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(log.changed_at)}</div>
+                        <div><span class="text-textMuted">Pulled:</span> ${formatLocalTime(log.pulled_at)}</div>
                     </div>
                 </div>
             </div>
