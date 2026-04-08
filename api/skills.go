@@ -39,9 +39,11 @@ type SkillListResponse struct {
 // SkillInfo contains skill metadata
 type SkillInfo struct {
 	Name        string   `json:"name"`
+	Id          string   `json:"id"`            // SHA256(file)[:12]
+	File        string   `json:"file"`          // Relative path from config.plugins.sql.path
 	Description string   `json:"description"`
 	Tables      []string `json:"tables"`
-	Status      string   `json:"status"` // loaded, error, not_loaded
+	Status      string   `json:"status"`        // loaded, error, not_loaded
 	Version     string   `json:"version"`
 	LoadTime    string   `json:"load_time,omitempty"`
 	Files       []string `json:"files"`
@@ -134,15 +136,17 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 			continue
 		}
 
-		// Load skill metadata from file
-		skillPath := filepath.Join("skills", p.Name+".yml")
+		// Use metadata from manager (already loaded from skill file)
 		skillInfo := SkillInfo{
-			Name:   p.Name,
+			Name:   p.Name,   // YAML name field
+			Id:     p.Id,     // SHA256(file)[:12]
+			File:   p.File,   // Relative file path
 			Status: "loaded",
-			Files:  []string{p.Name + ".yml"},
+			Files:  []string{p.File},
 		}
 
-		// Try to read skill file for metadata
+		// Read skill file for additional metadata (description, tables, SQL files)
+		skillPath := filepath.Join("skills", p.File)
 		if data, err := os.ReadFile(skillPath); err == nil {
 			var skill sql.Skill
 			if err := yaml.Unmarshal(data, &skill); err == nil {
@@ -499,13 +503,7 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 		})
 	}
 
-	// Ensure name matches filename
-	if skill.Name != name {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "Skill name in YAML must match filename",
-		})
-	}
+	// Note: YAML name no longer needs to match filename (issue #60)
 
 	// Security: ensure path is within skills directory
 	skillPath := filepath.Join("skills", name+".yml")

@@ -74,6 +74,9 @@ type Skill struct {
 	On          []string    `yaml:"on"`            // Tables to monitor
 	SQLite      string      `yaml:"sqlite"`        // Path to SQLite sink database (resolves to data/sinks/{name}/{name}.db)
 	Sinks       SinksConfig `yaml:"sinks"`
+
+	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
+	Id   string `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
 }
 
 // SinksConfig represents job configuration
