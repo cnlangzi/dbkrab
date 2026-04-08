@@ -74,13 +74,14 @@ For each change:
 
 ### Sinks
 
-Sinks are configured under `sinks` with three operation types:
+Sinks are configured under `sinks` as a flat list. Each sink has a `when` field that specifies which operations it handles:
 
-| Operation | Trigger | Use Case |
-|-----------|---------|----------|
-| `insert` | `__$operation = 2` | New records |
-| `update` | `__$operation = 4` | Updated records |
-| `delete` | `__$operation = 1` | Deleted records |
+| `when` value | Trigger | Use Case |
+|-------------|---------|----------|
+| `[insert, update]` | `__$operation = 2 or 4` | INSERT and UPDATE share the same SQL |
+| `[delete]` | `__$operation = 1` | DELETE operations |
+
+**Key benefit**: INSERT and UPDATE operations now share the same SQL without duplication.
 
 ---
 
@@ -95,26 +96,19 @@ on:
   - table_name
 
 sinks:
-  insert:
-    - name: job_name
-      sql: |
-        SELECT ... FROM source_table WHERE id = @table_id;
-      output: target_table
-      primary_key: id
+  - name: job_name
+    when: [insert, update]        # Required: [insert, update] or [delete]
+    sql: |
+      SELECT ... FROM source_table WHERE id = @table_id;
+    output: target_table
+    primary_key: id
 
-  update:
-    - name: job_name
-      sql: |
-        SELECT ... FROM source_table WHERE id = @table_id;
-      output: target_table
-      primary_key: id
-
-  delete:
-    - name: job_name
-      sql: |
-        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-      output: target_table
-      primary_key: id
+  - name: delete_job
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: target_table
+    primary_key: id
 ```
 
 ### Fields
@@ -125,13 +119,14 @@ sinks:
 | `on` | Yes | Tables to monitor |
 | `sqlite` | No | Separate SQLite database path |
 | `sinks` | Yes | Output configurations |
-| `sinks[insert/update/delete][].name` | Yes | Job identifier |
-| `sinks[insert/update/delete][].on` | No | Table filter (empty = all tables) |
-| `sinks[insert/update/delete][].sql` | Yes* | SQL template (*or sql_file) |
-| `sinks[insert/update/delete][].sql_file` | Yes* | External SQL file (*or sql) |
-| `sinks[insert/update/delete][].output` | Yes | Target table name |
-| `sinks[insert/update/delete][].primary_key` | Yes | Primary key column |
-| `sinks[insert/update/delete][].on_conflict` | No | Conflict strategy: skip/overwrite/error (default: skip) |
+| `sinks[].name` | Yes | Sink identifier |
+| `sinks[].when` | Yes | Operation filter: `[insert, update]` or `[delete]` |
+| `sinks[].on` | No | Table filter (empty = all tables) |
+| `sinks[].sql` | Yes* | SQL template (*or sql_file) |
+| `sinks[].sql_file` | Yes* | External SQL file (*or sql) |
+| `sinks[].output` | Yes | Target table name |
+| `sinks[].primary_key` | Yes | Primary key column |
+| `sinks[].on_conflict` | No | Conflict strategy: skip/overwrite/error (default: skip) |
 
 ---
 
@@ -139,9 +134,9 @@ sinks:
 
 | __$operation | Trigger |
 |-------------|---------|
-| 1 | DELETE - triggers `delete` sinks |
-| 2 | INSERT - triggers `insert` sinks |
-| 4 | UPDATE (after) - triggers `update` sinks |
+| 1 | DELETE - triggers `when: [delete]` sinks |
+| 2 | INSERT - triggers `when: [insert, update]` sinks |
+| 4 | UPDATE (after) - triggers `when: [insert, update]` sinks |
 
 ---
 
@@ -157,38 +152,25 @@ on:
   - orders
 
 sinks:
-  insert:
-    - name: sync
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id,
-          o.amount,
-          o.status
-        FROM orders o
-        WHERE o.order_id = @orders_order_id;
-      output: order_sync
-      primary_key: order_id
+  - name: sync
+    when: [insert, update]
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @orders_order_id as order_id,
+        o.amount,
+        o.status
+      FROM orders o
+      WHERE o.order_id = @orders_order_id;
+    output: order_sync
+    primary_key: order_id
 
-  update:
-    - name: sync
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id,
-          o.amount,
-          o.status
-        FROM orders o
-        WHERE o.order_id = @orders_order_id;
-      output: order_sync
-      primary_key: order_id
-
-  delete:
-    - name: sync
-      sql: |
-        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-      output: order_sync
-      primary_key: order_id
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: order_sync
+    primary_key: order_id
 ```
 
 ### 1:N:1 (Enrichment with JOIN)
@@ -201,38 +183,25 @@ on:
   - orders
 
 sinks:
-  insert:
-    - name: sync
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id,
-          c.name as customer_name,
-          c.email as customer_email
-        FROM customers c
-        WHERE c.customer_id = @orders_customer_id;
-      output: enriched_orders
-      primary_key: order_id
+  - name: sync
+    when: [insert, update]
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @orders_order_id as order_id,
+        c.name as customer_name,
+        c.email as customer_email
+      FROM customers c
+      WHERE c.customer_id = @orders_customer_id;
+    output: enriched_orders
+    primary_key: order_id
 
-  update:
-    - name: sync
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id,
-          c.name as customer_name,
-          c.email as customer_email
-        FROM customers c
-        WHERE c.customer_id = @orders_customer_id;
-      output: enriched_orders
-      primary_key: order_id
-
-  delete:
-    - name: sync
-      sql: |
-        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-      output: enriched_orders
-      primary_key: order_id
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: enriched_orders
+    primary_key: order_id
 ```
 
 ### N:N:N (Multiple Tables, Fan-out)
@@ -246,31 +215,48 @@ on:
   - order_items
 
 sinks:
-  insert:
-    - name: orders_sync
-      on: orders
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id,
-          c.name as customer_name
-        FROM customers c
-        WHERE c.customer_id = @orders_customer_id;
-      output: orders_enriched
-      primary_key: order_id
+  - name: orders_sync
+    when: [insert, update]
+    on: orders
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @orders_order_id as order_id,
+        c.name as customer_name
+      FROM customers c
+      WHERE c.customer_id = @orders_customer_id;
+    output: orders_enriched
+    primary_key: order_id
 
-    - name: order_items_sync
-      on: order_items
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @order_items_id as id,
-          @orders_order_id as order_id,
-          p.product_name
-        FROM products p
-        WHERE p.product_id = @order_items_product_id;
-      output: order_items_enriched
-      primary_key: id
+  - name: orders_delete
+    when: [delete]
+    on: orders
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: orders_enriched
+    primary_key: order_id
+
+  - name: order_items_sync
+    when: [insert, update]
+    on: order_items
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @order_items_id as id,
+        @orders_order_id as order_id,
+        p.product_name
+      FROM products p
+      WHERE p.product_id = @order_items_product_id;
+    output: order_items_enriched
+    primary_key: id
+
+  - name: order_items_delete
+    when: [delete]
+    on: order_items
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @order_items_id as id;
+    output: order_items_enriched
+    primary_key: id
 ```
 
 ---
@@ -280,25 +266,25 @@ sinks:
 ### Direct Mapping
 
 ```yaml
-delete:
-  - name: sync
-    sql: |
-      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-    output: order_sync
-    primary_key: order_id
+- name: sync_delete
+  when: [delete]
+  sql: |
+    SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+  output: order_sync
+  primary_key: order_id
 ```
 
 ### Target Lookup Required
 
 ```yaml
-delete:
-  - name: sync
-    sql: |
-      SELECT @orders_order_id as target_id 
-      FROM order_sync 
-      WHERE source_order_id = @orders_order_id;
-    output: order_sync
-    primary_key: id
+- name: sync_delete
+  when: [delete]
+  sql: |
+    SELECT @orders_order_id as target_id 
+    FROM order_sync 
+    WHERE source_order_id = @orders_order_id;
+  output: order_sync
+  primary_key: id
 ```
 
 ---

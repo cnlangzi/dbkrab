@@ -73,17 +73,16 @@ type Skill struct {
 	Description string      `yaml:"description"`
 	On          []string    `yaml:"on"`            // Tables to monitor
 	SQLite      string      `yaml:"sqlite"`        // Path to SQLite sink database (resolves to data/sinks/{name}/{name}.db)
-	Sinks       SinksConfig `yaml:"sinks"`
+	Sinks       []Sink      `yaml:"sinks"`
 
 	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
 	Id   string `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
 }
 
-// SinksConfig represents job configuration
-type SinksConfig struct {
-	Insert []SinkConfig `yaml:"insert"`  // Insert operations
-	Update []SinkConfig `yaml:"update"`  // Update operations
-	Delete []SinkConfig `yaml:"delete"`  // Delete operations
+// Sink represents a single sink configuration with operation filter
+type Sink struct {
+	SinkConfig `yaml:",inline"` // Embedded SinkConfig for backward compatibility
+	When       []string           `yaml:"when"` // Required: [insert, update] or [delete]
 }
 
 // SinkConfig represents a single job configuration
@@ -131,18 +130,77 @@ func OperationToJobType(op Operation) string {
 	}
 }
 
-// GetSinks returns jobs for the given operation type
-func (s *Skill) GetSinks(opType Operation) []SinkConfig {
+// FilterByOperation returns sinks that handle the given operation type.
+// The 'when' field must contain the operation string ("insert", "update", or "delete").
+func (s *Skill) FilterByOperation(opType Operation) []SinkConfig {
+	var opStr string
 	switch opType {
 	case Insert:
-		return s.Sinks.Insert
+		opStr = "insert"
 	case Update:
-		return s.Sinks.Update
+		opStr = "update"
 	case Delete:
-		return s.Sinks.Delete
+		opStr = "delete"
 	default:
 		return nil
 	}
+
+	var result []SinkConfig
+	for _, sink := range s.Sinks {
+		for _, when := range sink.When {
+			if when == opStr {
+				result = append(result, sink.SinkConfig)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// ValidateSinks validates the sinks configuration and returns an error if invalid.
+// It ensures:
+//   - 'when' field is required for all sinks
+//   - Only [insert, update] or [delete] are valid 'when' values
+//   - No mixing of insert/update with delete in the same sink
+func (s *Skill) ValidateSinks() error {
+	for i, sink := range s.Sinks {
+		if len(sink.When) == 0 {
+			return fmt.Errorf("sink[%d].when is required", i)
+		}
+
+		// Check valid combinations: [insert, update] or [delete]
+		hasInsert := false
+		hasUpdate := false
+		hasDelete := false
+
+		for _, w := range sink.When {
+			switch w {
+			case "insert":
+				hasInsert = true
+			case "update":
+				hasUpdate = true
+			case "delete":
+				hasDelete = true
+			default:
+				return fmt.Errorf("sink[%d].when: invalid value '%s', must be 'insert', 'update', or 'delete'", i, w)
+			}
+		}
+
+		// Validate: either (insert+update) or (delete only), never mixed
+		if hasDelete && (hasInsert || hasUpdate) {
+			return fmt.Errorf("sink[%d].when: cannot mix delete with insert/update", i)
+		}
+		if !hasDelete && (!hasInsert && !hasUpdate) {
+			return fmt.Errorf("sink[%d].when: must be either [insert, update] or [delete]", i)
+		}
+		if hasInsert && !hasUpdate {
+			return fmt.Errorf("sink[%d].when: insert requires update (use [insert, update] for shared SQL)", i)
+		}
+		if hasUpdate && !hasInsert {
+			return fmt.Errorf("sink[%d].when: update requires insert (use [insert, update] for shared SQL)", i)
+		}
+	}
+	return nil
 }
 
 // FilterSinks filters jobs by table name (for multi-table CDC)

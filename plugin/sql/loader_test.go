@@ -16,12 +16,12 @@ on:
   - dbo.orders
   - dbo.customers
 sinks:
-  insert:
-    - name: orders_enriched
-      on: dbo.orders
-      sql: SELECT * FROM orders
-      output: orders_enriched
-      primary_key: order_id
+  - name: orders_enriched
+    when: [insert, update]
+    on: dbo.orders
+    sql: SELECT * FROM orders
+    output: orders_enriched
+    primary_key: order_id
 `
 	writeErr := os.WriteFile(skillFile, []byte(skillContent), 0644)
 	if writeErr != nil {
@@ -46,8 +46,8 @@ func TestLoadAllSkills(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	skills := map[string]string{
-		"skill1": "name: skill1\ndescription: First skill\non:\n  - dbo.table1\nsinks:\n  insert: []",
-		"skill2": "name: skill2\ndescription: Second skill\non:\n  - dbo.table2\nsinks:\n  insert: []",
+		"skill1": "name: skill1\ndescription: First skill\non:\n  - dbo.table1\nsinks:\n  - name: sink1\n    when: [insert, update]\n    sql: SELECT 1",
+		"skill2": "name: skill2\ndescription: Second skill\non:\n  - dbo.table2\nsinks:\n  - name: sink2\n    when: [insert, update]\n    sql: SELECT 1",
 	}
 
 	// Flat structure: pluginsDir/{name}.yml
@@ -79,11 +79,11 @@ description: Test skill with external sql_file
 on:
   - dbo.orders
 sinks:
-  insert:
-    - name: sink1
-      sql_file: fetch.sql
-      output: out
-      primary_key: id
+  - name: sink1
+    when: [insert, update]
+    sql_file: fetch.sql
+    output: out
+    primary_key: id
 `
 	if err := os.WriteFile(skillFile, []byte(skillContent), 0644); err != nil {
 		t.Fatalf("failed to write skill file: %v", err)
@@ -101,11 +101,11 @@ sinks:
 		t.Fatalf("failed to load skill: %v", err)
 	}
 
-	if len(skill.Sinks.Insert) == 0 {
+	if len(skill.Sinks) == 0 {
 		t.Fatal("expected at least one sink")
 	}
-	if skill.Sinks.Insert[0].SQL != sqlContent {
-		t.Errorf("expected SQL to be loaded from external file, got: %s", skill.Sinks.Insert[0].SQL)
+	if skill.Sinks[0].SQL != sqlContent {
+		t.Errorf("expected SQL to be loaded from external file, got: %s", skill.Sinks[0].SQL)
 	}
 }
 
@@ -118,4 +118,3 @@ func TestLoadNonExistentSkill(t *testing.T) {
 		t.Error("expected error for nonexistent skill")
 	}
 }
-
