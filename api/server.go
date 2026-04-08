@@ -132,6 +132,18 @@ func (s *Server) registerAPIRoutes() {
 	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
 
+	// Skills management routes
+	api.Get("/skills/list", s.handleSkillsList, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/files", s.handleSkillsFiles, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/:name", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/:name/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Delete("/skills/:name", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/validate", s.handleSkillValidate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/file/*path", s.handleSkillFileGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/file/:path/save", s.handleSkillFileSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/folder", s.handleFolderCreate, xun.WithViewer(&xun.JsonViewer{}))
+
 	if s.dlq != nil {
 		api.Get("/dlq/list", s.handleDLQList, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/dlq/stats", s.handleDLQStats, xun.WithViewer(&xun.JsonViewer{}))
@@ -171,6 +183,9 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
+	
+	// Register skills page explicitly
+	s.app.Get("/skills", s.handleSkillsPage)
 }
 
 // handlePlugins handles GET /api/plugins

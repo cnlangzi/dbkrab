@@ -1,0 +1,519 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+        <h2 class="text-2xl font-bold text-text">Skills Management</h2>
+        <div class="flex gap-2">
+            <button onclick="showCreateSkillModal()" 
+                    class="px-4 py-2 bg-primary hover:bg-primaryHover text-white rounded-lg transition-colors flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                New Skill
+            </button>
+            <button onclick="showCreateFolderModal()" 
+                    class="px-4 py-2 bg-surfaceHover hover:bg-surface text-text rounded-lg transition-colors flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                New Folder
+            </button>
+        </div>
+    </div>
+
+    <!-- Skills List -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <div class="p-6 border-b border-border">
+            <h3 class="text-lg font-semibold text-text">Loaded Skills</h3>
+            <p class="text-sm text-textMuted mt-1">Manage your SQL skills, edit configurations, and view metadata</p>
+        </div>
+        
+        <div id="skills-list" class="divide-y divide-border">
+            <!-- Skills will be loaded here -->
+        </div>
+    </div>
+
+    <!-- Skill Files Browser -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <div class="p-6 border-b border-border">
+            <h3 class="text-lg font-semibold text-text">Skills Directory</h3>
+            <p class="text-sm text-textMuted mt-1">Browse and manage skill files in the skills/ directory</p>
+        </div>
+        
+        <div id="skills-browser" 
+             hx-get="/api/skills/files"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="p-6 text-center text-textMuted">
+                <svg class="w-8 h-8 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                </svg>
+                <p>Loading skills directory...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Skill Modal -->
+<div id="create-skill-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-surface rounded-xl shadow-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div class="p-6 border-b border-border flex justify-between items-center">
+            <h3 class="text-xl font-bold text-text">Create New Skill</h3>
+            <button onclick="hideCreateSkillModal()" class="text-textMuted hover:text-text">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <form id="create-skill-form" class="p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-textMuted mb-2">Skill Name</label>
+                <input type="text" name="name" required 
+                       pattern="^[a-zA-Z][a-zA-Z0-9_-]*$"
+                       placeholder="e.g., sync_orders"
+                       class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary">
+                <p class="text-xs text-textMuted mt-1">Lowercase letters, numbers, underscores, and hyphens only. Must start with a letter.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-textMuted mb-2">Description (optional)</label>
+                <input type="text" name="description" 
+                       placeholder="Brief description of what this skill does"
+                       class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-textMuted mb-2">Monitored Tables</label>
+                <input type="text" name="tables" required
+                       placeholder="e.g., orders, users, products"
+                       class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary">
+                <p class="text-xs text-textMuted mt-1">Comma-separated list of table names to monitor</p>
+            </div>
+            <div class="flex gap-3 pt-4">
+                <button type="button" onclick="hideCreateSkillModal()" 
+                        class="flex-1 px-4 py-2 bg-surfaceHover hover:bg-surface text-text rounded-lg transition-colors">
+                    Cancel
+                </button>
+                <button type="submit" 
+                        class="flex-1 px-4 py-2 bg-primary hover:bg-primaryHover text-white rounded-lg transition-colors">
+                    Create Skill
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create Folder Modal -->
+<div id="create-folder-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-surface rounded-xl shadow-2xl border border-border max-w-md w-full">
+        <div class="p-6 border-b border-border flex justify-between items-center">
+            <h3 class="text-xl font-bold text-text">Create New Folder</h3>
+            <button onclick="hideCreateFolderModal()" class="text-textMuted hover:text-text">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <form id="create-folder-form" class="p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-textMuted mb-2">Folder Name</label>
+                <input type="text" name="name" required 
+                       pattern="^[a-zA-Z][a-zA-Z0-9_-]*$"
+                       placeholder="e.g., order_processing"
+                       class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary">
+            </div>
+            <div class="flex gap-3 pt-4">
+                <button type="button" onclick="hideCreateFolderModal()" 
+                        class="flex-1 px-4 py-2 bg-surfaceHover hover:bg-surface text-text rounded-lg transition-colors">
+                    Cancel
+                </button>
+                <button type="submit" 
+                        class="flex-1 px-4 py-2 bg-primary hover:bg-primaryHover text-white rounded-lg transition-colors">
+                    Create Folder
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Edit Skill Modal -->
+<div id="edit-skill-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-surface rounded-xl shadow-2xl border border-border max-w-6xl w-full max-h-[95vh] overflow-y-auto">
+        <div class="p-6 border-b border-border flex justify-between items-center sticky top-0 bg-surface z-10">
+            <h3 class="text-xl font-bold text-text">Edit Skill</h3>
+            <div class="flex items-center gap-2">
+                <span id="edit-status" class="text-sm text-textMuted"></span>
+                <button onclick="hideEditSkillModal()" class="text-textMuted hover:text-text">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div id="edit-skill-content" class="space-y-4">
+                <!-- Editor will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CodeMirror CSS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+
+<!-- CodeMirror JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/sql/sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/yaml/yaml.min.js"></script>
+
+<script>
+let skillEditors = {};
+let currentEditingSkill = null;
+
+function showCreateSkillModal() {
+    document.getElementById('create-skill-modal').classList.remove('hidden');
+}
+
+function hideCreateSkillModal() {
+    document.getElementById('create-skill-modal').classList.add('hidden');
+    document.getElementById('create-skill-form').reset();
+}
+
+function showCreateFolderModal() {
+    document.getElementById('create-folder-modal').classList.remove('hidden');
+}
+
+function hideCreateFolderModal() {
+    document.getElementById('create-folder-modal').classList.add('hidden');
+    document.getElementById('create-folder-form').reset();
+}
+
+function hideEditSkillModal() {
+    document.getElementById('edit-skill-modal').classList.add('hidden');
+    // Destroy editors
+    Object.values(skillEditors).forEach(editor => {
+        if (editor && editor.toTextArea) {
+            const wrapper = editor.getWrapperElement();
+            if (wrapper && wrapper.parentNode) {
+                wrapper.parentNode.removeChild(wrapper);
+            }
+        }
+    });
+    skillEditors = {};
+    currentEditingSkill = null;
+}
+
+function showEditStatus(message, isError = false) {
+    const statusEl = document.getElementById('edit-status');
+    statusEl.textContent = message;
+    statusEl.className = 'text-sm ' + (isError ? 'text-error' : 'text-success');
+    setTimeout(() => {
+        statusEl.textContent = '';
+    }, 3000);
+}
+
+// Create skill form submission
+document.getElementById('create-skill-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        description: formData.get('description') || '',
+        tables: formData.get('tables').split(',').map(t => t.trim()).filter(t => t)
+    };
+
+    try {
+        const response = await fetch('/api/skills', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            hideCreateSkillModal();
+            loadSkillsList();
+        } else {
+            alert('Failed to create skill: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error creating skill: ' + err.message);
+    }
+});
+
+// Create folder form submission
+document.getElementById('create-folder-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name')
+    };
+
+    try {
+        const response = await fetch('/api/skills/folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            hideCreateFolderModal();
+            htmx.ajax('GET', '/api/skills/files', { target: '#skills-browser' });
+        } else {
+            alert('Failed to create folder: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error creating folder: ' + err.message);
+    }
+});
+
+// Load skills list
+async function loadSkillsList() {
+    try {
+        const response = await fetch('/api/skills/list');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderSkillsList(data.skills);
+        } else {
+            document.getElementById('skills-list').innerHTML = 
+                '<div class="p-6 text-center text-error">' + (data.error || 'Failed to load skills') + '</div>';
+        }
+    } catch (err) {
+        document.getElementById('skills-list').innerHTML = 
+            '<div class="p-6 text-center text-error">Error loading skills: ' + err.message + '</div>';
+    }
+}
+
+function renderSkillsList(skills) {
+    const container = document.getElementById('skills-list');
+    
+    if (skills.length === 0) {
+        container.innerHTML = `
+            <div class="p-6 text-center text-textMuted">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <p>No skills loaded yet</p>
+                <p class="text-sm mt-2">Create your first skill to get started</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    skills.forEach(skill => {
+        const statusClass = skill.status === 'error' ? 'bg-error/20 text-error' : 'bg-success/20 text-success';
+        const statusText = skill.status === 'error' ? 'Error' : 'Loaded';
+        
+        html += `
+            <div class="p-4 hover:bg-surfaceHover transition-colors">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
+                                ${statusText}
+                            </span>
+                            <h4 class="text-lg font-semibold text-text">${skill.name}</h4>
+                        </div>
+                        ${skill.description ? `<p class="text-sm text-textMuted mb-2">${skill.description}</p>` : ''}
+                        <div class="flex items-center gap-4 text-xs text-textMuted">
+                            <span>Tables: ${skill.tables ? skill.tables.join(', ') : 'None'}</span>
+                            <span>Files: ${skill.files ? skill.files.length : 0}</span>
+                        </div>
+                        ${skill.error ? `<p class="text-xs text-error mt-2">${skill.error}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="editSkill('${skill.name}')" class="px-3 py-1.5 text-sm bg-primary hover:bg-primaryHover text-white rounded-lg transition-colors">
+                            Edit
+                        </button>
+                        <button onclick="reloadSkill('${skill.name}')" class="px-3 py-1.5 text-sm bg-surfaceHover hover:bg-surface text-text rounded-lg transition-colors">
+                            Reload
+                        </button>
+                        <button onclick="deleteSkill('${skill.name}')" class="px-3 py-1.5 text-sm bg-error/20 hover:bg-error/30 text-error rounded-lg transition-colors">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+async function editSkill(name) {
+    currentEditingSkill = name;
+    
+    try {
+        const response = await fetch(`/api/skills/${name}`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('Failed to load skill: ' + data.error);
+            return;
+        }
+        
+        const content = document.getElementById('edit-skill-content');
+        content.innerHTML = `
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label class="block text-sm font-medium text-textMuted">YAML Configuration</label>
+                    <button onclick="validateYAML()" class="px-3 py-1 text-xs bg-surfaceHover hover:bg-surface text-text rounded transition-colors">
+                        Validate YAML
+                    </button>
+                </div>
+                <textarea id="yaml-editor">${escapeHtml(data.content)}</textarea>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="saveSkill()" class="px-4 py-2 bg-primary hover:bg-primaryHover text-white rounded-lg transition-colors">
+                    Save Changes
+                </button>
+                <button onclick="validateSkill()" class="px-4 py-2 bg-surfaceHover hover:bg-surface text-text rounded-lg transition-colors">
+                    Validate
+                </button>
+            </div>
+        `;
+        
+        // Initialize CodeMirror
+        setTimeout(() => {
+            const textarea = document.getElementById('yaml-editor');
+            if (textarea && !skillEditors.yaml) {
+                skillEditors.yaml = CodeMirror.fromTextArea(textarea, {
+                    mode: 'yaml',
+                    theme: 'dracula',
+                    lineNumbers: true,
+                    lineWrapping: true,
+                    tabSize: 2,
+                    indentUnit: 2
+                });
+            }
+        }, 100);
+        
+        document.getElementById('edit-skill-modal').classList.remove('hidden');
+    } catch (err) {
+        alert('Error loading skill: ' + err.message);
+    }
+}
+
+async function saveSkill() {
+    if (!currentEditingSkill || !skillEditors.yaml) {
+        alert('No skill being edited');
+        return;
+    }
+    
+    const content = skillEditors.yaml.getValue();
+    
+    try {
+        const response = await fetch(`/api/skills/${currentEditingSkill}/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: currentEditingSkill,
+                content: content
+            })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            showEditStatus('Skill saved successfully!');
+            loadSkillsList();
+        } else {
+            showEditStatus('Failed to save: ' + result.error, true);
+        }
+    } catch (err) {
+        showEditStatus('Error saving: ' + err.message, true);
+    }
+}
+
+async function validateSkill() {
+    if (!skillEditors.yaml) {
+        return;
+    }
+    
+    const content = skillEditors.yaml.getValue();
+    
+    try {
+        const response = await fetch('/api/skills/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: content,
+                type: 'yaml'
+            })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.valid) {
+                showEditStatus('Validation passed!' + (result.warnings.length > 0 ? ' Warnings: ' + result.warnings.join(', ') : ''));
+            } else {
+                showEditStatus('Validation failed: ' + result.errors.join(', '), true);
+            }
+        } else {
+            showEditStatus('Validation error: ' + result.error, true);
+        }
+    } catch (err) {
+        showEditStatus('Validation error: ' + err.message, true);
+    }
+}
+
+async function validateYAML() {
+    await validateSkill();
+}
+
+async function reloadSkill(name) {
+    if (!confirm('Reload skill ' + name + '? This will reload the plugin from disk.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/plugins/${name}/reload`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Skill reloaded successfully');
+            loadSkillsList();
+        } else {
+            alert('Failed to reload skill: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error reloading skill: ' + err.message);
+    }
+}
+
+async function deleteSkill(name) {
+    if (!confirm('Delete skill ' + name + '? This cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/skills/${name}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Skill deleted successfully');
+            loadSkillsList();
+            htmx.ajax('GET', '/api/skills/files', { target: '#skills-browser' });
+        } else {
+            alert('Failed to delete skill: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error deleting skill: ' + err.message);
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Initial load
+loadSkillsList();
+</script>
+{{ end }}
