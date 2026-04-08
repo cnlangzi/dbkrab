@@ -309,6 +309,11 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	// Trigger plugin reload
 	if s.manager != nil {
 		slog.Info("Skill created, triggering plugin reload", "skill", req.Name)
+		// Reload all plugins to pick up the new skill
+		resp := s.manager.HandleAPI("reload", map[string]any{"name": ""})
+		if !resp.Success {
+			slog.Warn("Plugin reload failed after skill creation", "error", resp.Error)
+		}
 	}
 
 	return c.View(map[string]any{
@@ -397,6 +402,11 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 	// Trigger plugin reload
 	if s.manager != nil {
 		slog.Info("Skill saved, triggering plugin reload", "skill", name)
+		// Reload specific plugin
+		resp := s.manager.HandleAPI("reload", map[string]any{"name": name})
+		if !resp.Success {
+			slog.Warn("Plugin reload failed after skill save", "skill", name, "error", resp.Error)
+		}
 	}
 
 	return c.View(map[string]any{
