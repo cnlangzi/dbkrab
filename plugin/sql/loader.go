@@ -71,26 +71,11 @@ func (l *Loader) Load(file string) (*Skill, error) {
 
 	// Load external SQL files (skillDir is the directory containing the skill.yml)
 	skillDir := filepath.Dir(skillPath)
-	if skillDir == l.pluginsDir {
-		skillDir = l.pluginsDir
-	}
 	if err := l.loadSQLFiles(&skill, skillDir); err != nil {
 		return nil, err
 	}
 
 	return &skill, nil
-}
-
-// validate validates the skill configuration (name and on fields)
-// Note: YAML name no longer needs to match filename (issue #60)
-func (l *Loader) validate(skill *Skill) error {
-	if skill.Name == "" {
-		return NewConfigError("name", "name is required")
-	}
-	if len(skill.On) == 0 {
-		return NewConfigError("on", "at least one table must be specified")
-	}
-	return nil
 }
 
 // loadSQLFiles loads external SQL files referenced in jobs and sinks

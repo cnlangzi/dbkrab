@@ -505,8 +505,14 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 
 	// Note: YAML name no longer needs to match filename (issue #60)
 
+	// Determine file path: use skill.File if set (loaded from subdir), else URL name
+	filePath := name
+	if skill.File != "" {
+		filePath = skill.File
+	}
+
 	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", name+".yml")
+	skillPath := filepath.Join("skills", filePath)
 	cleanPath := filepath.Clean(skillPath)
 	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{

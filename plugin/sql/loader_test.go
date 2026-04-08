@@ -29,7 +29,7 @@ sinks:
 	}
 
 	loader := NewLoader(tmpDir)
-	skill, loadErr := loader.Load("test_load")
+	skill, loadErr := loader.Load("test_load.yml")
 	if loadErr != nil {
 		t.Fatalf("failed to load skill: %v", loadErr)
 	}
@@ -96,7 +96,7 @@ sinks:
 	}
 
 	loader := NewLoader(tmpDir)
-	skill, err := loader.Load("skill_with_file")
+	skill, err := loader.Load("skill_with_file.yml")
 	if err != nil {
 		t.Fatalf("failed to load skill: %v", err)
 	}
