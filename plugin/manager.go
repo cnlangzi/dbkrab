@@ -30,6 +30,16 @@ type Manager struct {
 	mssqlDB    *sql.DB
 }
 
+// PluginLifecycle is the common interface for all plugin types
+// It provides unified initialization and lifecycle management
+type PluginLifecycle interface {
+	Name() string
+	Type() string // "wasm" or "sql"
+	Init(ctx context.Context, db *sql.DB) error
+	Start(ctx context.Context) error
+	Stop() error
+}
+
 // Plugin represents a loaded WASM plugin
 type Plugin struct {
 	Name     string
@@ -45,6 +55,32 @@ func NewManager() *Manager {
 		plugins:    make(map[string]*Plugin),
 		sqlPlugins: make(map[string]*SQLPlugin),
 	}
+}
+
+// Init initializes all plugins based on the provided config.
+// It replaces the separate Watch() and InitSQLPlugins() calls.
+func (m *Manager) Init(ctx context.Context, db *sql.DB, wasmCfg struct {
+	Enabled bool
+	Path    string
+}, sqlCfg struct {
+	Enabled bool
+	Path    string
+}) error {
+	// Initialize SQL plugins if enabled
+	if sqlCfg.Enabled && sqlCfg.Path != "" {
+		if err := m.InitSQLPlugins(db, sqlCfg.Path); err != nil {
+			return fmt.Errorf("init SQL plugins: %w", err)
+		}
+	}
+
+	// Start WASM plugin watching if enabled
+	if wasmCfg.Enabled && wasmCfg.Path != "" {
+		if err := m.Watch(ctx, wasmCfg.Path); err != nil {
+			return fmt.Errorf("watch WASM plugins: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // InitSQLPlugins initializes SQL plugins with database connections

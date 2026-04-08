@@ -31,14 +31,23 @@ type PluginsConfig struct {
 
 // PluginSection contains WASM plugin configuration
 type PluginSection struct {
-	Enabled bool   `yaml:"enabled"`
+	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
 	Path    string `yaml:"path"`
 }
 
 // SQLPluginSection contains SQL plugin configuration
 type SQLPluginSection struct {
-	Enabled bool   `yaml:"enabled"`
+	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
 	Path    string `yaml:"path"`
+}
+
+// IsEnabled returns true only if val is explicitly set to true, "on", or "1"
+// All other values (nil, false, "off", "0", etc.) return false
+func IsEnabled(val *bool) bool {
+	if val == nil {
+		return false
+	}
+	return *val
 }
 
 type MSSQLConfig struct {
@@ -160,25 +169,20 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Plugin defaults (hierarchical)
-	// WASM plugins disabled by default, SQL plugins enabled by default
+	// Both WASM and SQL plugins are DISABLED by default
+	// Only explicitly set true/on/1 enables them
 	if cfg.Plugins.WASM.Path == "" && cfg.Plugin != "" {
 		// Backward compatibility: use old Plugin field for WASM path
 		cfg.Plugins.WASM.Path = cfg.Plugin
-		cfg.Plugins.WASM.Enabled = true
+		// Keep disabled unless already set
 	}
 	if cfg.Plugins.WASM.Path == "" {
 		cfg.Plugins.WASM.Path = "./plugins"
 	}
-	// WASM plugins disabled by default (Enabled=false is the zero value)
 	if cfg.Plugins.SQL.Path == "" {
 		cfg.Plugins.SQL.Path = "./sql_plugins"
 	}
-	// SQL plugins enabled by default (set Enabled=true unless explicitly disabled)
-	if !cfg.Plugins.SQL.Enabled {
-		// Only enable by default if no explicit setting was made
-		// Check if this is the first load (path was just set to default)
-		cfg.Plugins.SQL.Enabled = true
-	}
+	// Both are disabled by default (Enabled=nil means not set)
 
 	// Graceful degradation defaults
 	if cfg.GracefulDegradation.Enabled {
