@@ -14,12 +14,34 @@ type Config struct {
 	Tables             []string               `yaml:"tables"`
 	Interval           string                 `yaml:"polling_interval"`
 	Offset             OffsetConfig           `yaml:"offset"`
-	Plugin             string                 `yaml:"plugin"`
+
 	APIPort            int                    `yaml:"api_port"`
 	Sink               SinkConfig             `yaml:"sink"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
+	Plugins            PluginsConfig          `yaml:"plugins"`
+}
+
+// PluginsConfig contains hierarchical plugin configuration
+type PluginsConfig struct {
+	WASM PluginConfig `yaml:"wasm"`
+	SQL  PluginConfig `yaml:"sql"`
+}
+
+// PluginConfig contains plugin configuration for both WASM and SQL plugins
+type PluginConfig struct {
+	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
+	Path    string `yaml:"path"`
+}
+
+// IsEnabled returns true only if val is explicitly set to true, "on", or "1"
+// All other values (nil, false, "off", "0", etc.) return false
+func IsEnabled(val *bool) bool {
+	if val == nil {
+		return false
+	}
+	return *val
 }
 
 type MSSQLConfig struct {
@@ -138,6 +160,14 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.TransactionBuffer.MaxBatchBytes == 0 {
 		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
+	}
+
+	// Plugin defaults: both disabled by default
+	if cfg.Plugins.WASM.Path == "" {
+		cfg.Plugins.WASM.Path = "./skills/wasm"
+	}
+	if cfg.Plugins.SQL.Path == "" {
+		cfg.Plugins.SQL.Path = "./skills/sql"
 	}
 
 	// Graceful degradation defaults

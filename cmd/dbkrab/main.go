@@ -182,13 +182,21 @@ func main() {
 		}
 	}()
 
-	// Watch plugin directory if configured
-	if cfg.Plugin != "" {
-		go func() {
-			if err := pluginManager.Watch(ctx, cfg.Plugin); err != nil {
-				slog.Warn("plugin watch error", "error", err)
-			}
-		}()
+	// Initialize all plugins via unified Init (WASM + SQL)
+	if err := pluginManager.Init(ctx, db, struct {
+		Enabled bool
+		Path    string
+	}{
+		Enabled: config.IsEnabled(cfg.Plugins.WASM.Enabled),
+		Path:    cfg.Plugins.WASM.Path,
+	}, struct {
+		Enabled bool
+		Path    string
+	}{
+		Enabled: config.IsEnabled(cfg.Plugins.SQL.Enabled),
+		Path:    cfg.Plugins.SQL.Path,
+	}); err != nil {
+		slog.Warn("plugin initialization failed", "error", err)
 	}
 
 	go func() {

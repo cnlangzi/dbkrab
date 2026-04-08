@@ -126,7 +126,7 @@ All writes happen in one transaction
 ## Directory Structure
 
 ```
-sql_plugins/
+skills/sql/
 └── plugin_name/
     └── skill.yml
 ```
@@ -256,7 +256,7 @@ Monitor `orders` table, enrich with full row data, sync to `order_sync` table.
 ### Directory Structure
 
 ```
-sql_plugins/
+skills/sql/
 └── sync_orders/
     └── skill.yml
 ```
@@ -324,7 +324,7 @@ Monitor `orders` table. Use jobs to pre-fetch related data. Join with customers 
 ### Directory Structure
 
 ```
-sql_plugins/
+skills/sql/
 └── enrich_orders/
     └── skill.yml
 ```
