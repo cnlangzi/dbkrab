@@ -127,7 +127,6 @@ func (s *Server) Stop() error {
 // registerAPIRoutes registers API routes with JsonViewer
 func (s *Server) registerAPIRoutes() {
 	api := s.app.Group("/api")
-	api.Get("/plugins", s.handlePlugins, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
@@ -170,13 +169,18 @@ func (s *Server) registerAPIRoutes() {
 
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
-	// Pages are auto-registered by xun from pages/ directory
+	// Register plugins page with SSR data
+	s.app.Get("/plugins", s.handlePluginsPage)
+	// Other pages are auto-registered by xun from pages/ directory
 }
 
-// handlePlugins handles GET /api/plugins
-func (s *Server) handlePlugins(c *xun.Context) error {
-	resp := s.manager.HandleAPI("list", nil)
-	return c.View(resp)
+// handlePluginsPage handles GET /plugins - renders plugins page with SSR
+func (s *Server) handlePluginsPage(c *xun.Context) error {
+	data := map[string]any{
+		"PluginsSQLEnabled":  s.manager.HasSQLPlugins(),
+		"PluginsWASMEnabled": s.manager.HasWASMPlugins(),
+	}
+	return c.View(data)
 }
 
 // handlePluginGet handles GET /api/plugins/:name
@@ -676,158 +680,14 @@ func formatLSN(lsn []byte) string {
 	return sb.String()
 }
 
-// formatBytes formats bytes into human-readable format
-func formatBytes(bytes int64) string {
-	if bytes <= 0 {
-		return "0 B"
-	}
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-// formatDuration formats duration string
-func formatDuration(dur string) string {
-	if dur == "" {
-		return "N/A"
-	}
-	d, err := time.ParseDuration(dur)
-	if err != nil {
-		return dur
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// renderOverviewHTML renders the overview metrics as HTML
-func renderOverviewHTML(m OverviewMetrics) string {
-	var sb strings.Builder
-	
-	// Determine health status classes
-	healthBgClass := "bg-success/20"
-	healthTextClass := "text-success"
-	healthTitle := "System Healthy"
-	if m.HealthStatus == "warning" {
-		healthBgClass = "bg-warning/20"
-		healthTextClass = "text-warning"
-		healthTitle = "System Warning"
-	} else if m.HealthStatus == "error" {
-		healthBgClass = "bg-error/20"
-		healthTextClass = "text-error"
-		healthTitle = "System Error"
-	}
-	
-	// Determine CDC status classes
-	cdcTextClass := "text-success"
-	cdcStatusText := "Active"
-	if m.CDCStatus == "inactive" {
-		cdcTextClass = "text-warning"
-		cdcStatusText = "Inactive"
-	} else if m.CDCStatus == "error" {
-		cdcTextClass = "text-error"
-		cdcStatusText = "Error"
-	}
-	
-	sb.WriteString(`<div class="space-y-6">`)
-	
-	// Health Status Card
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<div class="flex items-center gap-4">`)
-	sb.WriteString(`<div class="flex items-center justify-center w-12 h-12 rounded-full ` + healthBgClass + `">`)
-	if m.HealthStatus == "healthy" {
-		sb.WriteString(`<svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`)
-	} else if m.HealthStatus == "warning" {
-		sb.WriteString(`<svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`)
-	} else {
-		sb.WriteString(`<svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`)
-	}
-	sb.WriteString(`</div><div>`)
-	sb.WriteString(`<h3 class="text-xl font-semibold ` + healthTextClass + `">` + healthTitle + `</h3>`)
-	sb.WriteString(`<p class="text-textMuted">` + m.HealthMessage + `</p>`)
-	sb.WriteString(`</div></div></div>`)
-	
-	// CDC Sync Status Card
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">CDC Sync Status</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">`)
-	sb.WriteString(`<div><p class="text-textMuted text-sm">Status</p><p class="text-lg font-semibold ` + cdcTextClass + `">` + cdcStatusText + `</p></div>`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes)))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime))
-	sb.WriteString(`</div>`)
-	if m.CDCMessage != "" {
-		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)
-	}
-	sb.WriteString(`</div>`)
-	
-	// GAP Monitoring Summary
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">GAP Monitoring</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-success/10 border border-success/20"><p class="text-textMuted text-sm">Healthy Tables</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.GAPHealthyTables))
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-error/10 border border-error/20"><p class="text-textMuted text-sm">Issues</p><p class="text-2xl font-bold text-error">%d</p></div>`, m.GAPIssueTables))
-	sb.WriteString(`<div class="p-4 rounded-lg bg-surfaceHover border border-border">`)
-	sb.WriteString(`<p class="text-textMuted text-sm">Max Lag</p>`)
-	sb.WriteString(`<p class="text-lg font-semibold text-text">` + formatBytes(m.GAPMaxLagBytes) + `</p>`)
-	if m.GAPMaxLagDuration != "" {
-		sb.WriteString(`<p class="text-xs text-textMuted mt-1">` + formatDuration(m.GAPMaxLagDuration) + `</p>`)
-	}
-	sb.WriteString(`</div></div></div>`)
-	
-	// DLQ Stats Cards
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">`)
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-error/20 hover:border-error/40 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Pending</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-error/20 flex items-center justify-center"><svg class="w-4 h-4 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-error">%d</p></div>`, m.DLQPending))
-	
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-success/20 hover:border-success/40 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Resolved</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center"><svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-success">%d</p></div>`, m.DLQResolved))
-	
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Ignored</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-surfaceHover flex items-center justify-center"><svg class="w-4 h-4 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-textMuted">%d</p></div>`, m.DLQIgnored))
-	sb.WriteString(`</div>`)
-	
-	// Plugin Status Card
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">Plugins</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Active</p><p class="text-2xl font-bold text-primary">%d</p></div>`, m.PluginsActive))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">SQL Plugins</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.PluginsSQL))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">WASM Plugins</p><p class="text-2xl font-bold text-warning">%d</p></div>`, m.PluginsWASM))
-	sb.WriteString(`</div></div>`)
-	
-	sb.WriteString(`</div>`)
-	
-	return sb.String()
-}
 
 // handleOverview handles GET /api/overview - returns HTML fragment with dashboard overview
 func (s *Server) handleOverview(c *xun.Context) error {
 	// Collect all metrics
 	metrics := s.collectOverviewMetrics()
 	
-	// Return HTML string directly
-	html := renderOverviewHTML(metrics)
-	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
-	_, err := c.Response.Write([]byte(html))
-	return err
+	// Render using views template
+	return c.View(metrics, "views/overview")
 }
 
 // OverviewMetrics contains all dashboard overview metrics
@@ -855,9 +715,11 @@ type OverviewMetrics struct {
 	DLQIgnored int
 	
 	// Plugin Status
-	PluginsActive int
-	PluginsSQL int
-	PluginsWASM int
+	PluginsActive     int
+	PluginsSQL        int
+	PluginsWASM       int
+	PluginsSQLEnabled bool
+	PluginsWASMEnabled bool
 	
 	// System Info
 	Uptime string
@@ -1000,6 +862,8 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	if s.manager != nil {
 		plugins := s.manager.List()
 		metrics.PluginsActive = len(plugins)
+		metrics.PluginsSQLEnabled = s.manager.HasSQLPlugins()
+		metrics.PluginsWASMEnabled = s.manager.HasWASMPlugins()
 		for _, p := range plugins {
 			if p.Type == "sql" {
 				metrics.PluginsSQL++
