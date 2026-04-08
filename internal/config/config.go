@@ -25,18 +25,12 @@ type Config struct {
 
 // PluginsConfig contains hierarchical plugin configuration
 type PluginsConfig struct {
-	WASM PluginSection    `yaml:"wasm"`
-	SQL  SQLPluginSection `yaml:"sql"`
+	WASM PluginConfig `yaml:"wasm"`
+	SQL  PluginConfig `yaml:"sql"`
 }
 
-// PluginSection contains WASM plugin configuration
-type PluginSection struct {
-	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
-	Path    string `yaml:"path"`
-}
-
-// SQLPluginSection contains SQL plugin configuration
-type SQLPluginSection struct {
+// PluginConfig contains plugin configuration for both WASM and SQL plugins
+type PluginConfig struct {
 	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
 	Path    string `yaml:"path"`
 }
