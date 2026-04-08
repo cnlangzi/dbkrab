@@ -21,6 +21,7 @@ type Manager struct {
 	mssqlDB    *dbsql.DB
 	mu         sync.RWMutex
 	watchCancel context.CancelFunc       // cancel WASM file watching
+	watchDone   chan struct{}             // closed when watchLoop exits
 }
 
 // NewManager creates a new plugin manager
@@ -106,6 +107,7 @@ func (m *Manager) Watch(ctx context.Context, dir string) error {
 	// Start watching for changes in background
 	watchCtx, cancel := context.WithCancel(ctx)
 	m.watchCancel = cancel
+	m.watchDone = make(chan struct{})
 	go m.watchLoop(watchCtx, dir)
 
 	return nil
@@ -113,18 +115,20 @@ func (m *Manager) Watch(ctx context.Context, dir string) error {
 
 // Stop stops all plugins and releases resources
 func (m *Manager) Stop() error {
+	// Cancel WASM file watching and wait for watchLoop to exit
 	if m.watchCancel != nil {
 		m.watchCancel()
+		if m.watchDone != nil {
+			<-m.watchDone
+		}
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for name, p := range m.plugins {
-		if p.Type() == "wasm" {
-			if err := p.Stop(); err != nil {
-				fmt.Printf("Warning: failed to stop plugin %s: %v\n", name, err)
-			}
+		if err := p.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop plugin %s: %v\n", name, err)
 		}
 	}
 	return nil
@@ -231,7 +235,7 @@ func (m *Manager) List() []PluginInfo {
 		list = append(list, PluginInfo{
 			Name:     p.Name(),
 			Path:     m.pluginPath(p),
-			LoadedAt: time.Now(),
+			LoadedAt: m.pluginLoadedAt(p),
 			Type:     p.Type(),
 		})
 	}
@@ -249,6 +253,18 @@ func (m *Manager) pluginPath(p Plugin) string {
 	return ""
 }
 
+// pluginLoadedAt returns the actual load time of a plugin
+func (m *Manager) pluginLoadedAt(p Plugin) time.Time {
+	switch plug := p.(type) {
+	case *wasm.Plugin:
+		return plug.LoadedAt()
+	case *sql.Plugin:
+		// SQL plugins don't track load time yet; return zero time
+		return time.Time{}
+	}
+	return time.Time{}
+}
+
 // PluginInfo contains plugin metadata (used by API)
 type PluginInfo struct {
 	Name     string    `json:"name"`
@@ -259,6 +275,7 @@ type PluginInfo struct {
 
 // watchLoop watches a directory for WASM plugin changes
 func (m *Manager) watchLoop(ctx context.Context, dir string) {
+	defer close(m.watchDone) // signal that watchLoop has exited
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 

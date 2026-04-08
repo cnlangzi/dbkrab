@@ -46,6 +46,9 @@ func (p *Plugin) Name() string { return p.name }
 // Type implements plugin.Plugin
 func (p *Plugin) Type() string { return "wasm" }
 
+// LoadedAt returns when the plugin was loaded
+func (p *Plugin) LoadedAt() time.Time { return p.loadedAt }
+
 // Path returns the plugin file path
 func (p *Plugin) Path() string { return p.path }
 
