@@ -28,14 +28,15 @@ func TestEngine_Handle(t *testing.T) {
 	skill := &Skill{
 		Name: "test_skill",
 		On:   []string{"orders"},
-		Sinks: SinksConfig{
-			Insert: []SinkConfig{
-				{
+		Sinks: []Sink{
+			{
+				SinkConfig: SinkConfig{
 					Name:       "sync_insert",
 					Output:     "order_sync",
 					PrimaryKey: "order_id",
 					OnConflict: "skip",
 				},
+				When: []string{"insert", "update"},
 			},
 		},
 	}

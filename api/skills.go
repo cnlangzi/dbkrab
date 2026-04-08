@@ -138,13 +138,31 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 
 		// Use metadata from manager (already loaded from skill file)
 		skillInfo := SkillInfo{
-			Name:        p.Name,   // YAML name field
-			Id:          p.Id,     // SHA256(file)[:12]
-			File:        p.File,   // Relative file path
-			Status:      "loaded",
-			Files:       []string{p.File},
-			Description: "", // Will be populated from skill if needed
-			Tables:      nil,  // Will be populated from skill if needed
+			Name:   p.Name,   // YAML name field
+			Id:     p.Id,     // SHA256(file)[:12]
+			File:   p.File,   // Relative file path
+			Status: "loaded",
+			Files:  []string{p.File},
+		}
+
+		// Read skill file for additional metadata (description, tables, SQL files)
+		skillPath := filepath.Join("skills", p.File)
+		if data, err := os.ReadFile(skillPath); err == nil {
+			var skill sql.Skill
+			if err := yaml.Unmarshal(data, &skill); err == nil {
+				skillInfo.Description = skill.Description
+				skillInfo.Tables = skill.On
+
+				// Collect SQL files referenced in the skill
+				for _, sink := range skill.Sinks {
+					if sink.SQLFile != "" {
+						skillInfo.Files = append(skillInfo.Files, sink.SQLFile)
+					}
+				}
+			}
+		} else {
+			skillInfo.Status = "error"
+			skillInfo.Error = "Failed to read skill file"
 		}
 
 		skills = append(skills, skillInfo)
@@ -402,7 +420,7 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 		Name:        req.Name,
 		Description: req.Description,
 		On:          req.Tables,
-		Sinks:       sql.SinksConfig{},
+		Sinks:       []sql.Sink{},
 	}
 
 	data, err := yaml.Marshal(skill)
@@ -615,17 +633,21 @@ func (s *Server) handleSkillValidate(c *xun.Context) error {
 			response.Errors = append(response.Errors, "Field 'on' must contain at least one table")
 		}
 
-		// Validate SQL syntax in jobs
-		for _, jobType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-			for _, job := range jobType {
-				if job.SQL != "" {
-					// Basic SQL validation - check for common syntax issues
-					if err := validateSQLBasic(job.SQL); err != nil {
-						response.Errors = append(response.Errors, fmt.Sprintf("Job SQL error: %s", err.Error()))
-						response.Valid = false
-					}
+		// Validate SQL syntax in sinks
+		for _, sink := range skill.Sinks {
+			if sink.SQL != "" {
+				// Basic SQL validation - check for common syntax issues
+				if err := validateSQLBasic(sink.SQL); err != nil {
+					response.Errors = append(response.Errors, fmt.Sprintf("Sink SQL error: %s", err.Error()))
+					response.Valid = false
 				}
 			}
+		}
+
+		// Validate sinks configuration
+		if err := skill.ValidateSinks(); err != nil {
+			response.Valid = false
+			response.Errors = append(response.Errors, fmt.Sprintf("Sinks configuration error: %s", err.Error()))
 		}
 
 		// Add warnings for potential issues
