@@ -30,11 +30,9 @@
 
     <!-- Skills List -->
     <div class="bg-surface rounded-xl border border-border overflow-hidden">
-        <div class="p-4 border-b border-border flex items-center justify-between">
-            <div>
-                <h2 class="text-lg font-semibold text-text">Loaded Skills</h2>
-                <p class="text-xs text-textMuted mt-0.5">Tap to edit</p>
-            </div>
+        <div class="p-4 border-b border-border">
+            <h2 class="text-lg font-semibold text-text">Loaded Skills</h2>
+            <p class="text-xs text-textMuted mt-0.5">Tap to edit</p>
         </div>
         <div id="skills-list" class="divide-y divide-border">
             <div class="p-6 text-center">
@@ -69,13 +67,13 @@
 <!-- Bottom Action Bar -->
 <div class="fixed bottom-0 left-0 right-0 p-4 bg-bg/95 backdrop-blur border-t border-border lg:hidden">
     <div class="flex gap-3">
-        <button onclick="showCreateSkillModal()" 
-                class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2">
+        <a href="/skills/new" 
+           class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
             </svg>
             New Skill
-        </button>
+        </a>
         <button onclick="showCreateFolderModal()" 
                 class="py-3 px-4 bg-surfaceHover hover:bg-surface text-text font-medium rounded-xl transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -94,89 +92,13 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
     </button>
-    <button onclick="showCreateSkillModal()" 
-            class="p-4 bg-primary hover:bg-primaryHover text-white rounded-full shadow-lg transition-colors"
-            title="New Skill">
+    <a href="/skills/new" 
+       class="p-4 bg-primary hover:bg-primaryHover text-white rounded-full shadow-lg transition-colors"
+       title="New Skill">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
         </svg>
-    </button>
-</div>
-
-<!-- Edit Skill Modal (Full Screen on Mobile) -->
-<div id="edit-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end lg:items-center justify-center">
-    <div class="bg-surface w-full max-w-3xl max-h-[95vh] lg:rounded-2xl rounded-t-2xl overflow-hidden flex flex-col">
-        <div class="p-4 border-b border-border flex items-center justify-between flex-shrink-0">
-            <h3 class="text-xl font-bold text-text" id="edit-modal-title">Edit Skill</h3>
-            <button onclick="hideEditModal()" class="p-2 hover:bg-surfaceHover rounded-lg transition-colors">
-                <svg class="w-6 h-6 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
-        </div>
-        <div class="flex-1 overflow-y-auto p-4">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-textMuted mb-2">YAML Content</label>
-                    <textarea id="edit-yaml" rows="15" 
-                              class="w-full px-3 py-2 bg-bg border border-border rounded-lg text-text font-mono text-sm focus:outline-none focus:border-primary"></textarea>
-                </div>
-                <div id="edit-status" class="hidden p-3 rounded-lg text-sm"></div>
-            </div>
-        </div>
-        <div class="p-4 border-t border-border flex gap-3 flex-shrink-0">
-            <button onclick="hideEditModal()" 
-                    class="flex-1 py-3 bg-surfaceHover hover:bg-surface text-text font-medium rounded-xl transition-colors">
-                Cancel
-            </button>
-            <button onclick="saveEdit()" 
-                    class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors">
-                Save Changes
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Create Skill Modal -->
-<div id="create-skill-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end lg:items-center justify-center">
-    <div class="bg-surface w-full max-w-lg max-h-[90vh] lg:rounded-2xl rounded-t-2xl overflow-hidden flex flex-col">
-        <div class="p-4 border-b border-border flex-shrink-0">
-            <h3 class="text-xl font-bold text-text">New Skill</h3>
-        </div>
-        <form id="create-skill-form" class="p-4 space-y-4 overflow-y-auto flex-1">
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Name</label>
-                <input type="text" name="name" required 
-                       pattern="^[a-zA-Z][a-zA-Z0-9_-]*$"
-                       placeholder="e.g., sync_orders"
-                       class="w-full px-4 py-3 bg-bg border border-border rounded-xl text-text focus:outline-none focus:border-primary">
-                <p class="text-xs text-textMuted mt-1">Letters, numbers, underscores, hyphens. Start with letter.</p>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Description</label>
-                <input type="text" name="description" 
-                       placeholder="What does this skill do?"
-                       class="w-full px-4 py-3 bg-bg border border-border rounded-xl text-text focus:outline-none focus:border-primary">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-textMuted mb-2">Tables</label>
-                <input type="text" name="tables" required
-                       placeholder="orders, users"
-                       class="w-full px-4 py-3 bg-bg border border-border rounded-xl text-text focus:outline-none focus:border-primary">
-                <p class="text-xs text-textMuted mt-1">Comma-separated table names</p>
-            </div>
-        </form>
-        <div class="p-4 border-t border-border flex gap-3 flex-shrink-0">
-            <button type="button" onclick="hideCreateSkillModal()" 
-                    class="flex-1 py-3 bg-surfaceHover hover:bg-surface text-text font-medium rounded-xl transition-colors">
-                Cancel
-            </button>
-            <button type="submit" form="create-skill-form"
-                    class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors">
-                Create
-            </button>
-        </div>
-    </div>
+    </a>
 </div>
 
 <!-- Create Folder Modal -->
@@ -227,25 +149,6 @@ async function loadSkillsList() {
     }
 }
 
-// Load skills files
-async function loadSkillsFiles() {
-    try {
-        const response = await fetch('/api/skills/files');
-        const data = await response.json();
-        
-        if (data.success) {
-            renderSkillsFiles(data.files);
-            document.getElementById('files-count').textContent = data.files.length;
-        } else {
-            document.getElementById('skills-browser').innerHTML = 
-                '<div class="p-6 text-center text-error">' + (data.error || 'Failed to load files') + '</div>';
-        }
-    } catch (err) {
-        document.getElementById('skills-browser').innerHTML = 
-            '<div class="p-6 text-center text-error">Error: ' + err.message + '</div>';
-    }
-}
-
 function renderSkillsList(skills) {
     const container = document.getElementById('skills-list');
     
@@ -268,7 +171,7 @@ function renderSkillsList(skills) {
         const statusText = skill.status === 'error' ? 'Error' : 'Active';
         
         html += `
-            <div class="p-4 hover:bg-surfaceHover transition-colors cursor-pointer" onclick="editSkill('${skill.name}')">
+            <a href="/skills/edit/${skill.name}" class="block p-4 hover:bg-surfaceHover transition-colors">
                 <div class="flex items-start justify-between">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-2">
@@ -285,49 +188,7 @@ function renderSkillsList(skills) {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                     </svg>
                 </div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
-}
-
-function renderSkillsFiles(files) {
-    const container = document.getElementById('skills-browser');
-    
-    if (files.length === 0) {
-        container.innerHTML = `
-            <div class="p-8 text-center">
-                <svg class="w-16 h-16 mx-auto mb-4 text-textMuted opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                </svg>
-                <p class="text-textMuted">No files</p>
-            </div>
-        `;
-        return;
-    }
-    
-    let html = '';
-    files.forEach(file => {
-        const icon = file.type === 'dir' ? '📁' : (file.is_sql ? '📜' : (file.is_yaml ? '📝' : '📄'));
-        const typeLabel = file.type === 'dir' ? 'Folder' : 
-            (file.is_sql ? 'SQL' : (file.is_yaml ? 'YAML' : 'File'));
-        const typeClass = file.type === 'dir' ? 'bg-primary/20 text-primary' :
-            (file.is_sql ? 'bg-success/20 text-success' : (file.is_yaml ? 'bg-warning/20 text-warning' : 'bg-surfaceHover text-textMuted'));
-        
-        html += `
-            <div class="p-4 hover:bg-surfaceHover transition-colors">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3 min-w-0 flex-1">
-                        <span class="text-2xl flex-shrink-0">${icon}</span>
-                        <div class="min-w-0 flex-1">
-                            <p class="font-medium text-text truncate">${file.name}</p>
-                            ${file.type === 'file' ? `<p class="text-xs text-textMuted">${file.size} bytes</p>` : ''}
-                        </div>
-                    </div>
-                    <span class="px-2 py-1 rounded text-xs font-medium ${typeClass} flex-shrink-0 ml-2">${typeLabel}</span>
-                </div>
-            </div>
+            </a>
         `;
     });
     
@@ -335,15 +196,6 @@ function renderSkillsFiles(files) {
 }
 
 // Modal functions
-function showCreateSkillModal() {
-    document.getElementById('create-skill-modal').classList.remove('hidden');
-}
-
-function hideCreateSkillModal() {
-    document.getElementById('create-skill-modal').classList.add('hidden');
-    document.getElementById('create-skill-form').reset();
-}
-
 function showCreateFolderModal() {
     document.getElementById('create-folder-modal').classList.remove('hidden');
 }
@@ -353,92 +205,7 @@ function hideCreateFolderModal() {
     document.getElementById('create-folder-form').reset();
 }
 
-function hideEditModal() {
-    document.getElementById('edit-modal').classList.add('hidden');
-}
-
-async function editSkill(name) {
-    try {
-        const response = await fetch(`/api/skills/${name}`);
-        const result = await response.json();
-        
-        if (result.success) {
-            document.getElementById('edit-modal-title').textContent = 'Edit: ' + name;
-            document.getElementById('edit-yaml').value = result.content;
-            document.getElementById('edit-modal').dataset.skillName = name;
-            document.getElementById('edit-modal').classList.remove('hidden');
-        } else {
-            alert('Failed to load skill: ' + result.error);
-        }
-    } catch (err) {
-        alert('Error loading skill: ' + err.message);
-    }
-}
-
-async function saveEdit() {
-    const name = document.getElementById('edit-modal').dataset.skillName;
-    const content = document.getElementById('edit-yaml').value;
-    const statusEl = document.getElementById('edit-status');
-    
-    statusEl.className = 'p-3 rounded-lg text-sm bg-surfaceHover text-textMuted';
-    statusEl.textContent = 'Saving...';
-    statusEl.classList.remove('hidden');
-    
-    try {
-        const response = await fetch(`/api/skills/${name}/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, content })
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.className = 'p-3 rounded-lg text-sm bg-success/20 text-success';
-            statusEl.textContent = 'Saved! Reloading...';
-            setTimeout(() => {
-                hideEditModal();
-                loadSkillsList();
-                loadSkillsFiles();
-            }, 1000);
-        } else {
-            statusEl.className = 'p-3 rounded-lg text-sm bg-error/20 text-error';
-            statusEl.textContent = 'Error: ' + result.error;
-        }
-    } catch (err) {
-        statusEl.className = 'p-3 rounded-lg text-sm bg-error/20 text-error';
-        statusEl.textContent = 'Error: ' + err.message;
-    }
-}
-
 // Form handlers
-document.getElementById('create-skill-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    
-    try {
-        const response = await fetch('/api/skills', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: formData.get('name'),
-                description: formData.get('description') || '',
-                tables: formData.get('tables').split(',').map(t => t.trim()).filter(t => t)
-            })
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            hideCreateSkillModal();
-            loadSkillsList();
-            loadSkillsFiles();
-        } else {
-            alert('Failed to create skill: ' + result.error);
-        }
-    } catch (err) {
-        alert('Error: ' + err.message);
-    }
-});
-
 document.getElementById('create-folder-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -453,7 +220,8 @@ document.getElementById('create-folder-form').addEventListener('submit', async (
         
         if (result.success) {
             hideCreateFolderModal();
-            loadSkillsFiles();
+            // Trigger HTMX reload
+            htmx.ajax('GET', '/api/skills/files/html', { target: '#skills-browser' });
         } else {
             alert('Failed to create folder: ' + result.error);
         }
@@ -464,6 +232,5 @@ document.getElementById('create-folder-form').addEventListener('submit', async (
 
 // Initial load
 loadSkillsList();
-loadSkillsFiles();
 </script>
 {{ end }}

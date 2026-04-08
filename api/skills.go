@@ -92,6 +92,45 @@ func (s *Server) handleSkillsPage(c *xun.Context) error {
 	})
 }
 
+// handleSkillsNewPage handles GET /skills/new
+func (s *Server) handleSkillsNewPage(c *xun.Context) error {
+	return c.View(map[string]any{
+		"title":     "New Skill",
+		"activeTab": "skills",
+		"Data": map[string]any{
+			"title":     "New Skill",
+			"activeTab": "skills",
+		},
+	})
+}
+
+// handleSkillsEditPage handles GET /skills/edit/:name
+func (s *Server) handleSkillsEditPage(c *xun.Context) error {
+	name := c.Routing.Options.GetString("name")
+	if name == "" {
+		return c.View(map[string]any{
+			"title":     "Edit Skill",
+			"activeTab": "skills",
+			"Data": map[string]any{
+				"title":     "Edit Skill",
+				"activeTab": "skills",
+				"Name":      "",
+				"Error":     "Skill name required",
+			},
+		})
+	}
+	
+	return c.View(map[string]any{
+		"title":     "Edit: " + name,
+		"activeTab": "skills",
+		"Data": map[string]any{
+			"title":     "Edit: " + name,
+			"activeTab": "skills",
+			"Name":      name,
+		},
+	})
+}
+
 // handleSkillsList handles GET /api/skills/list
 func (s *Server) handleSkillsList(c *xun.Context) error {
 	if s.manager == nil {
