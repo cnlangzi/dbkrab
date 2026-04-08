@@ -350,6 +350,21 @@ func (p *Plugin) AttachDB(db *sql.DB) {
 // Name implements plugin.Plugin
 func (p *Plugin) Name() string { return p.name }
 
+// YamlName returns the skill's Name field from YAML (may differ from file path)
+func (p *Plugin) YamlName() string {
+	return p.skill.Load().(*Skill).Name
+}
+
+// SkillId returns the skill's unique ID (SHA256 of file path, 12 chars)
+func (p *Plugin) SkillId() string {
+	return p.skill.Load().(*Skill).Id
+}
+
+// SkillFile returns the skill's file path relative to plugins directory
+func (p *Plugin) SkillFile() string {
+	return p.skill.Load().(*Skill).File
+}
+
 // Type implements plugin.Plugin
 func (p *Plugin) Type() string { return "sql" }
 
