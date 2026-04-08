@@ -18,7 +18,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/plugin"
-	"github.com/cnlangzi/dbkrab/sink/sqlite"
+	"github.com/cnlangzi/dbkrab/app/sqlite"
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
@@ -91,10 +91,10 @@ func main() {
 	slog.Info("offset store initialized", "type", cfg.Offset.Type)
 
 	// Create store
-	var store *sqlite.Store
+	var store *app.Store
 	switch cfg.Sink.Type {
 	case "sqlite":
-		store, err = sqlite.NewStore(cfg.Sink.Path)
+		store, err = app.NewStore(cfg.Sink.Path)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)

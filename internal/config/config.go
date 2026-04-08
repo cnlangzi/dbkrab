@@ -17,6 +17,7 @@ type Config struct {
 
 	APIPort            int                    `yaml:"api_port"`
 	Sink               SinkConfig             `yaml:"sink"`
+	Sinks              SinksConfig            `yaml:"sinks"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
@@ -62,6 +63,11 @@ type GracefulDegradationConfig struct {
 type SinkConfig struct {
 	Type string `yaml:"type"`
 	Path string `yaml:"path"`
+}
+
+// SinksConfig contains business sinks configuration
+type SinksConfig struct {
+	BasePath string `yaml:"base_path"` // Base path for business sink databases
 }
 
 // OffsetConfig contains offset storage configuration
@@ -124,7 +130,10 @@ func Load(path string) (*Config, error) {
 		cfg.Sink.Type = "sqlite"
 	}
 	if cfg.Sink.Path == "" {
-		cfg.Sink.Path = "./data/cdc.db"
+		cfg.Sink.Path = "./data/system/dbkrab.db"
+	}
+	if cfg.Sinks.BasePath == "" {
+		cfg.Sinks.BasePath = "./data/sinks"
 	}
 	if cfg.APIPort == 0 {
 		cfg.APIPort = 9020
