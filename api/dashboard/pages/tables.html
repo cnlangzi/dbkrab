@@ -42,7 +42,8 @@
         <div class="p-4 sm:p-6 border-b border-border">
             <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <h3 class="text-base sm:text-xl font-semibold text-text">Available Tables</h3>
-                <button id="refresh-btn" class="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200 min-h-[44px]">
+                <!-- 移除 id，改用 onclick -->
+                <button onclick="loadTables()" class="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-surfaceHover hover:bg-border text-text font-medium rounded-lg transition-all duration-200 min-h-[44px]">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
                     </svg>
@@ -105,7 +106,7 @@ let selectedTables = new Set();
 document.addEventListener('DOMContentLoaded', loadTables);
 
 // Event listeners
-document.getElementById('refresh-btn').addEventListener('click', loadTables);
+// refresh-btn 改用 onclick 绑定，移除 addEventListener
 document.getElementById('select-all-btn').addEventListener('click', selectAll);
 document.getElementById('deselect-all-btn').addEventListener('click', deselectAll);
 document.getElementById('save-btn').addEventListener('click', saveConfiguration);
