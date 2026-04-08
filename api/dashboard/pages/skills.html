@@ -40,10 +40,7 @@
             <p class="text-sm text-textMuted mt-1">Browse and manage skill files in the skills/ directory</p>
         </div>
         
-        <div id="skills-browser" 
-             hx-get="/api/skills/files"
-             hx-trigger="load"
-             hx-swap="innerHTML">
+        <div id="skills-browser" class="divide-y divide-border">
             <div class="p-6 text-center text-textMuted">
                 <svg class="w-8 h-8 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
@@ -285,6 +282,24 @@ async function loadSkillsList() {
     }
 }
 
+// Load skills files
+async function loadSkillsFiles() {
+    try {
+        const response = await fetch('/api/skills/files');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderSkillsFiles(data.files);
+        } else {
+            document.getElementById('skills-browser').innerHTML = 
+                '<div class="p-6 text-center text-error">' + (data.error || 'Failed to load files') + '</div>';
+        }
+    } catch (err) {
+        document.getElementById('skills-browser').innerHTML = 
+            '<div class="p-6 text-center text-error">Error loading files: ' + err.message + '</div>';
+    }
+}
+
 function renderSkillsList(skills) {
     const container = document.getElementById('skills-list');
     
@@ -334,6 +349,55 @@ function renderSkillsList(skills) {
                             Delete
                         </button>
                     </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function renderSkillsFiles(files) {
+    const container = document.getElementById('skills-browser');
+    
+    if (files.length === 0) {
+        container.innerHTML = `
+            <div class="p-6 text-center text-textMuted">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <p>No files in skills directory</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    files.forEach(file => {
+        const icon = file.type === 'dir' ? 
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>' :
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>';
+        
+        const typeLabel = file.type === 'dir' ? 'Folder' : 
+            (file.is_sql ? 'SQL' : (file.is_yaml ? 'YAML' : 'File'));
+        const typeClass = file.type === 'dir' ? 'bg-primary/20 text-primary' :
+            (file.is_sql ? 'bg-success/20 text-success' : (file.is_yaml ? 'bg-warning/20 text-warning' : 'bg-surfaceHover text-textMuted'));
+        
+        html += `
+            <div class="p-4 hover:bg-surfaceHover transition-colors">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            ${icon}
+                        </svg>
+                        <div>
+                            <p class="font-medium text-text">${file.name}</p>
+                            ${file.type === 'file' ? `<p class="text-xs text-textMuted">${file.size} bytes</p>` : ''}
+                        </div>
+                    </div>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${typeClass}">
+                        ${typeLabel}
+                    </span>
                 </div>
             </div>
         `;
@@ -515,5 +579,6 @@ function escapeHtml(text) {
 
 // Initial load
 loadSkillsList();
+loadSkillsFiles();
 </script>
 {{ end }}
