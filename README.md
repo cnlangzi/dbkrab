@@ -16,8 +16,11 @@ dbkrab is a pure Go implementation of MSSQL CDC (Change Data Capture). It reads 
 - **Transaction Boundary**: Changes within the same transaction are grouped together
 - **Batch + Stream (Initial Load + CDC)**: Full consistency via SNAPSHOT isolation
 - **Multi-table Monitoring**: Concurrent polling with cross-table transaction correlation
-- **Dynamic Plugin System**: Load/unload WASM and SQL plugins without restarting
+- **Dynamic Plugin System**: Load/unload SQL plugins without restarting
 - **Minimal Dependencies**: Pure Go + MSSQL driver only
+- **Graceful Degradation**: Auto-retry on MSSQL disconnection
+- **CDC Gap Protection**: Detect and alert on CDC cleanup data loss
+- **DLQ Support**: Handle failed transactions with dead letter queue
 
 ## Architecture
 
@@ -35,9 +38,18 @@ MSSQL CDC Tables
     ▼
 ┌─────────────────────────────────────────┐
 │     Plugin Manager (Hot-Reload)         │
-│  • Load/unload WASM plugins             │
-│  • Load SQL plugins with DB access      │
+│  • Load/unload SQL plugins              │
 │  • REST API for plugin management       │
+│  • Watch skill directory                │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│      Dashboard (Go + HTMX)              │
+│  • Skills management                    │
+│  • DLQ management                       │
+│  • CDC status monitoring               │
+│  • Gap detection                        │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -47,68 +59,7 @@ MSSQL CDC Tables
 └─────────────────────────────────────────┘
 ```
 
-## Dynamic Plugin System
-
-Plugins can be **loaded, unloaded, and reloaded at runtime** without restarting dbkrab.
-
-### Plugin Management API
-
-```bash
-# List loaded plugins
-curl http://localhost:9020/api/plugins
-
-# Load a new plugin
-curl -X POST http://localhost:9020/api/plugins \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-plugin", "path": "./plugins/my-handler.wasm", "config": ""}'
-
-# Reload a plugin (hot-reload)
-curl -X POST http://localhost:9020/api/plugins/my-plugin/reload
-
-# Unload a plugin
-curl -X DELETE http://localhost:9020/api/plugins/my-plugin
-```
-
-### Auto-Load from Directory
-
-Configure `plugins:` in `config.yml`. dbkrab will:
-1. Scan the directory on startup and load all `.wasm` files
-2. Watch for new/modified `.wasm` files and auto-load/reload
-
-### Writing a Plugin
-
-```go
-// plugins/my_handler/main.go
-package main
-
-import (
-    "github.com/cnlangzi/dbkrab/plugin"
-)
-
-//export Init
-func Init(config string) int {
-    return 0
-}
-
-//export Handle
-func Handle(ptr *byte, len int) int {
-    // Handle transaction data
-    return 0
-}
-
-//export Close
-func Close() int {
-    return 0
-}
-
-func main() {}
-```
-
-Build: `tinygo build -target wasi -o my_handler.wasm my_handler.go`
-
-## Usage
-
-### Quick Start
+## Quick Start
 
 ```bash
 # Copy example config
@@ -117,14 +68,16 @@ cp config.example.yml config.yml
 # Edit config with your MSSQL credentials
 vim config.yml
 
+# Build
+make build
+
 # Run
-go run ./cmd/dbkrab
+./bin/dbkrab -config config.yml
 ```
 
-### Configuration
+## Configuration
 
 ```yaml
-# config.yml
 mssql:
   host: localhost
   port: 1433
@@ -137,24 +90,28 @@ tables:
   - dbo.order_items
 
 polling_interval: 500ms
-offset_file: ./data/offset.json
 
-# Plugin configuration (hierarchical, both disabled by default)
 plugins:
-  wasm:
-    enabled: true
-    path: ./skills/wasm
   sql:
     enabled: true
-    path: ./skills/sql
+    path: ./skills
 
-# API server for plugin management
-api_port: 9020
+api_port: 3000
 
 sink:
   type: sqlite
-  path: ./data/cdc.db
+  path: ./data/system/dbkrab.db
 ```
+
+## Dashboard
+
+Dashboard runs on port 3000 (configurable via `api_port`):
+
+- `/` - Overview and system status
+- `/skills` - Skills management
+- `/dlq` - Dead letter queue
+- `/tables` - CDC tables status
+- `/gap` - Gap monitoring
 
 ## MSSQL CDC Setup
 
@@ -182,7 +139,3 @@ EXEC sp_cdc_enable_table
 ## License
 
 Apache License 2.0 - see [LICENSE](LICENSE)
-
----
-
-**dbkrab** — Lightweight MSSQL CDC in Go 🦀

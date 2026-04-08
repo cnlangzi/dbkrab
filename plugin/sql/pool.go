@@ -3,6 +3,7 @@ package sql
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -73,7 +74,9 @@ func NewPool(name, sqlitePath string) (*Pool, error) {
 	readDSN := buildDSN(dbPath, false)
 	readDB, err := sql.Open("sqlite", readDSN)
 	if err != nil {
-		_ = writeDB.Close() //nolint:errcheck
+		if closeErr := writeDB.Close(); closeErr != nil {
+			slog.Warn("failed to close writeDB", "error", closeErr)
+		}
 		return nil, fmt.Errorf("open read database: %w", err)
 	}
 	// Read pool can have multiple connections for concurrent reads
