@@ -724,127 +724,164 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	var sb strings.Builder
 	
 	// Determine health status classes
-	healthBgClass := "bg-success/20"
-	healthTextClass := "text-success"
+	healthIcon := `<svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`
 	healthTitle := "System Healthy"
+	healthClass := "text-success"
 	if m.HealthStatus == "warning" {
-		healthBgClass = "bg-warning/20"
-		healthTextClass = "text-warning"
+		healthIcon = `<svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`
 		healthTitle = "System Warning"
+		healthClass = "text-warning"
 	} else if m.HealthStatus == "error" {
-		healthBgClass = "bg-error/20"
-		healthTextClass = "text-error"
+		healthIcon = `<svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
 		healthTitle = "System Error"
+		healthClass = "text-error"
 	}
 	
-	// Determine CDC status classes
-	cdcTextClass := "text-success"
-	cdcStatusText := "Active"
+	// Determine CDC status
+	cdcStatus := "Active"
+	cdcClass := "text-success"
 	if m.CDCStatus == "inactive" {
-		cdcTextClass = "text-warning"
-		cdcStatusText = "Inactive"
+		cdcStatus = "Inactive"
+		cdcClass = "text-warning"
 	} else if m.CDCStatus == "error" {
-		cdcTextClass = "text-error"
-		cdcStatusText = "Error"
+		cdcStatus = "Error"
+		cdcClass = "text-error"
 	}
 	
-	sb.WriteString(`<div class="space-y-6">`)
+	sb.WriteString(`<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">`)
 	
 	// Health Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<div class="flex items-center gap-4">`)
-	sb.WriteString(`<div class="flex items-center justify-center w-12 h-12 rounded-full ` + healthBgClass + `">`)
-	if m.HealthStatus == "healthy" {
-		sb.WriteString(`<svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`)
-	} else if m.HealthStatus == "warning" {
-		sb.WriteString(`<svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`)
-	} else {
-		sb.WriteString(`<svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`)
-	}
-	sb.WriteString(`</div><div>`)
-	sb.WriteString(`<h3 class="text-xl font-semibold ` + healthTextClass + `">` + healthTitle + `</h3>`)
-	sb.WriteString(`<p class="text-textMuted">` + m.HealthMessage + `</p>`)
-	sb.WriteString(`</div></div></div>`)
+	sb.WriteString(`<div class="flex items-start justify-between mb-4">`)
+	sb.WriteString(`<div>`)
+	sb.WriteString(`<p class="text-textMuted text-sm font-medium mb-1">System Health</p>`)
+	sb.WriteString(`<h3 class="text-xl font-semibold ` + healthClass + `">` + healthTitle + `</h3>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="w-12 h-12 rounded-lg bg-surfaceHover flex items-center justify-center">` + healthIcon + `</div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<p class="text-sm text-textMuted">` + m.HealthMessage + `</p>`)
+	sb.WriteString(`</div>`)
 	
 	// CDC Sync Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">CDC Sync Status</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">`)
-	sb.WriteString(`<div><p class="text-textMuted text-sm">Status</p><p class="text-lg font-semibold ` + cdcTextClass + `">` + cdcStatusText + `</p></div>`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes)))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime))
+	sb.WriteString(`<div class="flex items-start justify-between mb-4">`)
+	sb.WriteString(`<div>`)
+	sb.WriteString(`<p class="text-textMuted text-sm font-medium mb-1">CDC Sync</p>`)
+	sb.WriteString(`<h3 class="text-xl font-semibold ` + cdcClass + `">` + cdcStatus + `</h3>`)
 	sb.WriteString(`</div>`)
-	if m.CDCMessage != "" {
-		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)
-	}
+	sb.WriteString(`<div class="w-12 h-12 rounded-lg bg-surfaceHover flex items-center justify-center">`)
+	sb.WriteString(`<svg class="w-6 h-6 text-text" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343-.029.68.083 1.01"/></svg>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="grid grid-cols-2 gap-4">`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Tables</p><p class="text-lg font-semibold text-text">` + fmt.Sprintf("%d", m.TablesTracked) + `</p></div>`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Lag</p><p class="text-lg font-semibold text-text">` + formatBytes(m.CDCLagBytes) + `</p></div>`)
+	sb.WriteString(`</div>`)
 	sb.WriteString(`</div>`)
 	
-	// GAP Monitoring Summary
+	// GAP Monitoring Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">GAP Monitoring</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-success/10 border border-success/20"><p class="text-textMuted text-sm">Healthy Tables</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.GAPHealthyTables))
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-error/10 border border-error/20"><p class="text-textMuted text-sm">Issues</p><p class="text-2xl font-bold text-error">%d</p></div>`, m.GAPIssueTables))
-	sb.WriteString(`<div class="p-4 rounded-lg bg-surfaceHover border border-border">`)
-	sb.WriteString(`<p class="text-textMuted text-sm">Max Lag</p>`)
-	sb.WriteString(`<p class="text-lg font-semibold text-text">` + formatBytes(m.GAPMaxLagBytes) + `</p>`)
-	if m.GAPMaxLagDuration != "" {
-		sb.WriteString(`<p class="text-xs text-textMuted mt-1">` + formatDuration(m.GAPMaxLagDuration) + `</p>`)
+	sb.WriteString(`<div class="flex items-start justify-between mb-4">`)
+	sb.WriteString(`<div>`)
+	sb.WriteString(`<p class="text-textMuted text-sm font-medium mb-1">GAP Monitoring</p>`)
+	gapClass := "text-success"
+	gapTitle := "Healthy"
+	if m.GAPIssueTables > 0 {
+		gapClass = "text-error"
+		gapTitle = "Issues Detected"
 	}
-	sb.WriteString(`</div></div></div>`)
-	
-	// DLQ Stats Cards
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">`)
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-error/20 hover:border-error/40 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Pending</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-error/20 flex items-center justify-center"><svg class="w-4 h-4 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-error">%d</p></div>`, m.DLQPending))
-	
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-success/20 hover:border-success/40 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Resolved</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center"><svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-success">%d</p></div>`, m.DLQResolved))
-	
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
-	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Ignored</p>`)
-	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-surfaceHover flex items-center justify-center"><svg class="w-4 h-4 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-textMuted">%d</p></div>`, m.DLQIgnored))
+	sb.WriteString(`<h3 class="text-xl font-semibold ` + gapClass + `">` + gapTitle + `</h3>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="w-12 h-12 rounded-lg bg-surfaceHover flex items-center justify-center">`)
+	sb.WriteString(`<svg class="w-6 h-6 text-text" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="grid grid-cols-2 gap-4">`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Healthy</p><p class="text-lg font-semibold text-success">` + fmt.Sprintf("%d", m.GAPHealthyTables) + `</p></div>`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Issues</p><p class="text-lg font-semibold ` + gapClass + `">` + fmt.Sprintf("%d", m.GAPIssueTables) + `</p></div>`)
+	sb.WriteString(`</div>`)
 	sb.WriteString(`</div>`)
 	
-	// Plugin Status Card
+	// DLQ Stats Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
-	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">Plugins</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">`)
+	sb.WriteString(`<div class="flex items-start justify-between mb-4">`)
+	sb.WriteString(`<div>`)
+	sb.WriteString(`<p class="text-textMuted text-sm font-medium mb-1">Dead Letter Queue</p>`)
+	dlqClass := "text-success"
+	dlqTitle := "All Clear"
+	if m.DLQPending > 0 {
+		dlqClass = "text-warning"
+		dlqTitle = "Pending Items"
+	}
+	sb.WriteString(`<h3 class="text-xl font-semibold ` + dlqClass + `">` + dlqTitle + `</h3>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="w-12 h-12 rounded-lg bg-surfaceHover flex items-center justify-center">`)
+	sb.WriteString(`<svg class="w-6 h-6 text-text" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="grid grid-cols-3 gap-4">`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Pending</p><p class="text-lg font-semibold text-warning">` + fmt.Sprintf("%d", m.DLQPending) + `</p></div>`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Resolved</p><p class="text-lg font-semibold text-success">` + fmt.Sprintf("%d", m.DLQResolved) + `</p></div>`)
+	sb.WriteString(`<div><p class="text-xs text-textMuted">Ignored</p><p class="text-lg font-semibold text-textMuted">` + fmt.Sprintf("%d", m.DLQIgnored) + `</p></div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
 	
-	// SQL Plugin
-	sqlStatus := "Disabled"
-	sqlDotClass := "bg-surfaceHover"
-	if m.PluginsSQLEnabled {
-		sqlStatus = "Enabled"
-		sqlDotClass = "bg-success"
+	// Plugins Card
+	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
+	sb.WriteString(`<div class="flex items-start justify-between mb-4">`)
+	sb.WriteString(`<div>`)
+	sb.WriteString(`<p class="text-textMuted text-sm font-medium mb-1">Plugins</p>`)
+	pluginCount := 0
+	if m.PluginsSQLEnabled { pluginCount++ }
+	if m.PluginsWASMEnabled { pluginCount++ }
+	pluginClass := "text-success"
+	pluginTitle := "Active"
+	if pluginCount == 0 {
+		pluginClass = "text-textMuted"
+		pluginTitle = "None Active"
+	}
+	sb.WriteString(`<h3 class="text-xl font-semibold ` + pluginClass + `">` + pluginTitle + `</h3>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="w-12 h-12 rounded-lg bg-surfaceHover flex items-center justify-center">`)
+	sb.WriteString(`<svg class="w-6 h-6 text-text" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`<div class="space-y-3">`)
+	
+	sqlClass := "text-success"
+	sqlStatus := "Enabled"
+	if !m.PluginsSQLEnabled {
+		sqlClass = "text-textMuted"
+		sqlStatus = "Disabled"
 	}
 	sb.WriteString(`<div class="flex items-center justify-between p-3 rounded-lg bg-surfaceHover">`)
-	sb.WriteString(`<div><p class="text-textMuted text-xs">SQL Plugin</p><p class="text-sm font-medium text-text">` + sqlStatus + `</p></div>`)
-	sb.WriteString(`<div class="w-2 h-2 rounded-full ` + sqlDotClass + `"></div></div>`)
+	sb.WriteString(`<div class="flex items-center gap-3">`)
+	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center"><svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg></div>`)
+	sb.WriteString(`<div><p class="text-sm font-medium text-text">SQL Plugin</p><p class="text-xs ` + sqlClass + `">` + sqlStatus + `</p></div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
 	
-	// WASM Plugin
-	wasmStatus := "Disabled"
-	wasmDotClass := "bg-surfaceHover"
-	if m.PluginsWASMEnabled {
-		wasmStatus = "Enabled"
-		wasmDotClass = "bg-success"
+	wasmClass := "text-success"
+	wasmStatus := "Enabled"
+	if !m.PluginsWASMEnabled {
+		wasmClass = "text-textMuted"
+		wasmStatus = "Disabled"
 	}
 	sb.WriteString(`<div class="flex items-center justify-between p-3 rounded-lg bg-surfaceHover">`)
-	sb.WriteString(`<div><p class="text-textMuted text-xs">WASM Plugin</p><p class="text-sm font-medium text-text">` + wasmStatus + `</p></div>`)
-	sb.WriteString(`<div class="w-2 h-2 rounded-full ` + wasmDotClass + `"></div></div>`)
+	sb.WriteString(`<div class="flex items-center gap-3">`)
+	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center"><svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg></div>`)
+	sb.WriteString(`<div><p class="text-sm font-medium text-text">WASM Plugin</p><p class="text-xs ` + wasmClass + `">` + wasmStatus + `</p></div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
 	
-	sb.WriteString(`</div></div>`)
+	sb.WriteString(`</div>`)
+	sb.WriteString(`</div>`)
 	
 	sb.WriteString(`</div>`)
 	
 	return sb.String()
 }
+
 
 // handleOverview handles GET /api/overview - returns HTML fragment with dashboard overview
 func (s *Server) handleOverview(c *xun.Context) error {
