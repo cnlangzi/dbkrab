@@ -89,19 +89,6 @@ func TestMergeSinks(t *testing.T) {
 			expect: []core.Sink{
 				{
 					Config: core.SinkConfig{
-						Name:       "sink1",
-						Output:     "users",
-						PrimaryKey: "id",
-						OnConflict: "overwrite",
-					},
-					DataSet: &core.DataSet{
-						Columns: []string{"id", "name"},
-						Rows:    [][]any{{1, "Alice"}},
-					},
-					OpType: core.OpInsert,
-				},
-				{
-					Config: core.SinkConfig{
 						Name:       "sink2",
 						Output:     "orders",
 						PrimaryKey: "id",
@@ -110,6 +97,19 @@ func TestMergeSinks(t *testing.T) {
 					DataSet: &core.DataSet{
 						Columns: []string{"id", "amount"},
 						Rows:    [][]any{{1, 100.0}},
+					},
+					OpType: core.OpInsert,
+				},
+				{
+					Config: core.SinkConfig{
+						Name:       "sink1",
+						Output:     "users",
+						PrimaryKey: "id",
+						OnConflict: "overwrite",
+					},
+					DataSet: &core.DataSet{
+						Columns: []string{"id", "name"},
+						Rows:    [][]any{{1, "Alice"}},
 					},
 					OpType: core.OpInsert,
 				},
@@ -194,19 +194,6 @@ func TestMergeSinks(t *testing.T) {
 			expect: []core.Sink{
 				{
 					Config: core.SinkConfig{
-						Name:       "sink1",
-						Output:     "users",
-						PrimaryKey: "id",
-						OnConflict: "overwrite",
-					},
-					DataSet: &core.DataSet{
-						Columns: []string{"id", "name"},
-						Rows:    [][]any{{1, "Alice"}},
-					},
-					OpType: core.OpInsert,
-				},
-				{
-					Config: core.SinkConfig{
 						Name:       "sink2",
 						Output:     "users",
 						PrimaryKey: "external_id",
@@ -218,11 +205,6 @@ func TestMergeSinks(t *testing.T) {
 					},
 					OpType: core.OpInsert,
 				},
-			},
-		},
-		{
-			name: "two sinks with same table, same pk, different ops - no merge",
-			sinks: []core.Sink{
 				{
 					Config: core.SinkConfig{
 						Name:       "sink1",
@@ -236,6 +218,11 @@ func TestMergeSinks(t *testing.T) {
 					},
 					OpType: core.OpInsert,
 				},
+			},
+		},
+		{
+			name: "two sinks with same table, same pk, different ops - no merge",
+			sinks: []core.Sink{
 				{
 					Config: core.SinkConfig{
 						Name:       "sink2",
@@ -248,6 +235,19 @@ func TestMergeSinks(t *testing.T) {
 						Rows:    [][]any{{1, "123-456-7890"}},
 					},
 					OpType: core.OpUpdateAfter,
+				},
+				{
+					Config: core.SinkConfig{
+						Name:       "sink1",
+						Output:     "users",
+						PrimaryKey: "id",
+						OnConflict: "overwrite",
+					},
+					DataSet: &core.DataSet{
+						Columns: []string{"id", "name"},
+						Rows:    [][]any{{1, "Alice"}},
+					},
+					OpType: core.OpInsert,
 				},
 			},
 			expect: []core.Sink{
