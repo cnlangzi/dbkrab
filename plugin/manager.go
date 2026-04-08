@@ -32,8 +32,6 @@ func NewManager() *Manager {
 }
 
 // Init initializes all plugins based on the provided config.
-// It replaces the separate Watch() and InitSQLPlugins() calls.
-// Caller typically holds the lock for the initialization phase.
 func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 	Enabled bool
 	Path    string
@@ -44,15 +42,20 @@ func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Initialize SQL plugins if enabled
+	// Load SQL plugins if enabled
 	if sqlCfg.Enabled && sqlCfg.Path != "" {
-		if err := m.initSQLPlugins(db, sqlCfg.Path); err != nil {
-			return fmt.Errorf("init SQL plugins: %w", err)
+		loader := sql.NewLoader(sqlCfg.Path)
+		skills, err := loader.LoadAll()
+		if err != nil {
+			return fmt.Errorf("load SQL plugins: %w", err)
 		}
+		for name, skill := range skills {
+			m.plugins[name] = sql.NewPlugin(name, skill, loader, db)
+		}
+		m.sqlLoader = loader
 	}
 
-	// Watch needs to be called without lock held (spawns goroutine)
-	// So we unlock temporarily for Watch
+	// Watch for WASM plugins if enabled
 	if wasmCfg.Enabled && wasmCfg.Path != "" {
 		m.mu.Unlock()
 		if err := m.Watch(ctx, wasmCfg.Path); err != nil {
@@ -65,29 +68,7 @@ func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 	return nil
 }
 
-// initSQLPlugins loads all SQL plugins from the given directory.
-// Caller must hold m.mu.
-func (m *Manager) initSQLPlugins(mssqlDB *dbsql.DB, sqlPluginsDir string) error {
-	m.mssqlDB = mssqlDB
-
-	// Load all SQL plugins
-	loader := sql.NewLoader(sqlPluginsDir)
-	skills, err := loader.LoadAll()
-	if err != nil {
-		return fmt.Errorf("load SQL plugins: %w", err)
-	}
-
-	for name, skill := range skills {
-		plug := sql.NewPlugin(name, skill, loader, mssqlDB)
-		m.plugins[name] = plug
-	}
-
-	m.sqlLoader = loader
-	return nil
-}
-
 // Watch watches a directory for WASM plugin files (.wasm) and auto-loads them.
-// SQL plugins are loaded via Init, not Watch.
 func (m *Manager) Watch(ctx context.Context, dir string) error {
 	files, err := os.ReadDir(dir)
 	if err != nil {
