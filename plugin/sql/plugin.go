@@ -486,27 +486,31 @@ func (p *Plugin) Stop() error {
 
 // Handle processes a CDC transaction through this SQL plugin.
 // Uses atomic.Value for lock-free read of skill and engine.
-func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
+// If a sink is configured, writes transformed data to the sink.
+// Otherwise, performs transformation only (no sink output).
+func (p *Plugin) Handle(tx *core.Transaction) error {
 	skill := p.skill.Load().(*Skill) // atomic.Value, lock-free read
 	if skill == nil {
-		return nil, fmt.Errorf("skill not loaded")
+		return fmt.Errorf("skill not loaded")
 	}
 
 	engine := p.engine.Load().(*Engine) // atomic.Value, lock-free read
 	if engine == nil {
-		return nil, fmt.Errorf("engine not initialized, call AttachDB first")
+		return fmt.Errorf("engine not initialized, call AttachDB first")
 	}
 
-	return engine.Handle(tx)
-}
-
-// WriteSinks writes sink operations to the SQLite sink database.
-// Returns error if the plugin doesn't have a sink configured.
-func (p *Plugin) WriteSinks(ops []core.Sink) error {
-	if p.sink == nil {
-		return fmt.Errorf("no sink configured for plugin %s", p.name)
+	// Execute transformation
+	ops, err := engine.Handle(tx)
+	if err != nil {
+		return err
 	}
-	return p.sink.WriteOps(ops)
+
+	// If sink is configured, write to it; otherwise just transform
+	if p.sink != nil && len(ops) > 0 {
+		return p.sink.WriteOps(ops)
+	}
+
+	return nil
 }
 
 // GetSink returns the SQLiteSink for this plugin (if configured)
