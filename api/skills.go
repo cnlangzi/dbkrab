@@ -367,9 +367,9 @@ func (s *Server) handleSkillsFiles(c *xun.Context) error {
 	})
 }
 
-// handleSkillGet handles GET /api/skills/:name
+// handleSkillGet handles GET /api/skills/{name}
 func (s *Server) handleSkillGet(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	if name == "" {
 		return c.View(map[string]any{
 			"success": false,
@@ -470,9 +470,9 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	})
 }
 
-// handleSkillSave handles POST /api/skills/:name/save
+// handleSkillSave handles POST /api/skills/{name}/save
 func (s *Server) handleSkillSave(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	if name == "" {
 		return c.View(map[string]any{
 			"success": false,
@@ -557,9 +557,9 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 	})
 }
 
-// handleSkillDelete handles DELETE /api/skills/:name
+// handleSkillDelete handles DELETE /api/skills/{name}
 func (s *Server) handleSkillDelete(c *xun.Context) error {
-	name := c.Routing.Options.GetString("name")
+	name := c.Request.PathValue("name")
 	if name == "" {
 		return c.View(map[string]any{
 			"success": false,
@@ -697,9 +697,9 @@ func (s *Server) handleSkillValidate(c *xun.Context) error {
 	return c.View(response)
 }
 
-// handleSkillFileGet handles GET /api/skills/file/*path
+// handleSkillFileGet handles GET /api/skills/file/{path...}
 func (s *Server) handleSkillFileGet(c *xun.Context) error {
-	filePath := c.Routing.Options.GetString("*path")
+	filePath := c.Request.PathValue("path")
 	if filePath == "" {
 		return c.View(map[string]any{
 			"success": false,
@@ -731,9 +731,9 @@ func (s *Server) handleSkillFileGet(c *xun.Context) error {
 	})
 }
 
-// handleSkillFileSave handles POST /api/skills/file/:path/save
+// handleSkillFileSave handles POST /api/skills/file/{path}/save
 func (s *Server) handleSkillFileSave(c *xun.Context) error {
-	filePath := c.Routing.Options.GetString("path")
+	filePath := c.Request.PathValue("path")
 	if filePath == "" {
 		return c.View(map[string]any{
 			"success": false,
