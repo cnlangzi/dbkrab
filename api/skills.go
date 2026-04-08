@@ -138,33 +138,13 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 
 		// Use metadata from manager (already loaded from skill file)
 		skillInfo := SkillInfo{
-			Name:   p.Name,   // YAML name field
-			Id:     p.Id,     // SHA256(file)[:12]
-			File:   p.File,   // Relative file path
-			Status: "loaded",
-			Files:  []string{p.File},
-		}
-
-		// Read skill file for additional metadata (description, tables, SQL files)
-		skillPath := filepath.Join("skills", p.File)
-		if data, err := os.ReadFile(skillPath); err == nil {
-			var skill sql.Skill
-			if err := yaml.Unmarshal(data, &skill); err == nil {
-				skillInfo.Description = skill.Description
-				skillInfo.Tables = skill.On
-
-				// Collect SQL files referenced in the skill
-				for _, jobType := range [][]sql.SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-					for _, job := range jobType {
-						if job.SQLFile != "" {
-							skillInfo.Files = append(skillInfo.Files, job.SQLFile)
-						}
-					}
-				}
-			}
-		} else {
-			skillInfo.Status = "error"
-			skillInfo.Error = "Failed to read skill file"
+			Name:        p.Name,   // YAML name field
+			Id:          p.Id,     // SHA256(file)[:12]
+			File:        p.File,   // Relative file path
+			Status:      "loaded",
+			Files:       []string{p.File},
+			Description: "", // Will be populated from skill if needed
+			Tables:      nil,  // Will be populated from skill if needed
 		}
 
 		skills = append(skills, skillInfo)
