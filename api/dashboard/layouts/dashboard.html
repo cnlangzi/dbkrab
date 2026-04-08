@@ -116,6 +116,14 @@
                     </svg>
                     <span>Overview</span>
                 </a>
+                <a href="/skills" 
+                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "skills"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                    <!-- Skills Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                    </svg>
+                    <span>Skills</span>
+                </a>
                 <a href="/tables" 
                    class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "tables"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
                     <!-- Tables Icon -->

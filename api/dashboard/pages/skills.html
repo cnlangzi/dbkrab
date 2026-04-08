@@ -1,0 +1,236 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="pb-24 space-y-4">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-text">Skills</h1>
+    </div>
+
+    <!-- Stats Summary -->
+    <div class="grid grid-cols-2 gap-3">
+        <div class="bg-surface rounded-xl p-4 border border-border">
+            <div class="flex items-center gap-2 mb-2">
+                <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <span class="text-textMuted text-sm">Loaded</span>
+            </div>
+            <p class="text-2xl font-bold text-text" id="skills-count">-</p>
+        </div>
+        <div class="bg-surface rounded-xl p-4 border border-border">
+            <div class="flex items-center gap-2 mb-2">
+                <svg class="w-5 h-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <span class="text-textMuted text-sm">Files</span>
+            </div>
+            <p class="text-2xl font-bold text-text" id="files-count">-</p>
+        </div>
+    </div>
+
+    <!-- Skills List -->
+    <div class="bg-surface rounded-xl border border-border overflow-hidden">
+        <div class="p-4 border-b border-border">
+            <h2 class="text-lg font-semibold text-text">Loaded Skills</h2>
+            <p class="text-xs text-textMuted mt-0.5">Tap to edit</p>
+        </div>
+        <div id="skills-list" class="divide-y divide-border">
+            <div class="p-6 text-center">
+                <div class="animate-pulse flex flex-col items-center">
+                    <div class="w-12 h-12 bg-surfaceHover rounded-full mb-3"></div>
+                    <div class="h-4 bg-surfaceHover rounded w-24"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skills Directory -->
+    <div class="bg-surface rounded-xl border border-border overflow-hidden">
+        <div class="p-4 border-b border-border">
+            <h2 class="text-lg font-semibold text-text">Files</h2>
+            <p class="text-xs text-textMuted mt-0.5">skills/ directory</p>
+        </div>
+        <div id="skills-browser" 
+             hx-get="/api/skills/files/html"
+             hx-trigger="load"
+             class="divide-y divide-border">
+            <div class="p-6 text-center">
+                <div class="animate-pulse flex flex-col items-center">
+                    <div class="w-12 h-12 bg-surfaceHover rounded-full mb-3"></div>
+                    <div class="h-4 bg-surfaceHover rounded w-20"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bottom Action Bar -->
+<div class="fixed bottom-0 left-0 right-0 p-4 bg-bg/95 backdrop-blur border-t border-border lg:hidden">
+    <div class="flex gap-3">
+        <a href="/skills/new" 
+           class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            New Skill
+        </a>
+        <button onclick="showCreateFolderModal()" 
+                class="py-3 px-4 bg-surfaceHover hover:bg-surface text-text font-medium rounded-xl transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<!-- Desktop FAB -->
+<div class="hidden lg:flex fixed bottom-6 right-6 gap-3">
+    <button onclick="showCreateFolderModal()" 
+            class="p-4 bg-surfaceHover hover:bg-surface text-text rounded-full shadow-lg transition-colors"
+            title="New Folder">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+        </svg>
+    </button>
+    <a href="/skills/new" 
+       class="p-4 bg-primary hover:bg-primaryHover text-white rounded-full shadow-lg transition-colors"
+       title="New Skill">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+    </a>
+</div>
+
+<!-- Create Folder Modal -->
+<div id="create-folder-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-end lg:items-center justify-center">
+    <div class="bg-surface w-full max-w-sm max-h-[90vh] lg:rounded-2xl rounded-t-2xl overflow-hidden flex flex-col">
+        <div class="p-4 border-b border-border flex-shrink-0">
+            <h3 class="text-xl font-bold text-text">New Folder</h3>
+        </div>
+        <form id="create-folder-form" class="p-4 overflow-y-auto flex-1">
+            <div>
+                <label class="block text-sm font-medium text-textMuted mb-2">Folder Name</label>
+                <input type="text" name="name" required 
+                       pattern="^[a-zA-Z][a-zA-Z0-9_-]*$"
+                       placeholder="e.g., order_processing"
+                       class="w-full px-4 py-3 bg-bg border border-border rounded-xl text-text focus:outline-none focus:border-primary">
+            </div>
+        </form>
+        <div class="p-4 border-t border-border flex gap-3 flex-shrink-0">
+            <button type="button" onclick="hideCreateFolderModal()" 
+                    class="flex-1 py-3 bg-surfaceHover hover:bg-surface text-text font-medium rounded-xl transition-colors">
+                Cancel
+            </button>
+            <button type="submit" form="create-folder-form"
+                    class="flex-1 py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors">
+                Create
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Load skills list
+async function loadSkillsList() {
+    try {
+        const response = await fetch('/api/skills/list');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderSkillsList(data.skills);
+            document.getElementById('skills-count').textContent = data.skills.length;
+        } else {
+            document.getElementById('skills-list').innerHTML = 
+                '<div class="p-6 text-center text-error">' + (data.error || 'Failed to load skills') + '</div>';
+        }
+    } catch (err) {
+        document.getElementById('skills-list').innerHTML = 
+            '<div class="p-6 text-center text-error">Error: ' + err.message + '</div>';
+    }
+}
+
+function renderSkillsList(skills) {
+    const container = document.getElementById('skills-list');
+    
+    if (skills.length === 0) {
+        container.innerHTML = `
+            <div class="p-8 text-center">
+                <svg class="w-16 h-16 mx-auto mb-4 text-textMuted opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <p class="text-textMuted">No skills loaded</p>
+                <p class="text-sm text-textMuted mt-1">Create your first skill to get started</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    skills.forEach(skill => {
+        const statusClass = skill.status === 'error' ? 'bg-error/20 text-error' : 'bg-success/20 text-success';
+        const statusText = skill.status === 'error' ? 'Error' : 'Active';
+        
+        html += `
+            <a href="/skills/edit/${skill.name}" class="block p-4 hover:bg-surfaceHover transition-colors">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="px-2 py-0.5 rounded text-xs font-medium ${statusClass}">${statusText}</span>
+                            <h4 class="text-base font-semibold text-text truncate">${skill.name}</h4>
+                        </div>
+                        ${skill.description ? `<p class="text-sm text-textMuted truncate">${skill.description}</p>` : ''}
+                        <div class="flex items-center gap-3 mt-2 text-xs text-textMuted">
+                            <span>📊 ${skill.tables ? skill.tables.length : 0} tables</span>
+                            <span>📄 ${skill.files ? skill.files.length : 0} files</span>
+                        </div>
+                    </div>
+                    <svg class="w-5 h-5 text-textMuted flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </div>
+            </a>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+// Modal functions
+function showCreateFolderModal() {
+    document.getElementById('create-folder-modal').classList.remove('hidden');
+}
+
+function hideCreateFolderModal() {
+    document.getElementById('create-folder-modal').classList.add('hidden');
+    document.getElementById('create-folder-form').reset();
+}
+
+// Form handlers
+document.getElementById('create-folder-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    
+    try {
+        const response = await fetch('/api/skills/folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: formData.get('name') })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            hideCreateFolderModal();
+            // Trigger HTMX reload
+            htmx.ajax('GET', '/api/skills/files/html', { target: '#skills-browser' });
+        } else {
+            alert('Failed to create folder: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+});
+
+// Initial load
+loadSkillsList();
+</script>
+{{ end }}
