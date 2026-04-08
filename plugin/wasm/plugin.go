@@ -25,7 +25,7 @@ func NewPlugin(name, path, config string) (*Plugin, error) {
 	}
 
 	if err := instance.Init(config); err != nil {
-		instance.Close()
+		_ = instance.Close()
 		return nil, err
 	}
 

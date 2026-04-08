@@ -18,7 +18,6 @@ import (
 type Manager struct {
 	plugins    map[string]Plugin        // unified plugin registry
 	sqlLoader  *sql.Loader               // SQL plugin loader
-	mssqlDB    *dbsql.DB
 	mu         sync.RWMutex
 	watchCancel context.CancelFunc       // cancel WASM file watching
 	watchDone   chan struct{}             // closed when watchLoop exits
