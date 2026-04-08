@@ -255,7 +255,7 @@ document.getElementById('create-folder-form').addEventListener('submit', async f
         
         if (result.success) {
             hideCreateFolderModal();
-            htmx.ajax('GET', '/api/skills/files', { target: '#skills-browser' });
+            loadSkillsFiles();
         } else {
             alert('Failed to create folder: ' + result.error);
         }
@@ -562,7 +562,7 @@ async function deleteSkill(name) {
         if (result.success) {
             alert('Skill deleted successfully');
             loadSkillsList();
-            htmx.ajax('GET', '/api/skills/files', { target: '#skills-browser' });
+            loadSkillsFiles();
         } else {
             alert('Failed to delete skill: ' + result.error);
         }
