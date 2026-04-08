@@ -22,7 +22,7 @@ func (w *Writer) DB() *sql.DB {
 	return w.db
 }
 
-// SinkOp represents a single sink operation
+// SinkOp represents a single sink operation (write to SQLite)
 type SinkOp struct {
 	Config  SinkConfig
 	DataSet *DataSet

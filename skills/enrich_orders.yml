@@ -5,16 +5,6 @@ sqlite: ./data/sinks/business.db
 on:
   - orders
 
-jobs:
-  - name: log_enrichment
-    sql: |
-      SELECT 
-        @cdc_lsn as cdc_lsn,
-        @cdc_tx_id as cdc_tx_id,
-        @orders_order_id as order_id,
-        GETDATE() as enriched_at
-    output: enrichment_log
-
 sinks:
   insert:
     - name: sync
