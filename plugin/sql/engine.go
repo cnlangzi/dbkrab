@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -28,6 +29,7 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 // Handle processes a core.Transaction through the SQL Plugin
 // It extracts CDC changes, executes jobs against MSSQL
 // Returns all job operations as []core.Sink for the caller to write
+// Multiple sinks targeting the same table+pk are merged into a single sink
 func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
@@ -83,7 +85,133 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		}
 	}
 
-	return allOps, nil
+	// Merge multiple sinks targeting the same table+pk into single sinks
+	return mergeSinks(allOps), nil
+}
+
+// sinkKey uniquely identifies a sink group by table, pk, and operation type
+type sinkKey struct {
+	table  string
+	pk     string
+	opType core.Operation
+}
+
+// mergeSinks merges multiple sinks targeting the same table+pk into single sinks.
+// This ensures that when multiple sinks select different columns for the same
+// target table, their data is combined into a single dataset before writing.
+func mergeSinks(sinks []core.Sink) []core.Sink {
+	if len(sinks) <= 1 {
+		return sinks
+	}
+
+	// Group sinks by (table, pk, opType)
+	groups := make(map[sinkKey][]core.Sink)
+	for _, sink := range sinks {
+		if sink.DataSet == nil || len(sink.DataSet.Rows) == 0 {
+			continue // Skip empty datasets
+		}
+		key := sinkKey{
+			table:  sink.Config.Output,
+			pk:     sink.Config.PrimaryKey,
+			opType: sink.OpType,
+		}
+		groups[key] = append(groups[key], sink)
+	}
+
+	// For groups with only one sink, keep as-is
+	// For groups with multiple sinks, merge them
+	var merged []core.Sink
+	for key, group := range groups {
+		if len(group) == 1 {
+			merged = append(merged, group[0])
+		} else {
+			merged = append(merged, mergeSinkGroup(key, group))
+		}
+	}
+
+	return merged
+}
+
+// mergeSinkGroup merges multiple sinks with the same (table, pk, opType)
+// into a single sink with combined columns and merged rows.
+func mergeSinkGroup(key sinkKey, sinks []core.Sink) core.Sink {
+	// Collect all unique columns from all sinks, sorted for determinism
+	columnSet := make(map[string]bool)
+	for _, sink := range sinks {
+		for _, col := range sink.DataSet.Columns {
+			columnSet[col] = true
+		}
+	}
+	columns := make([]string, 0, len(columnSet))
+	for col := range columnSet {
+		columns = append(columns, col)
+	}
+	sort.Strings(columns)
+
+	// Find primary key column index (should be same for all sinks in group)
+	pkIndex := -1
+	for i, col := range sinks[0].DataSet.Columns {
+		if col == key.pk {
+			pkIndex = i
+			break
+		}
+	}
+
+	// Build column index map for fast lookup
+	colIndexMap := make(map[string]int)
+	for i, col := range columns {
+		colIndexMap[col] = i
+	}
+
+	// Merge rows by primary key value
+	// For each unique pk value, collect all column values from all sinks
+	mergedRowsMap := make(map[any][]any)
+	for _, sink := range sinks {
+		for _, row := range sink.DataSet.Rows {
+			if pkIndex < 0 || pkIndex >= len(row) {
+				continue
+			}
+			pkValue := row[pkIndex]
+			if _, exists := mergedRowsMap[pkValue]; !exists {
+				// Initialize with nil values
+				mergedRowsMap[pkValue] = make([]any, len(columns))
+			}
+			// Fill in values from this sink's columns
+			for colIdx, col := range sink.DataSet.Columns {
+				if colIdx < len(row) {
+					mergedRowsMap[pkValue][colIndexMap[col]] = row[colIdx]
+				}
+			}
+		}
+	}
+
+	// Convert map to sorted slice (sort by pk value for determinism)
+	pkValues := make([]any, 0, len(mergedRowsMap))
+	for pk := range mergedRowsMap {
+		pkValues = append(pkValues, pk)
+	}
+	sort.Slice(pkValues, func(i, j int) bool {
+		return fmt.Sprintf("%v", pkValues[i]) < fmt.Sprintf("%v", pkValues[j])
+	})
+
+	mergedRows := make([][]any, len(pkValues))
+	for i, pk := range pkValues {
+		mergedRows[i] = mergedRowsMap[pk]
+	}
+
+	return core.Sink{
+		Config: core.SinkConfig{
+			Name:       sinks[0].Config.Name, // Use first sink's name
+			Output:     key.table,
+			PrimaryKey: key.pk,
+			OnConflict: sinks[0].Config.OnConflict, // Use first sink's conflict strategy
+		},
+		DataSet: &core.DataSet{
+			Columns: columns,
+			Rows:    mergedRows,
+		},
+		OpType: key.opType,
+	}
 }
 
 // convertDataSet converts sqlplugin.DataSet to core.DataSet
