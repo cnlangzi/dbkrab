@@ -174,7 +174,7 @@ func (p *Plugin) checkChanges() {
 
 				// Call reload outside the lock to avoid deadlock
 				p.mu.Unlock()
-				if err := p.Reload(); err != nil {
+				if err := p.reload(); err != nil {
 					fmt.Printf("Warning: failed to reload SQL plugin %s: %v\n", p.name, err)
 				} else {
 					fmt.Printf("Reloaded SQL plugin: %s\n", p.name)
@@ -329,13 +329,8 @@ func (p *Plugin) Metadata() PluginMetadata {
 	return p.metadata
 }
 
-// Reload reloads the plugin from disk, respecting the issue requirements:
-// - Check if file was deleted → mark IsDeleted, keep old engine
-// - Parse new file → if fail, set Status=error, LastError=err, keep old version
-// - Calculate SHA256 hash for each file → compare with CurVersion
-// - If no changes, set Status=loaded, skip
-// - If changes detected, update metadata, atomic replace skill via atomic.Value.Store(), rebuild engine
-func (p *Plugin) Reload() error {
+// reload reloads the plugin from disk (internal, called by watchLoop).
+func (p *Plugin) reload() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -343,7 +338,6 @@ func (p *Plugin) Reload() error {
 
 	// Check if main file was deleted
 	if _, err := os.Stat(ymlPath); os.IsNotExist(err) {
-		// File was deleted - mark as deleted and keep old engine
 		p.metadata.Status = "stale"
 		if existing, ok := p.metadata.Files[ymlPath]; ok {
 			p.metadata.Files[ymlPath] = FileMetadata{
@@ -357,16 +351,13 @@ func (p *Plugin) Reload() error {
 		return fmt.Errorf("skill file deleted: %s", ymlPath)
 	}
 
-	// Try to parse the new file
 	newSkill, err := p.loader.Load(p.name)
 	if err != nil {
-		// Parse failed - keep old version, set error status
 		p.metadata.Status = "error"
 		p.metadata.LastError = err.Error()
 		return fmt.Errorf("failed to reload skill %s: %w", p.name, err)
 	}
 
-	// Check if content actually changed by comparing SHA256 hashes
 	curVersion := ""
 	if existing, ok := p.metadata.Files[ymlPath]; ok {
 		curVersion = existing.CurVersion
@@ -379,7 +370,6 @@ func (p *Plugin) Reload() error {
 	}
 
 	if newVersion == curVersion {
-		// No actual content change - just update status
 		p.metadata.Status = "loaded"
 		p.metadata.NeedsReload = false
 		if existing, ok := p.metadata.Files[ymlPath]; ok {
@@ -390,52 +380,32 @@ func (p *Plugin) Reload() error {
 		return nil
 	}
 
-	// Content changed - update metadata and atomic replace
-	if existing, ok := p.metadata.Files[ymlPath]; ok {
-		p.metadata.Files[ymlPath] = FileMetadata{
-			Path:         ymlPath,
-			IsSQL:        false,
-			CurVersion:   newVersion,
-			CurModTime:   existing.CurModTime,
-			CurSize:      existing.CurSize,
-			CurLoadedAt:  time.Now(),
-			NewVersion:   "",
-			NeedsReload:  false,
-			IsDeleted:    false,
-		}
-	} else {
-		info, _ := os.Stat(ymlPath)
-		var modTime time.Time
-		var size int64
-		if info != nil {
-			modTime = info.ModTime()
-			size = info.Size()
-		}
-		p.metadata.Files[ymlPath] = FileMetadata{
-			Path:         ymlPath,
-			IsSQL:        false,
-			CurVersion:   newVersion,
-			CurModTime:   modTime,
-			CurSize:      size,
-			CurLoadedAt:  time.Now(),
-			NewVersion:   "",
-			NeedsReload:  false,
-			IsDeleted:    false,
-		}
+	info, _ := os.Stat(ymlPath)
+	var modTime time.Time
+	var size int64
+	if info != nil {
+		modTime = info.ModTime()
+		size = info.Size()
+	}
+	p.metadata.Files[ymlPath] = FileMetadata{
+		Path:         ymlPath,
+		IsSQL:        false,
+		CurVersion:   newVersion,
+		CurModTime:   modTime,
+		CurSize:      size,
+		CurLoadedAt:  time.Now(),
+		NewVersion:   "",
+		NeedsReload:  false,
+		IsDeleted:    false,
 	}
 
-	// Track any new/removed SQL files
 	p.trackSQLFiles(newSkill)
-
-	// Atomic replace skill
 	p.skill.Store(newSkill)
 
-	// Rebuild engine if db is available
 	if p.db != nil {
 		p.engine.Store(NewEngine(newSkill, p.db))
 	}
 
-	// Update metadata
 	p.metadata.Status = "loaded"
 	p.metadata.NeedsReload = false
 	p.metadata.LastError = ""

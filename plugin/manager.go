@@ -168,15 +168,6 @@ func (m *Manager) Reload(name string) error {
 		return fmt.Errorf("plugin %s not found", name)
 	}
 
-	if plug.Type() == "sql" {
-		// For SQL plugins, call their Reload method directly
-		splug, ok := plug.(*sql.Plugin)
-		if !ok {
-			return fmt.Errorf("internal error: plugin type mismatch")
-		}
-		return splug.Reload()
-	}
-
 	if plug.Type() != "wasm" {
 		return fmt.Errorf("cannot reload plugin %s of unknown type", name)
 	}
@@ -385,16 +376,6 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 			return APIResponse{Success: false, Error: "name required"}
 		}
 		if err := m.Unload(name); err != nil {
-			return APIResponse{Success: false, Error: err.Error()}
-		}
-		return APIResponse{Success: true}
-
-	case "reload":
-		name, _ := params["name"].(string)
-		if name == "" {
-			return APIResponse{Success: false, Error: "name required"}
-		}
-		if err := m.Reload(name); err != nil {
 			return APIResponse{Success: false, Error: err.Error()}
 		}
 		return APIResponse{Success: true}
