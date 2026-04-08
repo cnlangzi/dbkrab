@@ -175,8 +175,12 @@ func (s *Server) registerPageRoutes() {
 
 // handlePlugins handles GET /api/plugins
 func (s *Server) handlePlugins(c *xun.Context) error {
-	resp := s.manager.HandleAPI("list", nil)
-	return c.View(resp)
+	// Return simple status of plugin types
+	status := map[string]bool{
+		"sql":  s.manager.HasSQLPlugins(),
+		"wasm": s.manager.HasWASMPlugins(),
+	}
+	return c.View(map[string]any{"success": true, "data": status})
 }
 
 // handlePluginGet handles GET /api/plugins/:name

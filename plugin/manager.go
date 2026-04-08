@@ -224,6 +224,30 @@ func (m *Manager) List() []PluginInfo {
 	return list
 }
 
+// HasSQLPlugins returns true if any SQL plugins are loaded
+func (m *Manager) HasSQLPlugins() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, p := range m.plugins {
+		if p.Type() == "sql" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasWASMPlugins returns true if any WASM plugins are loaded
+func (m *Manager) HasWASMPlugins() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, p := range m.plugins {
+		if p.Type() == "wasm" {
+			return true
+		}
+	}
+	return false
+}
+
 // pluginPath returns a human-readable path for a plugin
 func (m *Manager) pluginPath(p Plugin) string {
 	switch plug := p.(type) {
