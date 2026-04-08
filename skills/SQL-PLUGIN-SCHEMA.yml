@@ -1,6 +1,6 @@
 # =============================================================================
-# SQL Plugin 配置完整示例
-# 文件路径: skills/sql_plugin_complete_example.yml
+# SQL Plugin Schema (Refactored with flattened sinks)
+# 文件路径: skills/SQL-PLUGIN-SCHEMA.yml
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -21,86 +21,62 @@ on:
 # 自定义路径会覆盖默认值
 sqlite: ./data/sinks/business.db       # 相对路径，相对于 dbkrab 工作目录
 
-# ✅ 必填：输出配置（insert/update/delete 三选一至少有一个）
-# 注意：原设计中的 "jobs" 和 "sinks" 已合并为 "jobs"
-# - 每个 CDC change 触发对应的 jobs
-# - INSERT change → 触发 insert 下的 jobs
-# - UPDATE change → 触发 update 下的 jobs
-# - DELETE change → 触发 delete 下的 jobs
+# ✅ 必填：输出配置（flattened 结构）
+# - 每个 sink 有一个 `when` 字段指定它处理哪些操作
+# - [insert, update]: INSERT 和 UPDATE 共享同一个 SQL（消除重复）
+# - [delete]: DELETE 操作单独处理
+#
+# - INSERT change (__$operation = 2) → 触发 when: [insert, update] 的 sinks
+# - UPDATE change (__$operation = 4) → 触发 when: [insert, update] 的 sinks
+# - DELETE change (__$operation = 1) → 触发 when: [delete] 的 sinks
 sinks:
-  
-  # ==========================================================================
-  # INSERT 操作配置（__$operation = 2）
-  # ==========================================================================
-  insert:
-    - name: orders_sync                           # ✅ 必填：Job 名称
-      # on: orders                                # ❌ 可选：表过滤（仅对该表生效）
-      #                                           # 不填 = 所有监听的表都触发
-      sql: |                                       # ✅ 必填（二选一）：内联 SQL 模板
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @cdc_tx_id as cdc_transaction_id,
-          @cdc_table as cdc_source_table,
-          @cdc_operation as cdc_operation,
-          @orders_order_id as order_id,
-          @orders_customer_id as customer_id,
-          @orders_product_id as product_id,
-          c.name as customer_name,
-          c.email as customer_email,
-          p.product_name,
-          p.price as product_price
-        FROM customers c
-        LEFT JOIN products p ON p.product_id = @orders_product_id
-        WHERE c.customer_id = @orders_customer_id;
-      # sql_file: ./sql/orders_insert.sql          # ✅ 必填（二选一）：外部 SQL 文件
-      output: enriched_orders                      # ✅ 必填：目标表名
-      primary_key: order_id                        # ✅ 必填：主键列（用于 upsert）
-      on_conflict: skip                            # ❌ 可选：冲突策略
-      #                                           #   skip      = 忽略冲突（默认）
-      #                                           #   overwrite = 覆盖已有记录
-      #                                           #   error     = 冲突时报错
 
   # ==========================================================================
-  # UPDATE 操作配置（__$operation = 4，表示 UpdateAfter）
+  # INSERT/UPDATE 操作配置（__$operation = 2 或 4）
+  # 使用 [insert, update] 可以让 INSERT 和 UPDATE 共享同一个 SQL
   # ==========================================================================
-  update:
-    - name: orders_sync
-      # on: orders                                # 表过滤（可省略）
-      sql: |
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @cdc_tx_id as cdc_transaction_id,
-          @cdc_table as cdc_source_table,
-          @cdc_operation as cdc_operation,
-          @orders_order_id as order_id,
-          @orders_customer_id as customer_id,
-          @orders_product_id as product_id,
-          c.name as customer_name,
-          c.email as customer_email,
-          p.product_name,
-          p.price as product_price
-        FROM customers c
-        LEFT JOIN products p ON p.product_id = @orders_product_id
-        WHERE c.customer_id = @orders_customer_id;
-      # sql_file: ./sql/orders_update.sql
-      output: enriched_orders
-      primary_key: order_id
-      on_conflict: skip                            # UPDATE 时：skip = 条件更新
+  - name: orders_sync                           # ✅ 必填：Sink 名称
+    when: [insert, update]                      # ✅ 必填：操作过滤
+    # on: orders                                # ❌ 可选：表过滤（仅对该表生效）
+    #                                           # 不填 = 所有监听的表都触发
+    sql: |                                       # ✅ 必填（二选一）：内联 SQL 模板
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_transaction_id,
+        @cdc_table as cdc_source_table,
+        @cdc_operation as cdc_operation,
+        @orders_order_id as order_id,
+        @orders_customer_id as customer_id,
+        @orders_product_id as product_id,
+        c.name as customer_name,
+        c.email as customer_email,
+        p.product_name,
+        p.price as product_price
+      FROM customers c
+      LEFT JOIN products p ON p.product_id = @orders_product_id
+      WHERE c.customer_id = @orders_customer_id;
+    # sql_file: ./sql/orders_sync.sql            # ✅ 必填（二选一）：外部 SQL 文件
+    output: enriched_orders                      # ✅ 必填：目标表名
+    primary_key: order_id                        # ✅ 必填：主键列（用于 upsert）
+    on_conflict: skip                            # ❌ 可选：冲突策略
+    #                                           #   skip      = 忽略冲突（默认）
+    #                                           #   overwrite = 覆盖已有记录
+    #                                           #   error     = 冲突时报错
 
   # ==========================================================================
   # DELETE 操作配置（__$operation = 1）
   # ==========================================================================
-  delete:
-    - name: orders_sync
-      # on: orders                                # 表过滤（可省略）
-      sql: |                                       # DELETE 只需要 CDC 参数即可
-        SELECT 
-          @cdc_lsn as cdc_lsn,
-          @orders_order_id as order_id
-      # sql_file: ./sql/orders_delete.sql
-      output: enriched_orders
-      primary_key: order_id
-      # on_conflict: skip                         # DELETE 时默认即可
+  - name: orders_delete
+    when: [delete]
+    # on: orders                                # 表过滤（可省略）
+    sql: |                                       # DELETE 只需要 CDC 参数即可
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @orders_order_id as order_id
+    # sql_file: ./sql/orders_delete.sql
+    output: enriched_orders
+    primary_key: order_id
+    # on_conflict: skip                         # DELETE 时默认即可
 
 # =============================================================================
 # CDC 参数说明

@@ -75,26 +75,29 @@ func (l *Loader) Load(file string) (*Skill, error) {
 		return nil, err
 	}
 
+	// Validate sinks configuration
+	if err := skill.ValidateSinks(); err != nil {
+		return nil, fmt.Errorf("validate sinks: %w", err)
+	}
+
 	return &skill, nil
 }
 
-// loadSQLFiles loads external SQL files referenced in jobs and sinks
+// loadSQLFiles loads external SQL files referenced in sinks
 func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
 	// skillDir is passed in - it's the directory containing the skill.yml file
 	// This allows skills to organize their SQL files in subdirectories if needed
 
-	// Load job SQL files
-	for _, jobType := range [][]SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-		for i := range jobType {
-			job := &jobType[i]
-			if job.SQLFile != "" {
-				sqlPath := filepath.Join(skillDir, job.SQLFile)
-				data, err := os.ReadFile(sqlPath)
-				if err != nil {
-					return fmt.Errorf("read job SQL file %s: %w", job.SQLFile, ErrSQLFileNotFound)
-				}
-				job.SQL = string(data)
+	// Load sink SQL files (flat structure)
+	for i := range skill.Sinks {
+		sink := &skill.Sinks[i]
+		if sink.SQLFile != "" {
+			sqlPath := filepath.Join(skillDir, sink.SQLFile)
+			data, err := os.ReadFile(sqlPath)
+			if err != nil {
+				return fmt.Errorf("read sink SQL file %s: %w", sink.SQLFile, ErrSQLFileNotFound)
 			}
+			sink.SQL = string(data)
 		}
 	}
 

@@ -254,14 +254,12 @@ func (p *Plugin) getSQLFiles() []string {
 	var sqlFiles []string
 	seen := make(map[string]bool)
 
-	for _, jobType := range [][]SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-		for _, job := range jobType {
-			if job.SQLFile != "" {
-				sqlPath := filepath.Join(p.watchDir, job.SQLFile)
-				if !seen[sqlPath] {
-					sqlFiles = append(sqlFiles, sqlPath)
-					seen[sqlPath] = true
-				}
+	for _, sink := range skill.Sinks {
+		if sink.SQLFile != "" {
+			sqlPath := filepath.Join(p.watchDir, sink.SQLFile)
+			if !seen[sqlPath] {
+				sqlFiles = append(sqlFiles, sqlPath)
+				seen[sqlPath] = true
 			}
 		}
 	}
@@ -306,12 +304,10 @@ func (p *Plugin) initMetadata(skill *Skill) {
 func (p *Plugin) trackSQLFiles(skill *Skill) {
 	skillDir := p.loader.pluginsDir
 
-	for _, jobType := range [][]SinkConfig{skill.Sinks.Insert, skill.Sinks.Update, skill.Sinks.Delete} {
-		for _, job := range jobType {
-			if job.SQLFile != "" {
-				sqlPath := filepath.Join(skillDir, job.SQLFile)
-				p.addSQLFileMetadata(sqlPath)
-			}
+	for _, sink := range skill.Sinks {
+		if sink.SQLFile != "" {
+			sqlPath := filepath.Join(skillDir, sink.SQLFile)
+			p.addSQLFileMetadata(sqlPath)
 		}
 	}
 }

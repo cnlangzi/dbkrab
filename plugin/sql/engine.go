@@ -52,8 +52,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 			return nil, fmt.Errorf("build params: %w", err)
 		}
 
-		// Get jobs for this operation
-		jobs := e.skill.GetSinks(Operation(jobType))
+		// Get sinks for this operation using FilterByOperation
+		jobs := e.skill.FilterByOperation(Operation(jobType))
 		if len(jobs) > 0 {
 			jobParams := e.cdcParamsToMap(cdcParams)
 
