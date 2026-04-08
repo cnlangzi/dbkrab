@@ -3,16 +3,10 @@
 <div class="space-y-6">
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h2 class="text-2xl font-bold text-text">Plugins</h2>
-        <button onclick="loadPlugins()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343-.029.68.083 1.01"/>
-            </svg>
-            Refresh
-        </button>
     </div>
 
     <!-- Plugin Status Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6" id="plugin-status-container">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
         <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-3">
@@ -23,10 +17,14 @@
                     </div>
                     <div>
                         <p class="text-textMuted text-sm font-medium">SQL Plugin</p>
-                        <p class="text-xs text-textMuted">skills/sql</p>
+                        <p class="text-xs text-textMuted">skills</p>
                     </div>
                 </div>
-                <span id="sql-status" class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">-</span>
+                {{ if .PluginsSQLEnabled }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
+                {{ else }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
+                {{ end }}
             </div>
             <p class="text-sm text-textMuted">SQL-based plugin system for CDC data transformation</p>
         </div>
@@ -44,38 +42,14 @@
                         <p class="text-xs text-textMuted">skills/wasm</p>
                     </div>
                 </div>
-                <span id="wasm-status" class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">-</span>
+                {{ if .PluginsWASMEnabled }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
+                {{ else }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
+                {{ end }}
             </div>
             <p class="text-sm text-textMuted">WebAssembly plugin system for custom CDC processing</p>
         </div>
     </div>
 </div>
-
-<script>
-function loadPlugins() {
-    fetch('/api/plugins')
-        .then(r => r.json())
-        .then(data => {
-            if (data.success && data.data) {
-                updateStatus('sql', data.data.sql.enabled);
-                updateStatus('wasm', data.data.wasm.enabled);
-            }
-        })
-        .catch(err => console.error('Failed to load plugins:', err));
-}
-
-function updateStatus(name, enabled) {
-    const span = document.getElementById(name + '-status');
-    if (enabled) {
-        span.className = 'inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success';
-        span.textContent = 'Enabled';
-    } else {
-        span.className = 'inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted';
-        span.textContent = 'Disabled';
-    }
-}
-
-// Load on page ready
-document.addEventListener('DOMContentLoaded', loadPlugins);
-</script>
 {{ end }}

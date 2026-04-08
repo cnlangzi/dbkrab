@@ -127,7 +127,6 @@ func (s *Server) Stop() error {
 // registerAPIRoutes registers API routes with JsonViewer
 func (s *Server) registerAPIRoutes() {
 	api := s.app.Group("/api")
-	api.Get("/plugins", s.handlePlugins, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/plugins/:name", s.handlePluginGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Delete("/plugins/:name", s.handlePluginDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/plugins/:name/reload", s.handlePluginReload, xun.WithViewer(&xun.JsonViewer{}))
@@ -170,21 +169,18 @@ func (s *Server) registerAPIRoutes() {
 
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
-	// Pages are auto-registered by xun from pages/ directory
+	// Register plugins page with SSR data
+	s.app.Get("/plugins", s.handlePluginsPage)
+	// Other pages are auto-registered by xun from pages/ directory
 }
 
-// handlePlugins handles GET /api/plugins
-func (s *Server) handlePlugins(c *xun.Context) error {
-	// Return simple status of plugin types
-	status := map[string]any{
-		"sql": map[string]any{
-			"enabled": s.manager.HasSQLPlugins(),
-		},
-		"wasm": map[string]any{
-			"enabled": s.manager.HasWASMPlugins(),
-		},
+// handlePluginsPage handles GET /plugins - renders plugins page with SSR
+func (s *Server) handlePluginsPage(c *xun.Context) error {
+	data := map[string]any{
+		"PluginsSQLEnabled":  s.manager.HasSQLPlugins(),
+		"PluginsWASMEnabled": s.manager.HasWASMPlugins(),
 	}
-	return c.View(map[string]any{"success": true, "data": status})
+	return c.View(data)
 }
 
 // handlePluginGet handles GET /api/plugins/:name
