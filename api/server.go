@@ -721,8 +721,8 @@ func (s *Server) handleOverview(c *xun.Context) error {
 	// Collect all metrics
 	metrics := s.collectOverviewMetrics()
 	
-	// Render using template
-	return c.View(metrics)
+	// Render using views template
+	return c.View(metrics, "views/overview")
 }
 
 // OverviewMetrics contains all dashboard overview metrics
