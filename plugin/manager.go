@@ -14,7 +14,7 @@ import (
 	"github.com/cnlangzi/dbkrab/plugin/wasm"
 )
 
-// Manager manages both WASM and SQL plugins with hot-reload support.
+// Manager manages both WASM and SQL plugins.
 type Manager struct {
 	plugins     map[string]Plugin        // unified plugin registry
 	sqlLoader   *sql.Loader              // SQL plugin loader
@@ -158,33 +158,6 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Reload reloads a plugin (hot-reload for WASM, manual/scheduled for SQL)
-func (m *Manager) Reload(name string) error {
-	m.mu.RLock()
-	plug, exists := m.plugins[name]
-	m.mu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("plugin %s not found", name)
-	}
-
-	if plug.Type() != "wasm" {
-		return fmt.Errorf("cannot reload plugin %s of unknown type", name)
-	}
-
-	// For WASM plugins, reload with same path and config
-	// We need the path, so we get it from the underlying wasm plugin
-	wplug, ok := plug.(*wasm.Plugin)
-	if !ok {
-		return fmt.Errorf("internal error: plugin type mismatch")
-	}
-
-	if err := m.Unload(name); err != nil {
-		return err
-	}
-	return m.Load(name, wplug.Path(), wplug.Config())
-}
-
 // Handle processes a transaction through all plugins.
 // SQL plugins return []core.Sink; WASM plugins process internally.
 func (m *Manager) Handle(tx *core.Transaction) ([]core.Sink, error) {
@@ -321,11 +294,6 @@ func (m *Manager) watchLoop(ctx context.Context, dir string) {
 				if lastMod[name].IsZero() {
 					if err := m.Load(name, path, ""); err == nil {
 						fmt.Printf("Auto-loaded plugin: %s\n", name)
-					}
-					lastMod[name] = info.ModTime()
-				} else if info.ModTime().After(lastMod[name]) {
-					if err := m.Reload(name); err == nil {
-						fmt.Printf("Reloaded plugin: %s\n", name)
 					}
 					lastMod[name] = info.ModTime()
 				}
