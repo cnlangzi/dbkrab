@@ -1,8 +1,6 @@
 package wasm
 
 import (
-	"context"
-	"database/sql"
 	"sync"
 	"time"
 
@@ -54,17 +52,6 @@ func (p *Plugin) Path() string { return p.path }
 
 // Config returns the plugin config
 func (p *Plugin) Config() string { return p.config }
-
-// Init implements plugin.Plugin (WASM plugins have no DB init needed)
-func (p *Plugin) Init(ctx context.Context, db *sql.DB) error {
-	_ = db
-	return nil
-}
-
-// Start implements plugin.Plugin (no-op for WASM; hot-reload handled by Manager)
-func (p *Plugin) Start(ctx context.Context) error {
-	return nil
-}
 
 // Stop implements plugin.Plugin
 func (p *Plugin) Stop() error {

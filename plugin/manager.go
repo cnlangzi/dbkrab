@@ -33,6 +33,7 @@ func NewManager() *Manager {
 
 // Init initializes all plugins based on the provided config.
 // It replaces the separate Watch() and InitSQLPlugins() calls.
+// Caller typically holds the lock for the initialization phase.
 func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 	Enabled bool
 	Path    string
@@ -40,6 +41,9 @@ func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 	Enabled bool
 	Path    string
 }) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Initialize SQL plugins if enabled
 	if sqlCfg.Enabled && sqlCfg.Path != "" {
 		if err := m.initSQLPlugins(db, sqlCfg.Path); err != nil {
@@ -47,21 +51,23 @@ func (m *Manager) Init(ctx context.Context, db *dbsql.DB, wasmCfg struct {
 		}
 	}
 
-	// Start WASM plugin watching if enabled
+	// Watch needs to be called without lock held (spawns goroutine)
+	// So we unlock temporarily for Watch
 	if wasmCfg.Enabled && wasmCfg.Path != "" {
+		m.mu.Unlock()
 		if err := m.Watch(ctx, wasmCfg.Path); err != nil {
+			m.mu.Lock()
 			return fmt.Errorf("watch WASM plugins: %w", err)
 		}
+		m.mu.Lock()
 	}
 
 	return nil
 }
 
-// initSQLPlugins loads all SQL plugins from the given directory
+// initSQLPlugins loads all SQL plugins from the given directory.
+// Caller must hold m.mu.
 func (m *Manager) initSQLPlugins(mssqlDB *dbsql.DB, sqlPluginsDir string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.mssqlDB = mssqlDB
 
 	// Load all SQL plugins
@@ -72,11 +78,7 @@ func (m *Manager) initSQLPlugins(mssqlDB *dbsql.DB, sqlPluginsDir string) error 
 	}
 
 	for name, skill := range skills {
-		plug := sql.NewPlugin(name, skill, loader)
-		if err := plug.Init(context.Background(), mssqlDB); err != nil {
-			fmt.Printf("Warning: failed to init SQL plugin %s: %v\n", name, err)
-			continue
-		}
+		plug := sql.NewPlugin(name, skill, loader, mssqlDB)
 		m.plugins[name] = plug
 	}
 
@@ -341,7 +343,7 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 		return APIResponse{Success: true, Data: PluginInfo{
 			Name:     plug.Name(),
 			Path:     m.pluginPath(plug),
-			LoadedAt: time.Now(),
+			LoadedAt: m.pluginLoadedAt(plug),
 			Type:     plug.Type(),
 		}}
 
