@@ -52,7 +52,10 @@
             <h2 class="text-lg font-semibold text-text">Files</h2>
             <p class="text-xs text-textMuted mt-0.5">skills/ directory</p>
         </div>
-        <div id="skills-browser" class="divide-y divide-border">
+        <div id="skills-browser" 
+             hx-get="/api/skills/files/html"
+             hx-trigger="load"
+             class="divide-y divide-border">
             <div class="p-6 text-center">
                 <div class="animate-pulse flex flex-col items-center">
                     <div class="w-12 h-12 bg-surfaceHover rounded-full mb-3"></div>

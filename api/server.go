@@ -135,6 +135,7 @@ func (s *Server) registerAPIRoutes() {
 	// Skills management routes
 	api.Get("/skills/list", s.handleSkillsList, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/files", s.handleSkillsFiles, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/files/html", s.handleSkillsFilesHTML) // HTML fragment for HTMX
 	api.Get("/skills/:name", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/:name/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))

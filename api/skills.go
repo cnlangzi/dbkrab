@@ -158,7 +158,118 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 	})
 }
 
-// handleSkillsFiles handles GET /api/skills/files
+// handleSkillsFilesHTML handles GET /api/skills/files/html
+// Returns HTML fragment for HTMX (like handleOverview pattern)
+func (s *Server) handleSkillsFilesHTML(c *xun.Context) error {
+	skillsDir := "skills"
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Failed to read skills directory: " + err.Error(),
+		})
+	}
+
+	files := make([]SkillFileInfo, 0)
+
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		fileInfo := SkillFileInfo{
+			Name:    entry.Name(),
+			Path:    filepath.Join(skillsDir, entry.Name()),
+			ModTime: info.ModTime().Format(time.RFC3339),
+		}
+
+		if entry.IsDir() {
+			fileInfo.Type = "dir"
+		} else {
+			fileInfo.Type = "file"
+			fileInfo.Size = info.Size()
+
+			if strings.HasSuffix(entry.Name(), ".sql") {
+				fileInfo.IsSQL = true
+			} else if strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml") {
+				fileInfo.IsYAML = true
+			}
+		}
+
+		files = append(files, fileInfo)
+	}
+
+	// Sort: directories first, then files, alphabetically
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Type != files[j].Type {
+			return files[i].Type == "dir"
+		}
+		return files[i].Name < files[j].Name
+	})
+
+	// Render HTML fragment
+	html := renderSkillsFilesHTML(files)
+	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
+	_, err = c.Response.Write([]byte(html))
+	return err
+}
+
+// renderSkillsFilesHTML renders file list as HTML fragment
+func renderSkillsFilesHTML(files []SkillFileInfo) string {
+	if len(files) == 0 {
+		return `<div class="p-8 text-center">
+			<svg class="w-16 h-16 mx-auto mb-4 text-textMuted opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+			</svg>
+			<p class="text-textMuted">No files</p>
+		</div>`
+	}
+
+	var html strings.Builder
+	for _, file := range files {
+		icon := "📄"
+		typeLabel := "File"
+		typeClass := "bg-surfaceHover text-textMuted"
+
+		if file.Type == "dir" {
+			icon = "📁"
+			typeLabel = "Folder"
+			typeClass = "bg-primary/20 text-primary"
+		} else if file.IsSQL {
+			icon = "📜"
+			typeLabel = "SQL"
+			typeClass = "bg-success/20 text-success"
+		} else if file.IsYAML {
+			icon = "📝"
+			typeLabel = "YAML"
+			typeClass = "bg-warning/20 text-warning"
+		}
+
+		sizeInfo := ""
+		if file.Type == "file" {
+			sizeInfo = fmt.Sprintf("<p class=\"text-xs text-textMuted\">%d bytes</p>", file.Size)
+		}
+
+		html.WriteString(fmt.Sprintf(`
+		<div class="p-4 hover:bg-surfaceHover transition-colors">
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3 min-w-0 flex-1">
+					<span class="text-2xl flex-shrink-0">%s</span>
+					<div class="min-w-0 flex-1">
+						<p class="font-medium text-text truncate">%s</p>
+						%s
+					</div>
+				</div>
+				<span class="px-2 py-1 rounded text-xs font-medium %s flex-shrink-0 ml-2">%s</span>
+			</div>
+		</div>`, icon, file.Name, sizeInfo, typeClass, typeLabel))
+	}
+
+	return html.String()
+}
+// Returns JSON for API clients
 func (s *Server) handleSkillsFiles(c *xun.Context) error {
 	skillsDir := "skills"
 
