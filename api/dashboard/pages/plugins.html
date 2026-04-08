@@ -2,49 +2,53 @@
 {{ define "content" }}
 <div class="space-y-6">
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h2 class="text-2xl font-bold text-text">Plugins Management</h2>
-        <button onclick="window.location.reload()"
-                class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v-5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
-            </svg>
-            Refresh
-        </button>
+        <h2 class="text-2xl font-bold text-text">Plugins</h2>
     </div>
 
-    <!-- Plugins List -->
-    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden" hx-get="/api/plugins" hx-trigger="load">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border">
-                <thead class="bg-surfaceHover">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Name</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Status</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-border">
-                    <tr>
-                        <td colspan="2" class="px-6 py-8 text-center text-textMuted">
-                            Loading...
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <!-- Plugin Status Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+        <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-textMuted text-sm font-medium">SQL Plugin</p>
+                        <p class="text-xs text-textMuted">skills</p>
+                    </div>
+                </div>
+                {{ if .Data.PluginsSQLEnabled }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
+                {{ else }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
+                {{ end }}
+            </div>
+            <p class="text-sm text-textMuted">SQL-based plugin system for CDC data transformation</p>
         </div>
-    </div>
-
-    <!-- Plugin Directory Info -->
-    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
-        <div class="flex items-start gap-4">
-            <div class="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                </svg>
+        
+        <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-success/20 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-textMuted text-sm font-medium">WASM Plugin</p>
+                        <p class="text-xs text-textMuted">skills/wasm</p>
+                    </div>
+                </div>
+                {{ if .Data.PluginsWASMEnabled }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-success/20 text-success">Enabled</span>
+                {{ else }}
+                <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-surfaceHover text-textMuted">Disabled</span>
+                {{ end }}
             </div>
-            <div>
-                <h3 class="text-lg font-semibold text-text mb-2">Plugin Directory</h3>
-                <p class="text-textMuted">Place WASM plugin files in the configured plugin directory. They will be auto-loaded and managed here.</p>
-            </div>
+            <p class="text-sm text-textMuted">WebAssembly plugin system for custom CDC processing</p>
         </div>
     </div>
 </div>
