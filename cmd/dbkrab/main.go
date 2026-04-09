@@ -99,9 +99,9 @@ func main() {
 
 	// Create store
 	var store *app.Store
-	switch cfg.Sink.Type {
+	switch cfg.App.Type {
 	case "sqlite":
-		store, err = app.NewStore(cfg.Sink.Path)
+		store, err = app.NewStore(cfg.App.Path)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
@@ -111,14 +111,14 @@ func main() {
 				slog.Warn("store.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite store initialized", "path", cfg.Sink.Path)
+		slog.Info("SQLite store initialized", "path", cfg.App.Path)
 	default:
-		slog.Error("unknown store type", "type", cfg.Sink.Type)
+		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
 	}
 
 	// Create DLQ (use same SQLite path as store for simplicity)
-	dlqStore, err := dlq.New(cfg.Sink.Path)
+	dlqStore, err := dlq.New(cfg.App.Path)
 	if err != nil {
 		slog.Error("failed to create DLQ", "error", err)
 		os.Exit(1)
