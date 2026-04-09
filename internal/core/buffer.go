@@ -363,13 +363,6 @@ func (tb *TransactionBuffer) cleanupLoop() {
 	}
 }
 
-// checkTimeouts is kept for potential future use (e.g., memory management)
-// Currently no timeout logic - transactions are delivered by commit-time or poll-interval gating
-func (tb *TransactionBuffer) checkTimeouts() {
-	// Reserved for future use - e.g., periodic cleanup of stale transactions
-	// Currently all delivery is handled by shouldDeliver() conditions
-}
-
 // Close stops the cleanup loop
 func (tb *TransactionBuffer) Close() {
 	close(tb.stopCh)
