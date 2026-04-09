@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1094,6 +1093,18 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 		"sinks":   sinks,
 	})
 }
+
+// getSinkPath finds the sink path from config by name
+func (s *Server) getSinkPath(name string) (string, error) {
+	for _, sink := range s.config.Sinks {
+		if sink.Name == name {
+			return sink.Path, nil
+		}
+	}
+	return "", fmt.Errorf("sink not found: %s", name)
+}
+
+// handleSinkTables handles GET /api/sinks/{name}/tables
 func (s *Server) handleSinkTables(c *xun.Context) error {
 	name := c.Request.PathValue("name")
 	if name == "" {
@@ -1102,43 +1113,26 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 			"error":   "sink name is required",
 		})
 	}
-	
-	// Check if sinks root is available
-	if s.sinksRoot == nil {
+
+	// Find sink path from config
+	sinkPath, err := s.getSinkPath(name)
+	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sinks directory not available",
+			"error":   err.Error(),
 		})
 	}
-	
-	// Validate name to prevent path traversal
-	// os.Root methods automatically reject paths that try to escape the root
-	if !filepath.IsLocal(name) {
+
+	// Check if database file exists
+	if _, err := os.Stat(sinkPath); err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "invalid sink name",
+			"error":   fmt.Sprintf("sink database not found: %s", sinkPath),
 		})
 	}
-	
-	// Try to find the database file using os.Root for secure access
-	// First try: {name}/{name}.db
-	dbRelPath := filepath.Join(name, name+".db")
-	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
-		// Second try: {name}.db
-		dbRelPath = name + ".db"
-		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
-			return c.View(map[string]any{
-				"success": false,
-				"error":   fmt.Sprintf("sink database not found: %s", name),
-			})
-		}
-	}
-	
-	// Build full path for SQLite driver
-	dbPath := filepath.Join(s.config.Sinks.BasePath(), dbRelPath)
-	
+
 	// Open read-only connection
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	db, err := sql.Open("sqlite", sinkPath+"?mode=ro")
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1146,7 +1140,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		})
 	}
 	defer func() { _ = db.Close() }()
-	
+
 	// Query tables from sqlite_master
 	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
 	if err != nil {
@@ -1156,7 +1150,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		})
 	}
 	defer func() { _ = rows.Close() }()
-	
+
 	var tables []string
 	for rows.Next() {
 		var tableName string
@@ -1168,7 +1162,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 			tables = append(tables, tableName)
 		}
 	}
-	
+
 	return c.View(map[string]any{
 		"success": true,
 		"count":   len(tables),
@@ -1185,29 +1179,21 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 			"error":   "sink name is required",
 		})
 	}
-	
-	// Check if sinks root is available
-	if s.sinksRoot == nil {
+
+	// Find sink path from config
+	sinkPath, err := s.getSinkPath(name)
+	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sinks directory not available",
+			"error":   err.Error(),
 		})
 	}
-	
-	// Validate name to prevent path traversal
-	// os.Root methods automatically reject paths that try to escape the root
-	if !filepath.IsLocal(name) {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "invalid sink name",
-		})
-	}
-	
+
 	// Parse request body
 	var req struct {
 		Query string `json:"query"`
 	}
-	
+
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return c.View(map[string]any{
@@ -1216,14 +1202,14 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 	defer func() { _ = c.Request.Body.Close() }()
-	
+
 	if err := json.Unmarshal(body, &req); err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "invalid request body",
 		})
 	}
-	
+
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
 		return c.View(map[string]any{
@@ -1231,7 +1217,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 			"error":   "query is required",
 		})
 	}
-	
+
 	// Only allow SELECT statements
 	queryUpper := strings.ToUpper(query)
 	if !strings.HasPrefix(queryUpper, "SELECT") {
@@ -1240,26 +1226,17 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 			"error":   "only SELECT statements are allowed",
 		})
 	}
-	
-	// Try to find the database file using os.Root for secure access
-	// First try: {name}/{name}.db
-	dbRelPath := filepath.Join(name, name+".db")
-	if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
-		// Second try: {name}.db
-		dbRelPath = name + ".db"
-		if _, err := s.sinksRoot.Stat(dbRelPath); err != nil {
-			return c.View(map[string]any{
-				"success": false,
-				"error":   fmt.Sprintf("sink database not found: %s", name),
-			})
-		}
+
+	// Check if database file exists
+	if _, err := os.Stat(sinkPath); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("sink database not found: %s", sinkPath),
+		})
 	}
-	
-	// Build full path for SQLite driver
-	dbPath := filepath.Join(s.config.Sinks.BasePath(), dbRelPath)
-	
+
 	// Open read-only connection
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	db, err := sql.Open("sqlite", sinkPath+"?mode=ro")
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1267,13 +1244,13 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 	defer func() { _ = db.Close() }()
-	
+
 	// Execute query with limit
 	limitQuery := query
 	if !strings.Contains(strings.ToUpper(query), "LIMIT") {
 		limitQuery = fmt.Sprintf("%s LIMIT 1000", query)
 	}
-	
+
 	rows, err := db.Query(limitQuery)
 	if err != nil {
 		return c.View(map[string]any{
@@ -1282,7 +1259,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 	defer func() { _ = rows.Close() }()
-	
+
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
@@ -1291,7 +1268,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 			"error":   fmt.Sprintf("failed to get columns: %v", err),
 		})
 	}
-	
+
 	// Fetch results
 	var results []map[string]any
 	for rows.Next() {
@@ -1300,21 +1277,21 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
-		
+
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return c.View(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("failed to scan row: %v", err),
 			})
 		}
-		
+
 		rowMap := make(map[string]any)
 		for i, col := range columns {
 			rowMap[col] = values[i]
 		}
 		results = append(results, rowMap)
 	}
-	
+
 	return c.View(map[string]any{
 		"success": true,
 		"columns": columns,
