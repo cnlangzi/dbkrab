@@ -38,7 +38,7 @@ type Poller struct {
 	pausedMu      sync.RWMutex
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
-	txBuffer      *TransactionBuffer // For cross-table transaction integrity
+	txBuffer      *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
 	
 	// Graceful degradation fields
 	disconnectStart time.Time
@@ -94,30 +94,10 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 		stopCh:   make(chan struct{}),
 	}
 
-	// Initialize transaction buffer if enabled
+	// TransactionBuffer is deprecated - not needed with simplified polling
+	// Keeping config for backward compatibility but not using it
 	if cfg.CDC.TransactionBuffer.Enabled {
-		maxWaitTime, err := time.ParseDuration(cfg.CDC.TransactionBuffer.MaxWaitTime)
-		if err != nil {
-			slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
-			maxWaitTime = 30 * time.Second
-		}
-		// Derive pollInterval from CDC poll configuration
-		pollInterval, err := cfg.Interval()
-		if err != nil {
-			slog.Warn("invalid cdc.interval, poll-interval gating disabled", "error", err)
-			pollInterval = 0
-		}
-		poller.txBuffer = NewTransactionBuffer(
-			maxWaitTime,
-			pollInterval,
-			cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-			cfg.CDC.TransactionBuffer.MaxBatchBytes,
-		)
-		slog.Info("transaction buffer enabled",
-			"max_wait_time", maxWaitTime,
-			"poll_interval", pollInterval,
-			"max_transactions_per_batch", cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-			"max_batch_bytes", cfg.CDC.TransactionBuffer.MaxBatchBytes)
+		slog.Warn("transaction_buffer is deprecated, not used in simplified polling")
 	}
 
 	// Initialize gap detector if CDC protection is enabled
@@ -191,30 +171,18 @@ func (p *Poller) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			// Flush buffer before exit
-			p.flushBuffer(ctx)
 			return ctx.Err()
 		case <-p.stopCh:
-			// Flush buffer before stop
-			p.flushBuffer(ctx)
 			return nil
 		case newCfg := <-p.reloadCh:
 			// Config reload signal received
 			p.pendingCfg = newCfg
-			slog.Info("config reload pending, will apply at transaction boundary")
+			slog.Info("config reload pending, will apply at next poll cycle")
 		case <-ticker.C:
-			// Check if need to drain buffer before applying config
-			if p.needDrain {
-				if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
-					// Skip polling, wait for buffer to drain
-					slog.Debug("waiting for txBuffer to drain before applying config")
-					continue
-				}
-				// Buffer is empty, safe to apply config
+			if p.pendingCfg != nil {
 				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
 				}
-				continue
 			}
 
 			if err := p.poll(ctx); err != nil {
@@ -234,7 +202,7 @@ func (p *Poller) Start(ctx context.Context) error {
 				// Continue polling despite errors
 			}
 
-			// Check for pending config after successful poll (at transaction boundary)
+			// Check for pending config after successful poll
 			if p.pendingCfg != nil {
 				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
@@ -371,16 +339,8 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 	}
 
-	// If transaction buffer is enabled, use it for cross-table integrity
-	if p.txBuffer != nil {
-		if len(allChanges) > 0 {
-			return p.processWithBuffer(ctx, allChanges, results)
-		}
-		// No changes but still update offsets for observability
-		return p.updateOffsets(results, allChanges)
-	}
-
-	// Otherwise, use legacy direct processing
+	// Always use processDirect - no transaction buffer needed
+	// All changes from the same poll cycle arrive together, simplifying cross-table handling
 	if len(allChanges) > 0 {
 		return p.processDirect(ctx, allChanges, results)
 	}
