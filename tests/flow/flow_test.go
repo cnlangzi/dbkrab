@@ -599,7 +599,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
 		}
 	}
 
