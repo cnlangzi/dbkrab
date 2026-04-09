@@ -11,7 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Loader handles loading and parsing SQL plugin configurations
+// Loader handles loading and parsing SQL plugin configurations.
+// Deprecated: The New() function should be used instead for new code.
 type Loader struct {
 	pluginsDir string
 }
