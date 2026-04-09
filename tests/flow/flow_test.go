@@ -14,7 +14,6 @@ package flow
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -123,9 +122,8 @@ func newTestHarness(t *testing.T) *testHarness {
 }
 
 func (h *testHarness) cleanup() {
-	if err := os.RemoveAll(h.tmpDir); err != nil {
-		slog.Error("cleanup failed", "path", h.tmpDir, "error", err)
-	}
+	//nolint:errcheck
+	os.RemoveAll(h.tmpDir)
 }
 
 // setupSkillFixtures copies skill fixtures to the test skills directory
@@ -234,9 +232,8 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	// Setup plugin manager
 	pluginMgr := h.setupPluginManager(dbConfigs)
 	defer func() {
-		if err := pluginMgr.Stop(); err != nil {
-			slog.Error("plugin manager stop failed", "error", err)
-		}
+		//nolint:errcheck
+		pluginMgr.Stop()
 	}()
 
 	var handlerCalled bool
@@ -292,9 +289,8 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			if err := h.offsetStore.Set(r.table, r.lastLSN.String()); err != nil {
-				slog.Error("offset store set failed", "table", r.table, "lsn", r.lastLSN.String(), "error", err)
-			}
+			//nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String())
 		}
 	}
 
@@ -313,9 +309,8 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
 	defer func() {
-		if err := pluginMgr.Stop(); err != nil {
-			slog.Error("plugin manager stop failed", "error", err)
-		}
+		//nolint:errcheck
+		pluginMgr.Stop()
 	}()
 
 	handler := &simpleHandler{
@@ -392,9 +387,8 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			if err := h.offsetStore.Set(r.table, r.lastLSN.String()); err != nil {
-				slog.Error("offset store set failed", "table", r.table, "lsn", r.lastLSN.String(), "error", err)
-			}
+			//nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String())
 		}
 	}
 
@@ -422,9 +416,8 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 
 	pluginMgr := h.setupPluginManager(dbConfigs)
 	defer func() {
-		if err := pluginMgr.Stop(); err != nil {
-			slog.Error("plugin manager stop failed", "error", err)
-		}
+		//nolint:errcheck
+		pluginMgr.Stop()
 	}()
 
 	handler := &simpleHandler{
@@ -537,9 +530,8 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	tx := txs[0]
 
 	// Set initial offset
-	if err := h.offsetStore.Set("dbo.orders", "0000000001000000"); err != nil {
-		slog.Error("offset store set failed", "table", "dbo.orders", "error", err)
-	}
+	//nolint:errcheck
+	h.offsetStore.Set("dbo.orders", "0000000001000000")
 
 	// Call handler - should fail
 	err := handler.Handle(&tx)
