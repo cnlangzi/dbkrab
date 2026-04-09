@@ -13,6 +13,7 @@ mssql:
   user: sa                 # Username
   password: your_password  # Password
   database: your_database  # Database name
+  timezone: UTC            # Timezone for datetime conversion (e.g., UTC, Local, Asia/Shanghai)
 
 # -----------------------------------------------------------------------------
 # CDC Monitored Tables
