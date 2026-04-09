@@ -1059,74 +1059,41 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 }
 
 // handleSinksList handles GET /api/sinks/list
+// Returns sinks configured in config.yaml with file status (exists/size/modTime)
 func (s *Server) handleSinksList(c *xun.Context) error {
-	// Check if sinks root is available
-	if s.sinksRoot == nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "sinks directory not available",
-		})
-	}
-	
-	entries, err := fs.ReadDir(s.sinksRoot.FS(), ".")
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to read sinks directory: %v", err),
-		})
-	}
-	
 	var sinks []map[string]any
-	for _, entry := range entries {
-		if entry.IsDir() {
-			// Check for .db files inside the directory
-			dbFiles, err := fs.ReadDir(s.sinksRoot.FS(), entry.Name())
-			if err != nil {
-				continue
+
+	// Get sinks from config (sinks and plugins are same-level in config)
+	if s.config != nil && len(s.config.Sinks.Databases) > 0 {
+		for _, dbCfg := range s.config.Sinks.Databases {
+			sink := map[string]any{
+				"name":       dbCfg.Name,
+				"type":       dbCfg.Type,
+				"file":       dbCfg.Path,
+				"configured": true,
 			}
-			for _, dbFile := range dbFiles {
-				if strings.HasSuffix(strings.ToLower(dbFile.Name()), ".db") {
-					filePath := filepath.Join(entry.Name(), dbFile.Name())
-					info, err := s.sinksRoot.Stat(filePath)
-					if err != nil {
-						continue
-					}
-					sinks = append(sinks, map[string]any{
-						"name":      entry.Name(),
-						"file":      dbFile.Name(),
-						"path":      filePath,
-						"size":      info.Size(),
-						"sizeHuman": formatFileSize(info.Size()),
-						"modTime":   info.ModTime().Format(time.RFC3339),
-					})
-				}
+
+			// Check if database file exists
+			if info, err := os.Stat(dbCfg.Path); err == nil {
+				sink["exists"] = true
+				sink["size"] = info.Size()
+				sink["sizeHuman"] = formatFileSize(info.Size())
+				sink["modTime"] = info.ModTime().Format(time.RFC3339)
+			} else {
+				sink["exists"] = false
+				sink["sizeHuman"] = "N/A"
 			}
-		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".db") {
-			// Direct .db file in sinks directory
-			info, err := s.sinksRoot.Stat(entry.Name())
-			if err != nil {
-				continue
-			}
-			name := strings.TrimSuffix(entry.Name(), ".db")
-			sinks = append(sinks, map[string]any{
-				"name":      name,
-				"file":      entry.Name(),
-				"path":      entry.Name(),
-				"size":      info.Size(),
-				"sizeHuman": formatFileSize(info.Size()),
-				"modTime":   info.ModTime().Format(time.RFC3339),
-			})
+
+			sinks = append(sinks, sink)
 		}
 	}
-	
+
 	return c.View(map[string]any{
 		"success": true,
 		"count":   len(sinks),
 		"sinks":   sinks,
 	})
 }
-
-// handleSinkTables handles GET /api/sinks/{name}/tables
 func (s *Server) handleSinkTables(c *xun.Context) error {
 	name := c.Request.PathValue("name")
 	if name == "" {

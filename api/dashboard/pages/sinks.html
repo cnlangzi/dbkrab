@@ -78,8 +78,8 @@ function renderSinks(sinks) {
                 <svg class="mx-auto h-12 w-12 text-textMuted mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
                 </svg>
-                <p class="text-textMuted">No sink databases found</p>
-                <p class="text-textMuted text-sm mt-1">Sink databases will appear here when SQL plugins write data</p>
+                <p class="text-textMuted">No sinks configured</p>
+                <p class="text-textMuted text-sm mt-1">Add sinks to config.yaml to enable data output</p>
             </div>
         `;
         return;
@@ -87,40 +87,57 @@ function renderSinks(sinks) {
 
     container.innerHTML = `
         <div class="divide-y divide-border">
-            ${sinks.map(sink => `
-                <div class="p-4 sm:p-6 hover:bg-surfaceHover/50 transition-colors cursor-pointer" 
-                     onclick="window.location.href='/sinks/${encodeURIComponent(sink.name)}'">
+            ${sinks.map(sink => {
+                const exists = sink.exists === true;
+                const statusClass = exists ? '' : 'opacity-50';
+                const cursorClass = exists ? 'cursor-pointer hover:bg-surfaceHover/50' : 'cursor-not-allowed';
+                const statusBadge = exists 
+                    ? '<span class="px-2 py-1 text-xs rounded-full bg-success/20 text-success">Active</span>'
+                    : '<span class="px-2 py-1 text-xs rounded-full bg-warning/20 text-warning">Not Found</span>';
+                const clickHandler = exists 
+                    ? `onclick="window.location.href='/sinks/${encodeURIComponent(sink.name)}'"` 
+                    : 'onclick="showNotFound()"';
+                
+                return `
+                <div class="p-4 sm:p-6 transition-colors ${cursorClass} ${statusClass}" ${clickHandler}>
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-4 flex-1 min-w-0">
-                            <div class="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
-                                <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div class="w-12 h-12 rounded-lg ${exists ? 'bg-primary/20' : 'bg-surfaceHover'} flex items-center justify-center flex-shrink-0">
+                                <svg class="w-6 h-6 ${exists ? 'text-primary' : 'text-textMuted'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
                                 </svg>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <h4 class="text-base sm:text-lg font-semibold text-text truncate">${escapeHtml(sink.name)}</h4>
+                                <div class="flex items-center gap-2">
+                                    <h4 class="text-base sm:text-lg font-semibold text-text truncate">${escapeHtml(sink.name)}</h4>
+                                    ${statusBadge}
+                                </div>
                                 <p class="text-sm text-textMuted truncate">${escapeHtml(sink.file)}</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-4 text-sm text-textMuted">
                             <div class="hidden sm:block text-right">
                                 <p class="text-text font-medium">${sink.sizeHuman}</p>
-                                <p class="text-xs">${formatDate(sink.modTime)}</p>
+                                ${sink.modTime ? `<p class=\"text-xs\">${formatDate(sink.modTime)}</p>` : ''}
                             </div>
-                            <svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            ${exists ? `<svg class="w-5 h-5 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                            </svg>
+                            </svg>` : ''}
                         </div>
                     </div>
                     <!-- Mobile-only size/time -->
                     <div class="sm:hidden mt-3 flex items-center gap-4 text-xs text-textMuted">
                         <span>📁 ${sink.sizeHuman}</span>
-                        <span>🕐 ${formatDate(sink.modTime)}</span>
+                        ${sink.modTime ? `<span>🕐 ${formatDate(sink.modTime)}</span>` : ''}
                     </div>
                 </div>
-            `).join('')}
+            `}).join('')}
         </div>
     `;
+}
+
+function showNotFound() {
+    showError('Sink database file not found. Data will be written when SQL plugins process changes.');
 }
 
 function escapeHtml(text) {
