@@ -843,20 +843,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 
 	newCfg := p.pendingCfg
 
-	// Check if transaction_buffer change requires drain
-	if newCfg.CDC.TransactionBuffer.Enabled != p.cfg.CDC.TransactionBuffer.Enabled ||
-		newCfg.CDC.TransactionBuffer.MaxWaitTime != p.cfg.CDC.TransactionBuffer.MaxWaitTime ||
-		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch != p.cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch ||
-		newCfg.CDC.TransactionBuffer.MaxBatchBytes != p.cfg.CDC.TransactionBuffer.MaxBatchBytes {
-		// Need to drain buffer before applying
-		if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
-			slog.Info("transaction_buffer changed, waiting for buffer to drain")
-			p.needDrain = true
-			p.needRebuildTx = true
-			// Will apply on next cycle after drain
-			return nil
-		}
-	}
+	// No need to check transaction_buffer changes - not used in simplified polling
 
 	// Safe to apply config now
 	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.CDC.Interval)
@@ -886,15 +873,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	p.cfg.GracefulDegradation = newCfg.GracefulDegradation
 	slog.Debug("graceful_degradation params updated")
 
-	// Handle transaction_buffer rebuild if needed
-	if p.needRebuildTx {
-		if err := p.rebuildTxBuffer(newCfg); err != nil {
-			slog.Error("failed to rebuild txBuffer", "error", err)
-			return err
-		}
-		p.needRebuildTx = false
-		p.needDrain = false
-	}
+	// No transaction buffer rebuild needed - deprecated
 
 	// Update main config reference
 	p.cfg = newCfg
@@ -904,101 +883,17 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	return nil
 }
 
-// rebuildTxBuffer rebuilds the transaction buffer with new config
+// rebuildTxBuffer is DEPRECATED - not used in simplified polling
+// Kept for backward compatibility
 func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
-	if !newCfg.CDC.TransactionBuffer.Enabled {
-		// Disable transaction buffer
-		if p.txBuffer != nil {
-			p.txBuffer.Close()
-			p.txBuffer = nil
-			slog.Info("transaction buffer disabled")
-		}
-		return nil
-	}
-
-	maxWaitTime, err := time.ParseDuration(newCfg.CDC.TransactionBuffer.MaxWaitTime)
-	if err != nil {
-		slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
-		maxWaitTime = 30 * time.Second
-	}
-
-	// Derive pollInterval from CDC poll configuration
-	pollInterval, err := newCfg.Interval()
-	if err != nil {
-		slog.Warn("invalid cdc.interval, poll-interval gating disabled", "error", err)
-		pollInterval = 0
-	}
-
-	// Close old buffer
-	if p.txBuffer != nil {
-		p.txBuffer.Close()
-	}
-
-	// Create new buffer with updated config
-	p.txBuffer = NewTransactionBuffer(
-		maxWaitTime,
-		pollInterval,
-		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-		newCfg.CDC.TransactionBuffer.MaxBatchBytes,
-	)
-
-	slog.Info("transaction buffer rebuilt",
-		"max_wait_time", maxWaitTime,
-		"poll_interval", pollInterval,
-		"max_transactions_per_batch", newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-		"max_batch_bytes", newCfg.CDC.TransactionBuffer.MaxBatchBytes)
-
+	slog.Warn("rebuildTxBuffer called but transaction buffer is deprecated")
 	return nil
 }
 
-// flushBuffer forces flush all pending transactions (for shutdown)
+// flushBuffer is DEPRECATED - kept for backward compatibility
 func (p *Poller) flushBuffer(ctx context.Context) {
-	if p.txBuffer == nil {
-		return
-	}
-
-	slog.Info("flushing transaction buffer", "pending_count", p.txBuffer.Size())
-
-	// Get all pending transactions
-	completeTxs := p.txBuffer.Flush()
-	if len(completeTxs) == 0 {
-		return
-	}
-
-	// Process each transaction
-	for _, tx := range completeTxs {
-		// Handler processing (plugin writes to its own sink)
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(tx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("flush handler error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "flush_handler")
-			}
-		}
-
-		// Store processing
-		if p.store != nil {
-			err := retry.DoWithName(ctx, func() error {
-				return p.store.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_store_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("flush store error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "flush_store")
-			}
-		}
-	}
-
-	slog.Info("transaction buffer flush complete", "flushed_count", len(completeTxs))
+	// No-op - transaction buffer no longer used
+	slog.Debug("flushBuffer called but transaction buffer is deprecated")
 }
 
 // tablesEqual checks if two table lists are equal (order-independent)

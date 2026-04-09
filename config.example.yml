@@ -40,13 +40,6 @@ cdc:
     json_path: ./data/offset.json   # JSON file path
     sqlite_path: ./data/offset.db   # SQLite file path
 
-  # Transaction buffer: cross-table transaction consistency & batch optimization
-  transaction_buffer:
-    enabled: false            # Enable transaction buffer
-    max_wait_time: 30s        # Max wait time per transaction
-    max_transactions_per_batch: 1000   # Max transactions per batch
-    max_batch_bytes: 10485760  # 10MB, max batch size
-
   # Gap protection: prevents data loss from CDC cleanup
   gap:
     enabled: true             # Enable gap detection
