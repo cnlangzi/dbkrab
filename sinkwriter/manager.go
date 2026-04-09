@@ -2,6 +2,7 @@ package sinkwriter
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -90,30 +91,57 @@ func (m *Manager) GetWriter(dbName string) (SinkWriter, error) {
 // WriteRoutes sink operations to appropriate writers based on Database field
 func (m *Manager) Write(sinks []core.Sink) error {
 	if len(sinks) == 0 {
+		slog.Debug("SinkWriterManager.Write: no sinks to write")
 		return nil
 	}
+
+	slog.Info("SinkWriterManager.Write: routing sinks",
+		"total_sinks", len(sinks))
 
 	// Group sinks by database
 	sinksByDB := make(map[string][]core.Sink)
 	for _, sink := range sinks {
 		dbName := sink.Config.Database
 		if dbName == "" {
+			slog.Error("SinkWriterManager.Write: sink has no database configured",
+				"sink_name", sink.Config.Name)
 			return fmt.Errorf("sink %s has no database configured", sink.Config.Name)
 		}
 		sinksByDB[dbName] = append(sinksByDB[dbName], sink)
 	}
 
+	slog.Debug("SinkWriterManager.Write: sinks grouped by database",
+		"databases", len(sinksByDB))
+
 	// Write to each database
 	for dbName, dbSinks := range sinksByDB {
+		slog.Debug("SinkWriterManager.Write: writing to database",
+			"database", dbName,
+			"sinks", len(dbSinks))
+
 		writer, err := m.GetWriter(dbName)
 		if err != nil {
+			slog.Error("SinkWriterManager.Write: failed to get writer",
+				"database", dbName,
+				"error", err)
 			return fmt.Errorf("get writer for %s: %w", dbName, err)
 		}
 
 		if err := writer.Write(dbSinks); err != nil {
+			slog.Error("SinkWriterManager.Write: write failed",
+				"database", dbName,
+				"error", err)
 			return fmt.Errorf("write to %s: %w", dbName, err)
 		}
+
+		slog.Debug("SinkWriterManager.Write: write completed",
+			"database", dbName,
+			"sinks_written", len(dbSinks))
 	}
+
+	slog.Info("SinkWriterManager.Write: completed successfully",
+		"total_sinks", len(sinks),
+		"databases", len(sinksByDB))
 
 	return nil
 }
