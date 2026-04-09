@@ -11,7 +11,23 @@ import (
 	"strings"
 )
 
-// numericPattern matches numeric strings (integers, decimals, scientific notation)
+// convertCommitTime reinterprets MSSQL driver's "UTC" time as SQL Server's local timezone
+// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
+// The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
+// but Go driver incorrectly treats it as UTC.
+// We reinterpret it using the configured timezone and convert to UTC for storage.
+func convertCommitTime(driverTime time.Time, timezone *time.Location) time.Time {
+	if timezone == nil || timezone == time.Local {
+		// No timezone configured - use driver's value as-is
+		return driverTime.UTC()
+	}
+	// Reinterpret driver's "UTC" time as SQL Server's local timezone, then convert to UTC
+	return time.Date(
+		driverTime.Year(), driverTime.Month(), driverTime.Day(),
+		driverTime.Hour(), driverTime.Minute(), driverTime.Second(), driverTime.Nanosecond(),
+		timezone,
+	).UTC()
+}
 // Examples: "123", "999.99", "700.0000", "-123.45", "1.23e10"
 var numericPattern = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][+-]?\d+)?$`)
 
@@ -160,27 +176,10 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		if idx, ok := colIndex["__$commit_time"]; ok {
 			switch v := values[idx].(type) {
 			case time.Time:
-				if q.timezone != nil {
-					// Reinterpret driver's "UTC" time as SQL Server's local timezone
-					commitTime = time.Date(
-						v.Year(), v.Month(), v.Day(),
-						v.Hour(), v.Minute(), v.Second(), v.Nanosecond(),
-						q.timezone,
-					).UTC()
-				} else {
-					commitTime = v.UTC()
-				}
+				commitTime = convertCommitTime(v, q.timezone)
 			case string:
 				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
-					if q.timezone != nil {
-						commitTime = time.Date(
-							parsed.Year(), parsed.Month(), parsed.Day(),
-							parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(),
-							q.timezone,
-						).UTC()
-					} else {
-						commitTime = parsed.UTC()
-					}
+					commitTime = convertCommitTime(parsed, q.timezone)
 				}
 			}
 		}
