@@ -31,6 +31,17 @@ plugins:
   sql:
     enabled: true
     path: ./skills/sql
+    # Database configurations (maps database names to actual storage)
+    databases:
+      business:
+        type: sqlite
+        path: ./data/sinks/business.db
+      analytics:
+        type: duckdb
+        path: ./data/sinks/analytics.duckdb
+      reporting:
+        type: mssql
+        connection_string: "Server=localhost;Database=reporting;User=sa;Password=...;"
 
 # API server port for plugin management
 # Endpoints:

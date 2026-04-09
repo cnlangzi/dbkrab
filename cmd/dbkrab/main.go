@@ -191,12 +191,14 @@ func main() {
 
 	// Initialize SQL plugins
 	if err := pluginManager.Init(ctx, db, struct {
-		Enabled bool
-		Path    string
+		Enabled   bool
+		Path      string
+		Databases map[string]any
 	}{
-		Enabled: config.IsEnabled(cfg.Plugins.SQL.Enabled),
-		Path:    cfg.Plugins.SQL.Path,
-	}); err != nil {
+		Enabled:   config.IsEnabled(cfg.Plugins.SQL.Enabled),
+		Path:      cfg.Plugins.SQL.Path,
+		Databases: nil, // TODO: pass database configs from cfg.Plugins.SQL.Databases
+	}, cfg.Plugins.SQL.Databases); err != nil {
 		slog.Warn("plugin initialization failed", "error", err)
 	}
 

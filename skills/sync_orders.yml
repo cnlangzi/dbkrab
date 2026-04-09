@@ -4,6 +4,8 @@ description: "orders CDC sync to order_sync"
 on:
   - orders
 
+database: business
+
 sinks:
   - name: sync
     when: [insert, update]

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +26,7 @@ type debounceEntry struct {
 // Plugin implements the plugin.Plugin interface for SQL plugins.
 // Each SQL plugin wraps a skill (yaml config + SQL templates) with an execution engine.
 // It supports hot-reloading when skill files change.
+// Sink writing is handled by the platform layer based on the Database field in returned sinks.
 type Plugin struct {
 	name    string
 	loader  *Loader
@@ -38,10 +38,6 @@ type Plugin struct {
 	mu      sync.RWMutex // only for Reload() and metadata updates
 	metadata PluginMetadata
 
-	// SQLite sink for business data output (optional)
-	sink    *SQLiteSink
-	pool    *Pool
-
 	// internal watch fields (each plugin watches its own files)
 	watchTicker *time.Ticker
 	watchQuit   chan struct{}
@@ -52,6 +48,7 @@ type Plugin struct {
 
 // NewPlugin creates a new SQL plugin from a skill.
 // Pass db=nil if you need to call AttachDB later.
+// Sink writing is handled by the platform layer - this plugin only handles SQL execution.
 func NewPlugin(name string, skill *Skill, loader *Loader, db *sql.DB) *Plugin {
 	p := &Plugin{
 		name:   name,
@@ -65,21 +62,6 @@ func NewPlugin(name string, skill *Skill, loader *Loader, db *sql.DB) *Plugin {
 	p.skill.Store(skill)
 	if db != nil {
 		p.engine.Store(NewEngine(skill, db))
-	}
-
-	// Initialize SQLite sink if skill specifies sqlite path
-	if skill.SQLite != "" {
-		pool, err := NewPool(name, skill.SQLite)
-		if err != nil {
-			fmt.Printf("Warning: failed to create sink pool for %s: %v\n", name, err)
-		} else {
-			p.pool = pool
-			p.sink = NewSQLiteSink(skill, pool)
-			// Run initial migrations
-			if err := p.sink.RunMigrations(); err != nil {
-				fmt.Printf("Warning: failed to run migrations for %s: %v\n", name, err)
-			}
-		}
 	}
 
 	// Initialize metadata
@@ -126,19 +108,6 @@ func (p *Plugin) checkChanges() {
 	ymlPath := filepath.Join(p.watchDir, p.name+".yml")
 	sqlFiles := p.getSQLFiles()
 
-	// Get migration files if sink is configured
-	var migrationFiles []string
-	if p.pool != nil {
-		migrationDir := p.pool.MigrationsPath()
-		if entries, err := os.ReadDir(migrationDir); err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
-					migrationFiles = append(migrationFiles, filepath.Join(migrationDir, entry.Name()))
-				}
-			}
-		}
-	}
-
 	now := time.Now()
 
 	p.mu.Lock()
@@ -182,28 +151,6 @@ func (p *Plugin) checkChanges() {
 					cur.modTime = info.ModTime()
 					cur.size = info.Size()
 					p.watchPending[sqlPath] = cur
-				}
-			}
-		}
-	}
-
-	// Check migration files
-	for _, migPath := range migrationFiles {
-		if _, err := os.Stat(migPath); os.IsNotExist(err) {
-			cur := p.watchPending[migPath]
-			cur.debounceAt = now.Add(500 * time.Millisecond)
-			cur.modTime = time.Time{}
-			cur.size = 0
-			p.watchPending[migPath] = cur
-		} else {
-			info, err := os.Stat(migPath)
-			if err == nil {
-				cur := p.watchPending[migPath]
-				if info.ModTime().After(cur.modTime) || info.Size() != cur.size {
-					cur.debounceAt = now.Add(500 * time.Millisecond)
-					cur.modTime = info.ModTime()
-					cur.size = info.Size()
-					p.watchPending[migPath] = cur
 				}
 			}
 		}
@@ -467,54 +414,31 @@ func (p *Plugin) reload() error {
 func (p *Plugin) Stop() error {
 	// Stop internal watcher
 	p.StopWatch()
-
-	// Close SQLite sink pool if present
-	if p.sink != nil {
-		if err := p.sink.Close(); err != nil {
-			fmt.Printf("Warning: failed to close sink for %s: %v\n", p.name, err)
-		}
-	}
-
 	return nil
 }
 
 // Handle processes a CDC transaction through this SQL plugin.
 // Uses atomic.Value for lock-free read of skill and engine.
-// If a sink is configured, writes transformed data to the sink.
-// Otherwise, performs transformation only (no sink output).
-func (p *Plugin) Handle(tx *core.Transaction) error {
+// Returns []core.Sink with Database field set for platform layer to route.
+// The caller (platform layer) is responsible for routing sinks to appropriate SinkWriters.
+func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	skill := p.skill.Load().(*Skill) // atomic.Value, lock-free read
 	if skill == nil {
-		return fmt.Errorf("skill not loaded")
+		return nil, fmt.Errorf("skill not loaded")
 	}
 
 	engine := p.engine.Load().(*Engine) // atomic.Value, lock-free read
 	if engine == nil {
-		return fmt.Errorf("engine not initialized, call AttachDB first")
+		return nil, fmt.Errorf("engine not initialized, call AttachDB first")
 	}
 
-	// Execute transformation
+	// Execute transformation - returns sinks with Database field set
 	ops, err := engine.Handle(tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// If sink is configured, write to it; otherwise just transform
-	if p.sink != nil && len(ops) > 0 {
-		return p.sink.Write(ops)
-	}
-
-	return nil
-}
-
-// GetSink returns the SQLiteSink for this plugin (if configured)
-func (p *Plugin) GetSink() *SQLiteSink {
-	return p.sink
-}
-
-// HasSink returns true if this plugin has a sink configured
-func (p *Plugin) HasSink() bool {
-	return p.sink != nil
+	return ops, nil
 }
 
 // calcFileSHA256 calculates SHA256 hash of file content

@@ -33,8 +33,16 @@ type PluginsConfig struct {
 
 // PluginConfig contains plugin configuration for SQL plugins
 type PluginConfig struct {
-	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
-	Path    string `yaml:"path"`
+	Enabled   *bool                  `yaml:"enabled"` // true/on/1=enable, otherwise disabled
+	Path      string                 `yaml:"path"`
+	Databases map[string]DatabaseConfig `yaml:"databases"` // Database name -> storage config
+}
+
+// DatabaseConfig contains configuration for a named database
+type DatabaseConfig struct {
+	Type            string `yaml:"type"`             // sqlite, duckdb, mssql, etc.
+	Path            string `yaml:"path"`             // Path for file-based databases
+	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
 }
 
 // IsEnabled returns true only if val is explicitly set to true, "on", or "1"
