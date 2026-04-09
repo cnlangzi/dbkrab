@@ -11,7 +11,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                 </svg>
             </button>
-            <h2 class="text-2xl sm:text-3xl font-bold text-text">Sink: <span id="sink-name-display" class="text-primary">{{.Data.sinkName}}</span></h2>
+            <h2 class="text-2xl sm:text-3xl font-bold text-text">Sink: <span id="sink-name-display" class="text-primary">Loading...</span></h2>
         </div>
         <p class="text-sm text-textMuted">Execute SQL queries against this sink database</p>
     </div>
@@ -79,8 +79,21 @@
 </div>
 
 <script>
-const sinkId = '{{.Data.sinkId}}';
-const sinkName = '{{.Data.sinkName}}';
+const sinkId = window.location.pathname.split('/').pop(); // Extract ID from URL
+let sinkName = sinkId;
+
+// Update display name from API
+fetch('/api/sinks/list')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const sink = data.sinks.find(s => s.id === sinkId);
+            if (sink) {
+                sinkName = sink.name;
+                document.getElementById('sink-name-display').textContent = sinkName;
+            }
+        }
+    });
 let availableTables = [];
 
 // Load tables on page load
