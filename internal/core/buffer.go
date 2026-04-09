@@ -104,12 +104,17 @@ func (tb *TransactionBuffer) Add(change Change) {
 
 	pending, exists := tb.pending[txID]
 	if !exists {
+		// Initialize commitTime from change, or default to firstSeen if not available
+		commitTime := change.CommitTime
+		if commitTime.IsZero() {
+			commitTime = time.Now()
+		}
 		pending = &pendingTransaction{
 			transactionID: txID,
 			changes:       make([]Change, 0),
 			firstSeen:     time.Now(),
+			commitTime:    commitTime, // Default to now if Change.CommitTime is zero
 			tables:        make(map[string]bool),
-			commitTime:    change.CommitTime, // Set from first change's CommitTime
 		}
 		tb.pending[txID] = pending
 	}
@@ -239,21 +244,13 @@ func (tb *TransactionBuffer) shouldDeliver(pending *pendingTransaction, now time
 	// Condition 2: now.Sub(tx.CommitTime) > pollInterval * safetyMultiplier (poll-interval gating)
 	// This is a safety boundary: even if other tables haven't confirmed,
 	// we deliver after pollInterval * 2 has passed since commit
-	// Use FirstSeenTime as fallback if CommitTime is not available
 	if tb.pollInterval > 0 {
-		var age time.Duration
-		if !pending.commitTime.IsZero() {
-			age = now.Sub(pending.commitTime)
-		} else {
-			age = now.Sub(pending.firstSeen)
-		}
 		safetyThreshold := tb.pollInterval * pollIntervalSafetyMultiplier
-		if age > safetyThreshold {
+		if now.Sub(pending.commitTime) > safetyThreshold {
 			slog.Debug("transaction ready for delivery by poll-interval gating",
 				"tx_id", pending.transactionID,
 				"commit_time", pending.commitTime,
-				"first_seen", pending.firstSeen,
-				"age", age,
+				"age_since_commit", now.Sub(pending.commitTime),
 				"poll_interval", tb.pollInterval,
 				"safety_threshold", safetyThreshold)
 			return DeliveryReasonPollInterval
