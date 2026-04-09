@@ -29,7 +29,7 @@ type Config struct {
 type CDCConfig struct {
 	PollingInterval string                 `yaml:"polling_interval"`
 	Offset          OffsetConfig           `yaml:"offset"`
-	Protection      CDCProtectionConfig    `yaml:"protection"`
+	Gap            CDCProtectionConfig    `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
@@ -175,23 +175,23 @@ func Load(path string) (*Config, error) {
 	}
 
 	// CDC protection defaults
-	if cfg.CDC.Protection.CheckInterval == "" {
-		cfg.CDC.Protection.CheckInterval = "1m"
+	if cfg.CDC.Gap.CheckInterval == "" {
+		cfg.CDC.Gap.CheckInterval = "1m"
 	}
-	if cfg.CDC.Protection.WarningLagBytes == 0 {
-		cfg.CDC.Protection.WarningLagBytes = 100 * 1024 * 1024 // 100MB
+	if cfg.CDC.Gap.WarningLagBytes == 0 {
+		cfg.CDC.Gap.WarningLagBytes = 100 * 1024 * 1024 // 100MB
 	}
-	if cfg.CDC.Protection.CriticalLagBytes == 0 {
-		cfg.CDC.Protection.CriticalLagBytes = 1024 * 1024 * 1024 // 1GB
+	if cfg.CDC.Gap.CriticalLagBytes == 0 {
+		cfg.CDC.Gap.CriticalLagBytes = 1024 * 1024 * 1024 // 1GB
 	}
-	if cfg.CDC.Protection.WarningLagDuration == "" {
-		cfg.CDC.Protection.WarningLagDuration = "1h"
+	if cfg.CDC.Gap.WarningLagDuration == "" {
+		cfg.CDC.Gap.WarningLagDuration = "1h"
 	}
-	if cfg.CDC.Protection.CriticalLagDuration == "" {
-		cfg.CDC.Protection.CriticalLagDuration = "6h"
+	if cfg.CDC.Gap.CriticalLagDuration == "" {
+		cfg.CDC.Gap.CriticalLagDuration = "6h"
 	}
-	if cfg.CDC.Protection.Recovery.Strategy == "" {
-		cfg.CDC.Protection.Recovery.Strategy = "manual" // Default to manual intervention
+	if cfg.CDC.Gap.Recovery.Strategy == "" {
+		cfg.CDC.Gap.Recovery.Strategy = "manual" // Default to manual intervention
 	}
 
 	// Transaction buffer defaults
@@ -255,26 +255,26 @@ func (c *Config) PollingInterval() (time.Duration, error) {
 
 // CDCCheckInterval returns the CDC gap check interval
 func (c *Config) CDCCheckInterval() (time.Duration, error) {
-	if c.CDC.Protection.CheckInterval == "" {
+	if c.CDC.Gap.CheckInterval == "" {
 		return 1 * time.Minute, nil
 	}
-	return time.ParseDuration(c.CDC.Protection.CheckInterval)
+	return time.ParseDuration(c.CDC.Gap.CheckInterval)
 }
 
 // WarningLagDuration returns the warning lag duration threshold
 func (c *Config) WarningLagDuration() (time.Duration, error) {
-	if c.CDC.Protection.WarningLagDuration == "" {
+	if c.CDC.Gap.WarningLagDuration == "" {
 		return 1 * time.Hour, nil
 	}
-	return time.ParseDuration(c.CDC.Protection.WarningLagDuration)
+	return time.ParseDuration(c.CDC.Gap.WarningLagDuration)
 }
 
 // CriticalLagDuration returns the critical lag duration threshold
 func (c *Config) CriticalLagDuration() (time.Duration, error) {
-	if c.CDC.Protection.CriticalLagDuration == "" {
+	if c.CDC.Gap.CriticalLagDuration == "" {
 		return 6 * time.Hour, nil
 	}
-	return time.ParseDuration(c.CDC.Protection.CriticalLagDuration)
+	return time.ParseDuration(c.CDC.Gap.CriticalLagDuration)
 }
 
 // Save writes the config to a YAML file

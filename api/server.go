@@ -583,20 +583,20 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 
 	if s.configWatcher != nil {
 		cfg := s.configWatcher.Get()
-		if cfg.CDC.Protection.Enabled {
-			if cfg.CDC.Protection.WarningLagBytes > 0 {
-				warnLagBytes = cfg.CDC.Protection.WarningLagBytes
+		if cfg.CDC.Gap.Enabled {
+			if cfg.CDC.Gap.WarningLagBytes > 0 {
+				warnLagBytes = cfg.CDC.Gap.WarningLagBytes
 			}
-			if cfg.CDC.Protection.WarningLagDuration != "" {
-				if dur, err := time.ParseDuration(cfg.CDC.Protection.WarningLagDuration); err == nil {
+			if cfg.CDC.Gap.WarningLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDC.Gap.WarningLagDuration); err == nil {
 					warnLagDuration = dur
 				}
 			}
-			if cfg.CDC.Protection.CriticalLagBytes > 0 {
-				critLagBytes = cfg.CDC.Protection.CriticalLagBytes
+			if cfg.CDC.Gap.CriticalLagBytes > 0 {
+				critLagBytes = cfg.CDC.Gap.CriticalLagBytes
 			}
-			if cfg.CDC.Protection.CriticalLagDuration != "" {
-				if dur, err := time.ParseDuration(cfg.CDC.Protection.CriticalLagDuration); err == nil {
+			if cfg.CDC.Gap.CriticalLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDC.Gap.CriticalLagDuration); err == nil {
 					critLagDuration = dur
 				}
 			}
@@ -956,20 +956,20 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 		critLagBytes := int64(1024 * 1024 * 1024)
 		critLagDuration := 6 * time.Hour
 		
-		if cfg.CDC.Protection.Enabled {
-			if cfg.CDC.Protection.WarningLagBytes > 0 {
-				warnLagBytes = cfg.CDC.Protection.WarningLagBytes
+		if cfg.CDC.Gap.Enabled {
+			if cfg.CDC.Gap.WarningLagBytes > 0 {
+				warnLagBytes = cfg.CDC.Gap.WarningLagBytes
 			}
-			if cfg.CDC.Protection.WarningLagDuration != "" {
-				if dur, err := time.ParseDuration(cfg.CDC.Protection.WarningLagDuration); err == nil {
+			if cfg.CDC.Gap.WarningLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDC.Gap.WarningLagDuration); err == nil {
 					warnLagDuration = dur
 				}
 			}
-			if cfg.CDC.Protection.CriticalLagBytes > 0 {
-				critLagBytes = cfg.CDC.Protection.CriticalLagBytes
+			if cfg.CDC.Gap.CriticalLagBytes > 0 {
+				critLagBytes = cfg.CDC.Gap.CriticalLagBytes
 			}
-			if cfg.CDC.Protection.CriticalLagDuration != "" {
-				if dur, err := time.ParseDuration(cfg.CDC.Protection.CriticalLagDuration); err == nil {
+			if cfg.CDC.Gap.CriticalLagDuration != "" {
+				if dur, err := time.ParseDuration(cfg.CDC.Gap.CriticalLagDuration); err == nil {
 					critLagDuration = dur
 				}
 			}
