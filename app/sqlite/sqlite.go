@@ -200,7 +200,7 @@ func (s *Store) Write(tx *core.Transaction) error {
 
 		var cdcTime interface{}
 		if !change.CommitTime.IsZero() {
-			cdcTime = change.CommitTime
+			cdcTime = change.CommitTime // Already converted to UTC in CDC query layer
 		}
 
 		_, err = stmt.Exec(
@@ -209,7 +209,7 @@ func (s *Store) Write(tx *core.Transaction) error {
 			change.Operation.String(),
 			string(dataJSON),
 			cdcTime,
-			time.Now(), // pulled_at
+			time.Now().UTC(), // pulled_at - store in UTC for consistency
 		)
 		if err != nil {
 			return fmt.Errorf("insert change: %w", err)
