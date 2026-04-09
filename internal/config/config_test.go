@@ -31,7 +31,7 @@ tables:
   - dbo.users
 
 cdc:
-  polling_interval: 1s
+  interval: 1s
   offset:
     type: json
     json_path: ./data/test-offset.json
@@ -73,8 +73,8 @@ app:
 	}
 
 	// Check defaults
-	if cfg.CDC.PollingInterval != "1s" {
-		t.Errorf("Interval = %v, want 1s", cfg.CDC.PollingInterval)
+	if cfg.CDC.Interval != "1s" {
+		t.Errorf("Interval = %v, want 1s", cfg.CDC.Interval)
 	}
 
 	// Check sink
@@ -115,8 +115,8 @@ tables:
 	}
 
 	// Check defaults
-	if cfg.CDC.PollingInterval != "500ms" {
-		t.Errorf("Interval default = %v, want 500ms", cfg.CDC.PollingInterval)
+	if cfg.CDC.Interval != "500ms" {
+		t.Errorf("Interval default = %v, want 500ms", cfg.CDC.Interval)
 	}
 	if cfg.CDC.Offset.Type != "json" {
 		t.Errorf("Offset.Type default = %v, want json", cfg.CDC.Offset.Type)
@@ -129,19 +129,19 @@ tables:
 	}
 }
 
-func TestPollingInterval(t *testing.T) {
-	cfg := &Config{CDC: CDCConfig{PollingInterval: "1s"}}
-	d, err := cfg.PollingInterval()
+func TestInterval(t *testing.T) {
+	cfg := &Config{CDC: CDCConfig{Interval: "1s"}}
+	d, err := cfg.Interval()
 	if err != nil {
-		t.Fatalf("PollingInterval() error = %v", err)
+		t.Fatalf("Interval() error = %v", err)
 	}
 	if d.Seconds() != 1 {
-		t.Errorf("PollingInterval() = %v, want 1s", d)
+		t.Errorf("Interval() = %v, want 1s", d)
 	}
 
 	// Invalid duration
-	cfg = &Config{CDC: CDCConfig{PollingInterval: "invalid"}}
-	_, err = cfg.PollingInterval()
+	cfg = &Config{CDC: CDCConfig{Interval: "invalid"}}
+	_, err = cfg.Interval()
 	if err == nil {
 		t.Error("Expected error for invalid duration")
 	}
