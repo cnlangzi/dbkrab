@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,36 +137,65 @@ func (w *SQLiteWriter) DatabaseType() string {
 // Write writes a batch of sink operations to the database
 func (w *SQLiteWriter) Write(ops []core.Sink) error {
 	if len(ops) == 0 {
+		slog.Debug("SQLiteWriter.Write: no operations to write")
 		return nil
 	}
+
+	slog.Debug("SQLiteWriter.Write: starting batch write",
+		"database", w.name,
+		"operations", len(ops),
+		"path", w.path)
 
 	ctx := context.Background()
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
+		slog.Error("SQLiteWriter.Write: failed to begin transaction",
+			"error", err)
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, op := range ops {
+	for i, op := range ops {
+		slog.Debug("SQLiteWriter.Write: processing operation",
+			"index", i,
+			"output", op.Config.Output,
+			"op_type", op.OpType.String(),
+			"rows", len(op.DataSet.Rows))
+
 		switch op.OpType {
 		case core.OpInsert:
 			if err := w.insertInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: insert failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("insert %s: %w", op.Config.Output, err)
 			}
 		case core.OpUpdateAfter:
 			if err := w.updateInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: update failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("update %s: %w", op.Config.Output, err)
 			}
 		case core.OpDelete:
 			if err := w.deleteInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: delete failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("delete %s: %w", op.Config.Output, err)
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		slog.Error("SQLiteWriter.Write: failed to commit transaction",
+			"error", err)
 		return fmt.Errorf("commit transaction: %w", err)
 	}
+
+	slog.Info("SQLiteWriter.Write: batch write completed",
+		"database", w.name,
+		"operations", len(ops))
 
 	return nil
 }

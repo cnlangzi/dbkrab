@@ -353,10 +353,12 @@ func (p *Plugin) matchTable(skill *Skill, table string) bool {
 // and executes the engine for each matching skill.
 func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
+		slog.Debug("Plugin.Handle: empty transaction, skipping")
 		return nil, nil
 	}
 
 	if p.engine == nil {
+		slog.Error("Plugin.Handle: engine not initialized")
 		return nil, fmt.Errorf("engine not initialized, call AttachDB first")
 	}
 
@@ -368,19 +370,47 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		table = tx.Changes[0].Table
 	}
 
+	slog.Info("Plugin.Handle: processing CDC transaction",
+		"tx_id", tx.ID,
+		"table", table,
+		"changes", len(tx.Changes),
+		"skills_count", len(p.Skills.List()))
+
 	// Iterate over all skills
 	for _, skill := range p.Skills.List() { // internal RLock
+		slog.Debug("Plugin.Handle: checking skill match",
+			"skill", skill.Name,
+			"skill.On", skill.On,
+			"table", table)
+
 		if !p.matchTable(skill, table) {
+			slog.Debug("Plugin.Handle: skill does not match table",
+				"skill", skill.Name,
+				"table", table)
 			continue
 		}
 
+		slog.Debug("Plugin.Handle: skill matched, executing engine",
+			"skill", skill.Name)
+
 		sinks, err := p.engine.HandleWithSkill(tx, skill)
 		if err != nil {
+			slog.Error("Plugin.Handle: skill execution failed",
+				"skill", skill.Name,
+				"error", err)
 			return nil, fmt.Errorf("skill %s handle: %w", skill.Name, err)
 		}
 
+		slog.Debug("Plugin.Handle: skill execution completed",
+			"skill", skill.Name,
+			"sinks_count", len(sinks))
+
 		allSinks = append(allSinks, sinks...)
 	}
+
+	slog.Info("Plugin.Handle: completed",
+		"tx_id", tx.ID,
+		"total_sinks", len(allSinks))
 
 	return allSinks, nil
 }
