@@ -31,17 +31,6 @@ plugins:
   sql:
     enabled: true
     path: ./skills/sql
-    # Sink database configurations (maps database names to actual storage)
-    sink_databases:
-      business:
-        type: sqlite
-        path: ./data/sinks/business.db
-      analytics:
-        type: duckdb
-        path: ./data/sinks/analytics.duckdb
-      reporting:
-        type: mssql
-        connection_string: "Server=localhost;Database=reporting;User=sa;Password=...;"
 
 # API server port for plugin management
 # Endpoints:
@@ -58,10 +47,11 @@ sink:
   type: sqlite
   path: ./data/system/dbkrab.db
 
-# Business sinks output directory (per-skill SQLite files)
-# Each skill can specify its own sqlite path in the skill YAML
+# Business sinks output configuration
 sinks:
   base_path: ./data/sinks
+  # Sink database configurations (maps database names to actual storage)
+  databases:
 
 # Transaction buffer for cross-table integrity and batch processing
 transaction_buffer:

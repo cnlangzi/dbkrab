@@ -77,7 +77,8 @@ type SinkConfig struct {
 
 // SinksConfig contains business sinks configuration
 type SinksConfig struct {
-	BasePath string `yaml:"base_path"` // Base path for business sink databases
+	BasePath   string                     `yaml:"base_path"` // Base path for business sink databases
+	Databases map[string]DatabaseConfig `yaml:"databases"` // Database name -> storage config
 }
 
 // OffsetConfig contains offset storage configuration
