@@ -71,12 +71,10 @@ Go + HTMX dashboard for operations.
 ```
 CDC Change (single row)
     │
-    ├──► Job SQL (parallel, all ops) ──► SQLite (job output)
-    │
-    └──► Sink SQL (by operation type) ──► SQLite (sink output)
+    └──► Sink SQL (by operation type) ──► SQLite
 ```
 
-**Per-Change Processing**: Each CDC row triggers its own job and sink execution. Parameters are isolated per change.
+**Per-Change Processing**: Each CDC row triggers sink execution. Parameters are isolated per change.
 
 ---
 
