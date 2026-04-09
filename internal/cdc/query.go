@@ -30,12 +30,18 @@ type Change struct {
 
 // Querier handles CDC queries against MSSQL
 type Querier struct {
-	db *sql.DB
+	db       *sql.DB
+	timezone *time.Location // SQL Server timezone for CDC timestamp conversion
 }
 
 // NewQuerier creates a new CDC querier
-func NewQuerier(db *sql.DB) *Querier {
-	return &Querier{db: db}
+// timezone should be the SQL Server's timezone (e.g., Asia/Shanghai for UTC+8)
+// If timezone is nil, defaults to time.Local
+func NewQuerier(db *sql.DB, timezone *time.Location) *Querier {
+	if timezone == nil {
+		timezone = time.Local
+	}
+	return &Querier{db: db, timezone: timezone}
 }
 
 // GetMinLSN returns the minimum LSN for a capture instance
@@ -146,16 +152,28 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		}
 
 		// Get commit time from LSN
-		// MSSQL sys.fn_cdc_map_lsn_to_time() returns timestamp with timezone info.
-		// The Go MSSQL driver correctly interprets the timezone, so we just convert to UTC.
+		// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
+		// The value is in SQL Server's local timezone, but Go driver can't detect it.
+		// We reinterpret the time value using the configured SQL Server timezone,
+		// then convert to UTC for consistent storage.
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
 			switch v := values[idx].(type) {
 			case time.Time:
-				commitTime = v.UTC()
+				// Reinterpret using SQL Server timezone, then convert to UTC
+				commitTime = time.Date(
+					v.Year(), v.Month(), v.Day(),
+					v.Hour(), v.Minute(), v.Second(), v.Nanosecond(),
+					q.timezone,
+				).UTC()
 			case string:
+				// Parse string and reinterpret timezone
 				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
-					commitTime = parsed.UTC()
+					commitTime = time.Date(
+						parsed.Year(), parsed.Month(), parsed.Day(),
+						parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(),
+						q.timezone,
+					).UTC()
 				}
 			}
 		}
