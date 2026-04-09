@@ -134,12 +134,12 @@ type CDCProtectionConfig struct {
 	Alert             alert.AlertConfig    `yaml:"alert"`
 }
 
-// TransactionBufferConfig contains transaction buffer settings
+// TransactionBufferConfig contains transaction buffer settings (DEPRECATED - not used)
 type TransactionBufferConfig struct {
-	Enabled              bool   `yaml:"enabled"`
-	MaxWaitTime          string `yaml:"max_wait_time"`          // e.g., "30s"
-	MaxTransactionsPerBatch int   `yaml:"max_transactions_per_batch"` // e.g., 1000
-	MaxBatchBytes        int    `yaml:"max_batch_bytes"`         // e.g., 10485760 (10MB)
+	Enabled              bool   `yaml:"enabled"` // Deprecated: not used
+	MaxWaitTime          string `yaml:"max_wait_time"`          // Deprecated: not used
+	MaxTransactionsPerBatch int   `yaml:"max_transactions_per_batch"` // Deprecated: not used
+	MaxBatchBytes        int    `yaml:"max_batch_bytes"`         // Deprecated: not used
 }
 
 // RecoveryConfig contains recovery strategy settings

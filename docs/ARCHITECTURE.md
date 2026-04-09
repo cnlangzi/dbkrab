@@ -81,7 +81,7 @@ CDC Change (single row)
 dbkrab/
 ├── cmd/dbkrab/           # CLI entry point
 ├── internal/
-│   ├── core/             # CDC poller, LSN, transaction buffer
+│   ├── core/             # CDC poller, LSN handling
 │   ├── cdc/              # CDC query functions
 │   ├── config/           # YAML config loader + hot-reload
 │   ├── offset/           # LSN persistence (SQLite)
