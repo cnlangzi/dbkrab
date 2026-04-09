@@ -129,6 +129,9 @@ func (p *Plugin) loadSkillFile(filePath string) (*Skill, error) {
 		return nil, err
 	}
 
+	// Normalize inline SQL (SQL not loaded from external files)
+	normalizeSkillSQL(&skill)
+
 	// Validate sinks configuration
 	if err := skill.ValidateSinks(); err != nil {
 		return nil, fmt.Errorf("validate sinks: %w", err)
@@ -147,7 +150,12 @@ func loadSkillSQLFiles(skill *Skill, skillDir string) error {
 			if err != nil {
 				return fmt.Errorf("read sink SQL file %s: %w", sink.SQLFile, ErrSQLFileNotFound)
 			}
-			sink.SQL = string(data)
+			// Normalize SQL parameter names to lowercase
+			sink.SQL = normalizeSQLParams(string(data))
+		}
+		// Also normalize inline SQL
+		if sink.SQL != "" {
+			sink.SQL = normalizeSQLParams(sink.SQL)
 		}
 	}
 	return nil
