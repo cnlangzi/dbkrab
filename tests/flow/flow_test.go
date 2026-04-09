@@ -274,7 +274,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	require.Len(t, tx.Changes, 1, "transaction should have one change")
 
 	// Call handler
-	handler.Handle(&tx)
+	handler.Handle(&tx) //nolint:errcheck
 	// Note: pluginMgr.Handle may fail without real MSSQL, but that's OK for this test
 
 	assert.True(t, handlerCalled, "handler should be called")
@@ -290,7 +290,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
 		}
 	}
 
@@ -377,7 +377,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	assert.Equal(t, core.OpDelete, tx.Changes[2].Operation)
 
 	// Call handler
-	handler.Handle(&tx)
+	handler.Handle(&tx) //nolint:errcheck
 	// May fail without MSSQL, but ordering is preserved
 
 	// Store
@@ -388,7 +388,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
 		}
 	}
 
@@ -483,7 +483,7 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	assert.Len(t, tables, 3, "should have changes from 3 tables")
 
 	// Process through handler
-	handler.Handle(&tx)
+	handler.Handle(&tx) //nolint:errcheck
 	// May fail without MSSQL, but transaction grouping is validated
 
 	// Store
@@ -531,7 +531,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 
 	// Set initial offset
 	//nolint:errcheck
-	h.offsetStore.Set("dbo.orders", "0000000001000000")
+	h.offsetStore.Set("dbo.orders", "0000000001000000") //nolint:errcheck
 
 	// Call handler - should fail
 	err := handler.Handle(&tx)
@@ -553,7 +553,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	h.setupSkillFixtures()
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { pluginMgr.Stop() }()
 
 	// First call fails, subsequent calls succeed
 	var callCount int
@@ -596,7 +596,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
 		}
 	}
 
@@ -620,7 +620,7 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 	}
 
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { pluginMgr.Stop() }()
 
 	txID := "tx-006"
 	commitTime := time.Now()
@@ -683,7 +683,7 @@ func TestFlow_PluginSkillLoading(t *testing.T) {
 
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { pluginMgr.Stop() }()
 
 	// Verify plugin manager has skills loaded
 	assert.True(t, pluginMgr.HasSQLPlugins(), "plugin manager should have SQL plugins")
