@@ -345,6 +345,390 @@ func TestValidateSinks(t *testing.T) {
 	}
 }
 
+func TestValidateSinksWithIfCondition(t *testing.T) {
+	tests := []struct {
+		name    string
+		skill   Skill
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid if expression - simple equality",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status = 'vip'"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - comparison",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "amount > 100"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - logical operators",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status = 'vip' AND amount > 100"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - field to field comparison",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "orders.amount > orders.min_amount"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - OR operator",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status = 'vip' OR status = 'gold'"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - NOT operator",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status != 'cancelled'"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - IN operator",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status IN ('vip', 'gold', 'silver')"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid if expression - case insensitive table/field names",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "ORDERS.STATUS = 'vip'"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid if expression - syntax error",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "status = 'vip' AND"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid expression",
+		},
+		{
+			name: "invalid if expression - unbalanced parentheses",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: "(status = 'vip'"}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid expression",
+		},
+		{
+			name: "no if - always valid",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: ""}, When: []string{"insert", "update"}},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.skill.ValidateSinks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSinks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil {
+				if !contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateSinks() error = %v, should contain %v", err, tt.errMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestSinkConfigEvalIf(t *testing.T) {
+	tests := []struct {
+		name       string
+		ifExpr     string
+		cdcParams  CDCParameters
+		wantResult bool
+	}{
+		{
+			name:       "no if - always true",
+			ifExpr:     "",
+			cdcParams:  CDCParameters{Fields: map[string]interface{}{}},
+			wantResult: true,
+		},
+		{
+			name:   "simple equality - true",
+			ifExpr: "status = 'vip'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "simple equality - false",
+			ifExpr: "status = 'vip'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "regular"},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "literal value case sensitive - match",
+			ifExpr: "status = 'VIP'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "VIP"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "literal value case sensitive - no match",
+			ifExpr: "status = 'VIP'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip"},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "comparison - greater than true",
+			ifExpr: "amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 150},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "comparison - greater than false",
+			ifExpr: "amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 50},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "AND operator - both true",
+			ifExpr: "status = 'vip' AND amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip", "orders_amount": 150},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "AND operator - one false",
+			ifExpr: "status = 'vip' AND amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip", "orders_amount": 50},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "OR operator - one true",
+			ifExpr: "status = 'vip' OR status = 'gold'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "gold"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "OR operator - both false",
+			ifExpr: "status = 'vip' OR status = 'gold'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "regular"},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "NOT operator",
+			ifExpr: "status != 'cancelled'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "pending"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "IN operator - match",
+			ifExpr: "status IN ('vip', 'gold', 'silver')",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "gold"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "IN operator - no match",
+			ifExpr: "status IN ('vip', 'gold', 'silver')",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "regular"},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "field to field comparison - true",
+			ifExpr: "orders.amount > orders.min_amount",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 150, "orders_min_amount": 100},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "field to field comparison - false",
+			ifExpr: "orders.amount > orders.min_amount",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 50, "orders_min_amount": 100},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "case insensitive table/field names - uppercase",
+			ifExpr: "ORDERS.STATUS = 'vip'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "case insensitive table/field names - mixed case",
+			ifExpr: "Orders.Status = 'vip'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip"},
+			},
+			wantResult: true,
+		},
+		{
+			name:   ">= comparison",
+			ifExpr: "amount >= 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 100},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "<= comparison",
+			ifExpr: "amount <= 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 100},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "< comparison",
+			ifExpr: "amount < 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 50},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "!= comparison",
+			ifExpr: "amount != 0",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_amount": 100},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "complex expression with parentheses",
+			ifExpr: "(status = 'vip' OR status = 'gold') AND amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip", "orders_amount": 150},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "complex expression with parentheses - second condition false",
+			ifExpr: "(status = 'vip' OR status = 'gold') AND amount > 100",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{"orders_status": "vip", "orders_amount": 50},
+			},
+			wantResult: false,
+		},
+		{
+			name:   "CDC metadata - cdc_operation",
+			ifExpr: "cdc_operation = 2",
+			cdcParams: CDCParameters{
+				CDCOperation: 2,
+				Fields:       map[string]interface{}{},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "CDC metadata - cdc_table",
+			ifExpr: "cdc_table = 'orders'",
+			cdcParams: CDCParameters{
+				CDCTable: "orders",
+				Fields:  map[string]interface{}{},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "CDC metadata - cdc_tx_id",
+			ifExpr: "cdc_tx_id = 'tx-123'",
+			cdcParams: CDCParameters{
+				CDCTxID: "tx-123",
+				Fields:  map[string]interface{}{},
+			},
+			wantResult: true,
+		},
+		{
+			name:   "missing field returns false",
+			ifExpr: "status = 'vip'",
+			cdcParams: CDCParameters{
+				Fields: map[string]interface{}{},
+			},
+			wantResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skill := &Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test", If: tt.ifExpr}, When: []string{"insert", "update"}},
+				},
+			}
+
+			// Validate first to compile the expression
+			err := skill.ValidateSinks()
+			if err != nil {
+				t.Fatalf("ValidateSinks() failed: %v", err)
+			}
+
+			sinkCfg := &skill.Sinks[0].SinkConfig
+			result := sinkCfg.EvalIf(tt.cdcParams)
+
+			if result != tt.wantResult {
+				t.Errorf("EvalIf() = %v, want %v", result, tt.wantResult)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
