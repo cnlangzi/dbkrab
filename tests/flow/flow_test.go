@@ -553,7 +553,10 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	h.setupSkillFixtures()
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer func() { pluginMgr.Stop() }()
+	defer func() {
+		//nolint:errcheck
+		pluginMgr.Stop()
+	}()
 
 	// First call fails, subsequent calls succeed
 	var callCount int
@@ -596,7 +599,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String())
 		}
 	}
 
@@ -620,7 +623,10 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 	}
 
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer func() { pluginMgr.Stop() }()
+	defer func() {
+		//nolint:errcheck
+		pluginMgr.Stop()
+	}()
 
 	txID := "tx-006"
 	commitTime := time.Now()
@@ -683,7 +689,10 @@ func TestFlow_PluginSkillLoading(t *testing.T) {
 
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer func() { pluginMgr.Stop() }()
+	defer func() {
+		//nolint:errcheck
+		pluginMgr.Stop()
+	}()
 
 	// Verify plugin manager has skills loaded
 	assert.True(t, pluginMgr.HasSQLPlugins(), "plugin manager should have SQL plugins")
