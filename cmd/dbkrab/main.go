@@ -25,7 +25,6 @@ import (
 
 var (
 	configPath = flag.String("config", "config.yml", "Path to config file")
-	apiPort    = flag.Int("api-port", 3000, "API/Dashboard server port (default: 3000)")
 
 	// Version and BuildTime are set via ldflags during build
 	Version   = "dev"
