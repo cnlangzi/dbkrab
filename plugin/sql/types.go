@@ -87,7 +87,7 @@ type Sink struct {
 
 // SinkConfig represents a single job configuration
 type SinkConfig struct {
-	Name        string `yaml:"name"`          // Job name
+	Name        string `yaml:"name"`          // Sink name
 	On          string `yaml:"on"`            // Table filter (required for multi-table)
 	SQL         string `yaml:"sql"`           // Inline SQL template
 	SQLFile     string `yaml:"sql_file"`      // External SQL file path
@@ -116,8 +116,8 @@ type DataSet struct {
 	Rows    [][]interface{}
 }
 
-// OperationToJobType converts Operation to job type string
-func OperationToJobType(op Operation) string {
+// OperationToSinkType converts Operation to sink type string
+func OperationToSinkType(op Operation) string {
 	switch op {
 	case Insert:
 		return "insert"
@@ -203,15 +203,15 @@ func (s *Skill) ValidateSinks() error {
 	return nil
 }
 
-// FilterSinks filters jobs by table name (for multi-table CDC)
-func FilterSinks(jobs []SinkConfig, tableName string) []SinkConfig {
+// FilterSinks filters sinks by table name (for multi-table CDC)
+func FilterSinks(sinks []SinkConfig, tableName string) []SinkConfig {
 	if tableName == "" {
-		return jobs
+		return sinks
 	}
 	var filtered []SinkConfig
-	for _, job := range jobs {
-		if job.On == "" || job.On == tableName {
-			filtered = append(filtered, job)
+	for _, sink := range sinks {
+		if sink.On == "" || sink.On == tableName {
+			filtered = append(filtered, sink)
 		}
 	}
 	return filtered
