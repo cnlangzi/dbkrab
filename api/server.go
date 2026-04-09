@@ -927,9 +927,14 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			metrics.CDCStatus = "active"
 			metrics.CDCMessage = "CDC polling active"
 			
-			// Get last sync time
-			if lastPoll, ok := state["last_poll_time"].(time.Time); ok {
-				metrics.LastSyncTime = lastPoll.Format("2006-01-02 15:04:05")
+			// Get last sync time (stored as string in DB)
+			if lastPollStr, ok := state["last_poll_time"].(string); ok && lastPollStr != "" {
+				// Parse the timestamp string and format for display
+				if lastPoll, err := time.Parse("2006-01-02 15:04:05.999999999", lastPollStr); err == nil {
+					metrics.LastSyncTime = lastPoll.Format("2006-01-02 15:04:05")
+				} else {
+					metrics.LastSyncTime = lastPollStr
+				}
 			}
 			
 			// Count tracked tables
