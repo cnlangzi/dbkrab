@@ -1,63 +1,63 @@
 # =============================================================================
-# dbkrab 配置完整示例
+# dbkrab Configuration Reference
 # =============================================================================
-# 本文件包含所有配置项及说明。实际部署时请复制为 config.yml 并修改相应值。
-# 所有字段均为可选，未填写的将使用默认值。
+# Copy this file to config.yml and modify values as needed.
+# All fields are optional - defaults will be applied when not specified.
 
 # -----------------------------------------------------------------------------
-# MSSQL 连接配置（必需）
+# MSSQL Connection (required)
 # -----------------------------------------------------------------------------
 mssql:
-  host: localhost          # MSSQL 服务器地址
-  port: 1433               # MSSQL 端口
-  user: sa                 # 用户名
-  password: your_password  # 密码
-  database: your_database  # 数据库名
+  host: localhost          # MSSQL server address
+  port: 1433               # MSSQL port
+  user: sa                 # Username
+  password: your_password  # Password
+  database: your_database  # Database name
 
 # -----------------------------------------------------------------------------
-# CDC 监控表配置
+# CDC Monitored Tables
 # -----------------------------------------------------------------------------
-# 要监控的表列表，格式：schema.table
+# Tables to monitor, format: schema.table
 tables:
   - dbo.orders
   - dbo.order_items
 
 # -----------------------------------------------------------------------------
-# CDC 配置（聚合所有 CDC 相关设置）
+# CDC Configuration
 # -----------------------------------------------------------------------------
 cdc:
-  # 轮询间隔：CDC 日志轮询频率，默认 500ms
+  # Polling interval: CDC log poll frequency, default 500ms
   interval: 500ms
 
-  # Offset 存储配置：记录每个表的消费位置
+  # Offset storage: tracks consumption position per table
   offset:
-    type: json             # 存储类型：json | sqlite
-    json_path: ./data/offset.json   # JSON 文件路径
-    sqlite_path: ./data/offset.db   # SQLite 文件路径
+    type: json             # Storage type: json | sqlite
+    json_path: ./data/offset.json   # JSON file path
+    sqlite_path: ./data/offset.db   # SQLite file path
 
-  # 事务缓冲区配置：用于跨表事务一致性和批量处理优化
+  # Transaction buffer: cross-table transaction consistency & batch optimization
   transaction_buffer:
-    enabled: false            # 是否启用事务缓冲
-    max_wait_time: 30s        # 单个事务最大等待时间
-    max_transactions_per_batch: 1000   # 每批次最大事务数
-    max_batch_bytes: 10485760  # 10MB，每批次最大字节数
+    enabled: false            # Enable transaction buffer
+    max_wait_time: 30s        # Max wait time per transaction
+    max_transactions_per_batch: 1000   # Max transactions per batch
+    max_batch_bytes: 10485760  # 10MB, max batch size
 
-  # Gap 保护配置：防止 CDC 清理导致数据丢失
+  # Gap protection: prevents data loss from CDC cleanup
   gap:
-    enabled: true             # 是否启用 Gap 检测
-    check_interval: 1m        # 检测频率
-    warning_lag_bytes: 104857600        # 100MB，警告阈值
-    warning_lag_duration: 1h            # 1小时，警告阈值
-    critical_lag_bytes: 1073741824      # 1GB，严重阈值
-    critical_lag_duration: 6h          # 6小时，严重阈值
+    enabled: true             # Enable gap detection
+    check_interval: 1m        # Check frequency
+    warning_lag_bytes: 104857600        # 100MB, warning threshold
+    warning_lag_duration: 1h            # 1h, warning threshold
+    critical_lag_bytes: 1073741824      # 1GB, critical threshold
+    critical_lag_duration: 6h          # 6h, critical threshold
 
-    # 数据丢失时的恢复策略
+    # Recovery strategy when data loss is detected
     recovery:
       strategy: manual         # manual | snapshot | timestamp
 
-    # 告警配置
+    # Alert configuration
     alert:
-      enabled: true           # 是否发送告警
+      enabled: true           # Enable alerts
       webhook_url: https://hooks.example.com/alert
       channels:
         - type: feishu
@@ -66,34 +66,34 @@ cdc:
           url: https://hooks.slack.com/services/xxx
 
 # -----------------------------------------------------------------------------
-# API 服务端口
+# API Server Port
 # -----------------------------------------------------------------------------
 api_port: 9020
 
 # -----------------------------------------------------------------------------
-# 应用存储配置（CDC 事务、DLQ、轮询状态）
+# App Storage (CDC transactions, DLQ, poller state)
 # -----------------------------------------------------------------------------
 app:
   type: sqlite
   path: ./data/system/dbkrab.db
 
 # -----------------------------------------------------------------------------
-# 业务 Sink 配置（数据输出目标）
+# Business Sinks (data output targets)
 # -----------------------------------------------------------------------------
 sinks:
   - name: business
-    description: 业务主数据库
+    description: Primary business database
     type: sqlite
     path: ./data/sinks/business/business.db
     migrations: ./data/sinks/business/migrations
   - name: analytics
-    description: 分析数据库
+    description: Analytics database
     type: duckdb
     path: ./data/sinks/analytics.duckdb
     migrations: ./data/sinks/analytics/migrations
 
 # -----------------------------------------------------------------------------
-# MSSQL 断连优雅降级
+# MSSQL Disconnection Graceful Degradation
 # -----------------------------------------------------------------------------
 graceful_degradation:
   enabled: true
@@ -102,7 +102,7 @@ graceful_degradation:
   reconnect_max_delay: 60s
 
 # -----------------------------------------------------------------------------
-# 插件配置
+# Plugin Configuration
 # -----------------------------------------------------------------------------
 plugins:
   sql:
@@ -110,7 +110,7 @@ plugins:
     path: ./skills/sql
 
 # -----------------------------------------------------------------------------
-# 日志配置
+# Logging Configuration
 # -----------------------------------------------------------------------------
 logging:
   level: info
