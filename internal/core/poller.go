@@ -47,8 +47,6 @@ type Poller struct {
 	// Hot reload fields
 	reloadCh      <-chan *config.Config  // Channel for config reload signals
 	pendingCfg    *config.Config         // Pending config to apply
-	needDrain     bool                   // Signal to drain txBuffer before rebuild
-	needRebuildTx bool                   // Signal to rebuild txBuffer after drain
 }
 
 // Store interface for storing changes
