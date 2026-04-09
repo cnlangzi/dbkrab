@@ -52,6 +52,14 @@ sinks:
   base_path: ./data/sinks
   # Sink database configurations (maps database names to actual storage)
   databases:
+    business:
+      type: sqlite
+      path: ./data/sinks/business/business.db
+      migrations: ./data/sinks/business/migrations
+    analytics:
+      type: duckdb
+      path: ./data/sinks/analytics.duckdb
+      migrations: ./data/sinks/analytics/migrations
 
 # Transaction buffer for cross-table integrity and batch processing
 transaction_buffer:

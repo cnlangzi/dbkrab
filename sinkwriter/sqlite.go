@@ -18,14 +18,15 @@ import (
 // SQLiteWriter writes sink operations to a SQLite database.
 // It handles its own SQL syntax and migration strategy.
 type SQLiteWriter struct {
-	name   string
-	db     *sql.DB
-	dbType string
-	path   string
+	name          string
+	db            *sql.DB
+	dbType        string
+	path          string
+	migrationPath string
 }
 
 // NewSQLiteWriter creates a new SQLite sink writer
-func NewSQLiteWriter(name, dbType, path string) (*SQLiteWriter, error) {
+func NewSQLiteWriter(name, dbType, path, migrationPath string) (*SQLiteWriter, error) {
 	// Resolve path - for SQLite, path is the directory containing the DB file
 	basePath := path
 	if strings.HasSuffix(strings.ToLower(path), ".db") {
@@ -51,10 +52,11 @@ func NewSQLiteWriter(name, dbType, path string) (*SQLiteWriter, error) {
 	}
 
 	return &SQLiteWriter{
-		name:   name,
-		dbType: dbType,
-		path:   basePath,
-		db:     db,
+		name:          name,
+		dbType:        dbType,
+		path:          basePath,
+		migrationPath: migrationPath,
+		db:           db,
 	}, nil
 }
 
@@ -353,6 +355,9 @@ func (w *SQLiteWriter) RunMigrations() error {
 
 // MigrationsPath returns the migrations directory path
 func (w *SQLiteWriter) MigrationsPath() string {
+	if w.migrationPath != "" {
+		return w.migrationPath
+	}
 	return filepath.Join(w.path, "migrations")
 }
 

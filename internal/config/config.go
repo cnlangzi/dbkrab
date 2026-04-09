@@ -42,6 +42,7 @@ type PluginConfig struct {
 type DatabaseConfig struct {
 	Type            string `yaml:"type"`             // sqlite, duckdb, mssql, etc.
 	Path            string `yaml:"path"`             // Path for file-based databases
+	MigrationPath  string `yaml:"migrations"`     // Path to migration SQL files
 	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
 }
 

@@ -71,7 +71,7 @@ func (m *Manager) GetWriter(dbName string) (SinkWriter, error) {
 			// Default path for SQLite
 			path = fmt.Sprintf("./data/sinks/%s.db", dbName)
 		}
-		sw, err := NewSQLiteWriter(dbName, dbConfig.Type, path)
+		sw, err := NewSQLiteWriter(dbName, dbConfig.Type, path, dbConfig.MigrationPath)
 		if err != nil {
 			return nil, fmt.Errorf("create sqlite writer: %w", err)
 		}
