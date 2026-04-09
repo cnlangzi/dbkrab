@@ -2,9 +2,7 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/alert"
@@ -63,7 +61,6 @@ type MSSQLConfig struct {
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Database string `yaml:"database"`
-	Timezone string `yaml:"timezone"` // SQL Server timezone (e.g., "Asia/Shanghai", "UTC+8") for CDC timestamp conversion
 }
 
 // GracefulDegradationConfig contains graceful degradation settings for MSSQL disconnection
@@ -326,45 +323,4 @@ func (c *Config) ReconnectMaxDelay() time.Duration {
 	}
 
 	return d
-}
-
-// ParseTimezone parses timezone string to time.Location
-// Supports IANA timezone names (e.g., "Asia/Shanghai") and UTC offsets (e.g., "UTC+8", "UTC-5")
-// Returns time.UTC if string is empty or invalid
-func ParseTimezone(tzStr string) *time.Location {
-	if tzStr == "" {
-		return time.UTC
-	}
-
-	// Try IANA timezone name first
-	if loc, err := time.LoadLocation(tzStr); err == nil {
-		return loc
-	}
-
-	// Try UTC offset format (UTC+8, UTC-5, etc.)
-	if strings.HasPrefix(tzStr, "UTC") {
-		offsetStr := strings.TrimPrefix(tzStr, "UTC")
-		if offsetStr == "" {
-			return time.UTC
-		}
-
-		// Parse offset as hours
-		var hours int
-		var sign int = 1
-		if strings.HasPrefix(offsetStr, "+") {
-			offsetStr = strings.TrimPrefix(offsetStr, "+")
-		} else if strings.HasPrefix(offsetStr, "-") {
-			offsetStr = strings.TrimPrefix(offsetStr, "-")
-			sign = -1
-		}
-
-		if _, err := fmt.Sscanf(offsetStr, "%d", &hours); err == nil {
-			offsetSeconds := sign * hours * 3600
-			return time.FixedZone(tzStr, offsetSeconds)
-		}
-	}
-
-	// Fallback to UTC
-	slog.Warn("invalid timezone format, using UTC", "timezone", tzStr)
-	return time.UTC
 }
