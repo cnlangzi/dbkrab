@@ -56,19 +56,16 @@ app:
 # -----------------------------------------------------------------------------
 # 将 CDC 数据写入业务数据库的配置
 sinks:
-  base_path: ./data/sinks   # 业务数据库根目录
-
-  # 业务数据库映射：名称 -> 存储配置
-  # 插件中通过数据库名称引用，而非直接使用路径
-  databases:
-    business:
-      type: sqlite                  # 数据库类型：sqlite | duckdb | mssql
-      path: ./data/sinks/business/business.db   # 文件数据库路径
-      migrations: ./data/sinks/business/migrations  # 迁移 SQL 目录
-    analytics:
-      type: duckdb
-      path: ./data/sinks/analytics.duckdb
-      migrations: ./data/sinks/analytics/migrations
+  - name: business          # 数据库名称（唯一标识）
+    description: 业务主数据库   # 用途描述
+    type: sqlite            # 数据库类型：sqlite | duckdb | mssql
+    path: ./data/sinks/business/business.db   # 文件数据库路径
+    migrations: ./data/sinks/business/migrations  # 迁移 SQL 目录
+  - name: analytics
+    description: 分析数据库
+    type: duckdb
+    path: ./data/sinks/analytics.duckdb
+    migrations: ./data/sinks/analytics/migrations
 
 # -----------------------------------------------------------------------------
 # 事务缓冲区配置
@@ -133,16 +130,6 @@ plugins:
   sql:
     enabled: true            # 是否启用 SQL 插件
     path: ./skills/sql       # 插件目录路径
-
-    # Sink 数据库映射：插件中引用的数据库名 -> 实际存储配置
-    # 需与顶层 sinks.databases 中的定义保持一致
-    sink_databases:
-      business:
-        type: sqlite
-        path: ./data/sinks/business/business.db
-      analytics:
-        type: duckdb
-        path: ./data/sinks/analytics.duckdb
 
 # -----------------------------------------------------------------------------
 # 日志配置
