@@ -1,0 +1,32 @@
+name: sync_order_items
+description: "order_items CDC sync"
+
+on:
+  - order_items
+
+database: business
+
+sinks:
+  - name: sync
+    when: [insert, update]
+    sql: |
+      SELECT
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_transaction_id,
+        @cdc_table as cdc_source_table,
+        @cdc_operation as cdc_operation,
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_name,
+        oi.price
+      FROM order_items oi
+      WHERE oi.order_item_id IN (@order_items_order_item_id);
+    output: order_item_sync
+    primary_key: order_item_id
+
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @order_items_order_item_id as order_item_id
+    output: order_item_sync
+    primary_key: order_item_id
