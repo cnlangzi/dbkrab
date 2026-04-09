@@ -69,7 +69,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 			// Filter sinks by table and execute
 			for _, sinkCfg := range sinkConfigs {
-				if sinkCfg.On != "" && sinkCfg.On != change.Table {
+				if sinkCfg.On != "" && strings.ToLower(sinkCfg.On) != strings.ToLower(change.Table) {
 					continue
 				}
 
@@ -122,7 +122,7 @@ func mergeSinks(sinks []core.Sink) []core.Sink {
 			continue // Skip empty datasets
 		}
 		key := sinkKey{
-			table:  sink.Config.Output,
+			table:  strings.ToLower(sink.Config.Output),
 			pk:     sink.Config.PrimaryKey,
 			opType: sink.OpType,
 		}
@@ -276,10 +276,10 @@ func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 		Fields:       make(map[string]interface{}),
 	}
 
-	// Add all data fields with table prefix
-	shortTable := shortTableName(change.Table)
+	// Add all data fields with table prefix (lowercase for consistency)
+	shortTable := strings.ToLower(shortTableName(change.Table))
 	for k, v := range change.Data {
-		params.Fields[fmt.Sprintf("%s_%s", shortTable, k)] = v
+		params.Fields[fmt.Sprintf("%s_%s", shortTable, strings.ToLower(k))] = v
 	}
 
 	// Add id field if exists
