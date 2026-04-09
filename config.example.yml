@@ -1,109 +1,172 @@
-# dbkrab configuration
+# =============================================================================
+# dbkrab 配置完整示例
+# =============================================================================
+# 本文件包含所有配置项及说明。实际部署时请复制为 config.yml 并修改相应值。
+# 所有字段均为可选，未填写的将使用默认值。
 
-# MSSQL connection settings
+# -----------------------------------------------------------------------------
+# MSSQL 连接配置（必需）
+# -----------------------------------------------------------------------------
 mssql:
-  host: localhost
-  port: 1433
-  user: sa
-  password: your_password
-  database: your_database
+  host: localhost          # MSSQL 服务器地址
+  port: 1433               # MSSQL 端口
+  user: sa                 # 用户名
+  password: your_password  # 密码
+  database: your_database  # 数据库名
 
-# Tables to monitor (format: schema.table)
+# -----------------------------------------------------------------------------
+# CDC 监控表配置
+# -----------------------------------------------------------------------------
+# 要监控的表列表，格式：schema.table
 tables:
   - dbo.orders
   - dbo.order_items
 
-# Polling interval
+# -----------------------------------------------------------------------------
+# 轮询间隔
+# -----------------------------------------------------------------------------
+# CDC 日志轮询频率，默认 500ms
 polling_interval: 500ms
 
-# Offset storage configuration
-# Supports JSON file or SQLite backend
+# -----------------------------------------------------------------------------
+# Offset 存储配置
+# -----------------------------------------------------------------------------
+# 记录每个表的消费位置，支持 JSON 文件或 SQLite
 offset:
-  type: json          # json or sqlite
-  json_path: ./data/offset.json
-  sqlite_path: ./data/offset.db
+  type: json             # 存储类型：json | sqlite
+  json_path: ./data/offset.json   # JSON 文件路径（type=json 时使用）
+  sqlite_path: ./data/offset.db   # SQLite 文件路径（type=sqlite 时使用）
 
-# Plugin configuration (both disabled by default)
-plugins:
-  wasm:
-    enabled: false
-    path: ./skills/wasm
-  sql:
-    enabled: true
-    path: ./skills/sql
-
-# API server port for plugin management
-# Endpoints:
-#   GET  /api/plugins        - List plugins
-#   POST /api/plugins        - Load plugin (body: {name, path, config})
-#   GET  /api/plugins/{name} - Get plugin info
-#   DELETE /api/plugins/{name} - Unload plugin
-#   POST /api/plugins/{name}/reload - Reload plugin
-#   GET  /health            - Health check
+# -----------------------------------------------------------------------------
+# API 服务端口
+# -----------------------------------------------------------------------------
+# 提供插件管理、状态查询等 HTTP 接口
 api_port: 9020
 
-# Sink configuration (platform store - CDC tracking, offsets, DLQ)
-sink:
-  type: sqlite
-  path: ./data/system/dbkrab.db
+# API 端点说明：
+#   GET  /api/plugins        - 列出已加载插件
+#   POST /api/plugins        - 加载插件（body: {name, path, config}）
+#   GET  /api/plugins/{name} - 获取插件详情
+#   DELETE /api/plugins/{name} - 卸载插件
+#   POST /api/plugins/{name}/reload - 热重载插件
+#   GET  /health             - 健康检查
 
-# Business sinks output configuration
+# -----------------------------------------------------------------------------
+# 系统 Sink 配置（CDC 跟踪、偏移量、DLQ）
+# -----------------------------------------------------------------------------
+# 存储 dbkrab 自身运行所需的元数据
+sink:
+  type: sqlite           # 目前仅支持 sqlite
+  path: ./data/system/dbkrab.db   # 系统数据库路径
+
+# -----------------------------------------------------------------------------
+# 业务 Sink 配置（数据输出目标）
+# -----------------------------------------------------------------------------
+# 将 CDC 数据写入业务数据库的配置
 sinks:
-  base_path: ./data/sinks
-  # Sink database configurations (maps database names to actual storage)
+  base_path: ./data/sinks   # 业务数据库根目录
+
+  # 业务数据库映射：名称 -> 存储配置
+  # 插件中通过数据库名称引用，而非直接使用路径
   databases:
     business:
-      type: sqlite
-      path: ./data/sinks/business/business.db
-      migrations: ./data/sinks/business/migrations
+      type: sqlite                  # 数据库类型：sqlite | duckdb | mssql
+      path: ./data/sinks/business/business.db   # 文件数据库路径
+      migrations: ./data/sinks/business/migrations  # 迁移 SQL 目录
     analytics:
       type: duckdb
       path: ./data/sinks/analytics.duckdb
       migrations: ./data/sinks/analytics/migrations
 
-# Transaction buffer for cross-table integrity and batch processing
+# -----------------------------------------------------------------------------
+# 事务缓冲区配置
+# -----------------------------------------------------------------------------
+# 用于跨表事务一致性和批量处理优化
 transaction_buffer:
-  enabled: false  # Set to true for multi-table transaction integrity
-  max_wait_time: 30s  # Max time to wait for incomplete transactions
-  max_transactions_per_batch: 1000  # Max transactions per batch before delivery
-  max_batch_bytes: 10485760  # 10MB max batch size before delivery
+  enabled: false            # 是否启用事务缓冲
+  max_wait_time: 30s        # 单个事务最大等待时间，超过即释放
+  max_transactions_per_batch: 1000   # 每批次最大事务数，达到即交付
+  max_batch_bytes: 10485760  # 10MB，每批次最大字节数，达到即交付
 
-# CDC gap protection (prevents data loss from CDC cleanup)
+# -----------------------------------------------------------------------------
+# CDC Gap 保护配置（防止 CDC 清理导致数据丢失）
+# -----------------------------------------------------------------------------
 cdc_protection:
-  enabled: true
-  
-  # How often to check for gaps
-  check_interval: 1m
-  
-  # Warning thresholds (triggers alert, continues polling)
-  warning_lag_bytes: 104857600      # 100MB
-  warning_lag_duration: 1h
-  
-  # Critical thresholds (triggers alert, continues polling)
-  critical_lag_bytes: 1073741824    # 1GB
-  critical_lag_duration: 6h
-  
-  # Recovery strategy when data loss is detected
-  # Options: manual (pause and wait), snapshot (auto full load), timestamp (time-based recovery)
+  enabled: true             # 是否启用 Gap 检测
+
+  # 检测频率
+  check_interval: 1m        # 多久检查一次
+
+  # 警告阈值（触发告警，继续轮询）
+  warning_lag_bytes: 104857600        # 100MB，字节数阈值
+  warning_lag_duration: 1h            # 1小时，时长阈值
+
+  # 严重阈值（触发告警，继续轮询）
+  critical_lag_bytes: 1073741824      # 1GB，字节数阈值
+  critical_lag_duration: 6h          # 6小时，时长阈值
+
+  # 数据丢失时的恢复策略
   recovery:
-    strategy: manual  # Recommended for production
-  
-  # Alert configuration
+    strategy: manual         # manual | snapshot | timestamp
+                          # manual: 暂停等待人工处理（推荐生产环境）
+                          # snapshot: 自动全量重载
+                          # timestamp: 基于时间戳恢复
+
+  # 告警配置
   alert:
-    enabled: true
-    # Generic webhook
-    webhook_url: https://hooks.example.com/alert
-    # Multiple channels
+    enabled: true           # 是否发送告警
+    webhook_url: https://hooks.example.com/alert  # 通用 Webhook
+
+    # 多渠道告警
     channels:
-      - type: feishu
+      - type: feishu         # 飞书机器人
         url: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-      - type: webhook
+      - type: webhook        # 通用 Webhook
         url: https://hooks.slack.com/services/xxx
 
-# Graceful degradation for MSSQL disconnection
-# When enabled, dbkrab will retry connection instead of exiting on MSSQL disconnection
+# -----------------------------------------------------------------------------
+# MSSQL 断连优雅降级
+# -----------------------------------------------------------------------------
+# 当 MSSQL 连接断开时的重连策略，避免进程直接退出
 graceful_degradation:
-  enabled: true
-  max_disconnect_duration: 30m  # Max time to wait before alerting
-  reconnect_base_delay: 5s      # Initial delay between reconnection attempts
-  reconnect_max_delay: 60s      # Maximum delay (exponential backoff caps at this)
+  enabled: true              # 是否启用优雅降级
+  max_disconnect_duration: 30m    # 最大断连时长，超过则告警
+  reconnect_base_delay: 5s        # 初始重连间隔
+  reconnect_max_delay: 60s         # 最大重连间隔（指数退避上限）
+
+# -----------------------------------------------------------------------------
+# 插件配置
+# -----------------------------------------------------------------------------
+plugins:
+  sql:
+    enabled: true            # 是否启用 SQL 插件
+    path: ./skills/sql       # 插件目录路径
+
+    # Sink 数据库映射：插件中引用的数据库名 -> 实际存储配置
+    # 需与顶层 sinks.databases 中的定义保持一致
+    sink_databases:
+      business:
+        type: sqlite
+        path: ./data/sinks/business/business.db
+      analytics:
+        type: duckdb
+        path: ./data/sinks/analytics.duckdb
+
+# -----------------------------------------------------------------------------
+# 日志配置
+# -----------------------------------------------------------------------------
+logging:
+  level: info               # 日志级别：debug | info | warn | error
+
+  # 控制台输出
+  console:
+    enabled: true           # 是否输出到 stdout
+
+  # 文件输出
+  file:
+    enabled: true           # 是否输出到文件
+    path: ./logs/dbkrab.log  # 日志文件路径
+    max_size_mb: 100         # 单文件最大 MB
+    max_age_days: 7           # 保留天数
+    max_files: 4             # 保留文件数
+    compress: true           # 是否 gzip 压缩旧日志
