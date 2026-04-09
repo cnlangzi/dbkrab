@@ -33,16 +33,17 @@ type PluginsConfig struct {
 
 // PluginConfig contains plugin configuration for SQL plugins
 type PluginConfig struct {
-	Enabled   *bool                  `yaml:"enabled"` // true/on/1=enable, otherwise disabled
-	Path      string                 `yaml:"path"`
-	SinkDatabases map[string]DatabaseConfig `yaml:"sink_databases"` // Sink database name -> storage config
+	Enabled *bool  `yaml:"enabled"` // true/on/1=enable, otherwise disabled
+	Path    string `yaml:"path"`
 }
 
 // DatabaseConfig contains configuration for a named database
 type DatabaseConfig struct {
-	Type            string `yaml:"type"`             // sqlite, duckdb, mssql, etc.
+	Name            string `yaml:"name"`             // Sink name (used as key in array format)
+	Description    string `yaml:"description"`     // Human-readable description
+	Type            string `yaml:"type"`            // sqlite, duckdb, mssql, etc.
 	Path            string `yaml:"path"`             // Path for file-based databases
-	MigrationPath  string `yaml:"migrations"`     // Path to migration SQL files
+	MigrationPath  string `yaml:"migrations"`      // Path to migration SQL files
 	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
 }
 
@@ -79,8 +80,55 @@ type AppConfig struct {
 
 // SinksConfig contains business sinks configuration
 type SinksConfig struct {
-	BasePath   string                     `yaml:"base_path"` // Base path for business sink databases
-	Databases map[string]DatabaseConfig `yaml:"databases"` // Database name -> storage config
+	// BasePath is used internally by the API server for file serving.
+	// When sinks are configured as an array, this is derived from the first sink's path
+	// or can be set explicitly for backward compatibility.
+	BasePath  string                      `yaml:"base_path"`
+	Databases map[string]DatabaseConfig   `yaml:"databases"` // Database name -> storage config
+}
+
+// SinkEntry is used for YAML unmarshaling of the array format.
+// Name is extracted from the array element and used as the map key.
+type SinkEntry struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Type        string `yaml:"type"`
+	Path        string `yaml:"path"`
+	Migrations  string `yaml:"migrations"`
+}
+
+// UnmarshalYAML allows SinksConfig to accept both the old map format and the new array format.
+func (s *SinksConfig) UnmarshalYAML(unmarshal func(any) error) error {
+	// Try to unmarshal as array first (new format)
+	var entries []SinkEntry
+	if err := unmarshal(&entries); err == nil {
+		s.Databases = make(map[string]DatabaseConfig)
+		for _, entry := range entries {
+			if entry.Name == "" {
+				continue // skip entries without a name
+			}
+			s.Databases[entry.Name] = DatabaseConfig{
+				Name:           entry.Name,
+				Description:    entry.Description,
+				Type:          entry.Type,
+				Path:          entry.Path,
+				MigrationPath: entry.Migrations,
+			}
+		}
+		return nil
+	}
+
+	// Fall back to old map format (backward compatibility)
+	var old struct {
+		BasePath  string                      `yaml:"base_path"`
+		Databases map[string]DatabaseConfig   `yaml:"databases"`
+	}
+	if err := unmarshal(&old); err != nil {
+		return err
+	}
+	s.BasePath = old.BasePath
+	s.Databases = old.Databases
+	return nil
 }
 
 // OffsetConfig contains offset storage configuration
