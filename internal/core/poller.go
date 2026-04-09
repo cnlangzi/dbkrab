@@ -316,7 +316,7 @@ func (p *Poller) poll(ctx context.Context) error {
 
 		// Get changes since last poll (separate timeout for observability)
 		changesCtx, changesCancel := context.WithTimeout(ctx, changesTimeout)
-		cdcChanges, err := p.querier.GetChanges(changesCtx, captureInstance, startLSN, nil)
+		cdcChanges, err := p.querier.GetChanges(changesCtx, captureInstance, tableName, startLSN, nil)
 		changesCancel()
 		if err != nil {
 			results = append(results, tablePollResult{table: table, err: err})
