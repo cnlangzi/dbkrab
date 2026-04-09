@@ -393,6 +393,16 @@ function renderMobileCard(log) {
     `;
 }
 
+function formatLocalTime(timeStr) {
+    if (!timeStr) return '-';
+    try {
+        const date = new Date(timeStr);
+        return date.toLocaleString();
+    } catch {
+        return timeStr;
+    }
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
