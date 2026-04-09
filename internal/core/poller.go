@@ -161,7 +161,7 @@ func (p *Poller) Start(ctx context.Context) error {
 		}
 	}
 
-	interval, err := p.cfg.PollingInterval()
+	interval, err := p.cfg.Interval()
 	if err != nil {
 		return fmt.Errorf("parse interval: %w", err)
 	}
@@ -888,11 +888,11 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	}
 
 	// Safe to apply config now
-	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.CDC.PollingInterval)
+	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.CDC.Interval)
 
 	// Apply polling_interval change
-	if newCfg.CDC.PollingInterval != p.cfg.CDC.PollingInterval {
-		newInterval, err := newCfg.PollingInterval()
+	if newCfg.CDC.Interval != p.cfg.CDC.Interval {
+		newInterval, err := newCfg.Interval()
 		if err != nil {
 			slog.Warn("invalid polling_interval in new config", "error", err)
 		} else {
