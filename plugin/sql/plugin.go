@@ -114,13 +114,14 @@ func (p *Plugin) loadSkillFile(filePath string) (*Skill, error) {
 		return nil, fmt.Errorf("parse skill file: %w", err)
 	}
 
-	// Set File and Id
+	// Set File, Id, and Raw
 	relPath, err := filepath.Rel(p.watchDir, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("get relative path: %w", err)
 	}
 	skill.File = relPath
 	skill.Id = id
+	skill.Raw = string(data) // Save raw YAML content
 
 	// Load external SQL files
 	skillDir := filepath.Dir(filePath)
