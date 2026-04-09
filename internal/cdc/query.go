@@ -153,27 +153,34 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 
 		// Get commit time from LSN
 		// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
-		// The value is in SQL Server's local timezone, but Go driver can't detect it.
-		// We reinterpret the time value using the configured SQL Server timezone,
-		// then convert to UTC for consistent storage.
+		// Go driver incorrectly treats this as UTC, but it's actually SQL Server's local time.
+		// If timezone is configured, reinterpret the time value as SQL Server's timezone.
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
 			switch v := values[idx].(type) {
 			case time.Time:
-				// Reinterpret using SQL Server timezone, then convert to UTC
-				commitTime = time.Date(
-					v.Year(), v.Month(), v.Day(),
-					v.Hour(), v.Minute(), v.Second(), v.Nanosecond(),
-					q.timezone,
-				).UTC()
-			case string:
-				// Parse string and reinterpret timezone
-				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
+				if q.timezone != nil && q.timezone != time.Local {
+					// Reinterpret using configured SQL Server timezone, then convert to UTC
 					commitTime = time.Date(
-						parsed.Year(), parsed.Month(), parsed.Day(),
-						parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(),
+						v.Year(), v.Month(), v.Day(),
+						v.Hour(), v.Minute(), v.Second(), v.Nanosecond(),
 						q.timezone,
 					).UTC()
+				} else {
+					// No timezone configured - use driver's value as-is
+					commitTime = v.UTC()
+				}
+			case string:
+				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
+					if q.timezone != nil && q.timezone != time.Local {
+						commitTime = time.Date(
+							parsed.Year(), parsed.Month(), parsed.Day(),
+							parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(),
+							q.timezone,
+						).UTC()
+					} else {
+						commitTime = parsed.UTC()
+					}
 				}
 			}
 		}
