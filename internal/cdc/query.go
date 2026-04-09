@@ -88,7 +88,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 
 	// Build the CDC function name
 	fnName := fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
-	
+
 	// Get max LSN if toLSN is not provided
 	if len(toLSN) == 0 {
 		var err error
@@ -150,7 +150,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		if idx, ok := colIndex["__$start_lsn"]; ok {
 			lsn, _ = values[idx].([]byte)
 		}
-		
+
 		// Get transaction ID
 		var txID string
 		if idx, ok := colIndex["__$transaction_id"]; ok {
@@ -160,7 +160,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 				txID = fmt.Sprintf("%v", values[idx])
 			}
 		}
-		
+
 		// Get operation (MSSQL returns int64)
 		var op int64
 		if idx, ok := colIndex["__$operation"]; ok {
@@ -178,6 +178,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			case time.Time:
 				commitTime = convertCommitTime(v, q.timezone)
 			case string:
+				// Parse string and reinterpret timezone
 				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
 					commitTime = convertCommitTime(parsed, q.timezone)
 				}
@@ -191,11 +192,11 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			if strings.HasPrefix(col, "__$") {
 				continue
 			}
-			
+
 			// Convert MSSQL numeric bytes to string to avoid Base64 encoding in JSON
 			// MSSQL driver returns DECIMAL/NUMERIC as []byte which gets Base64 encoded
 			val := convertMSSQLValue(values[i])
-			
+
 			// Convert column name to lowercase for consistency
 			data[strings.ToLower(col)] = val
 		}
@@ -260,7 +261,7 @@ func formatMSSQLGUID(b []byte) string {
 		// Not a valid GUID, return hex encoding
 		return hex.EncodeToString(b)
 	}
-	
+
 	// MSSQL GUID byte order: 3-2-1-0, 5-4, 7-6, 8-9-10-11-12-13-14-15
 	// (first 3 groups are little-endian, last group is big-endian)
 	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x%02x%02x",
@@ -281,17 +282,17 @@ func convertMSSQLValue(val interface{}) interface{} {
 		// Not []byte, return as-is (string, int64, nil, etc.)
 		return val
 	}
-	
+
 	// Convert []byte to string
 	strVal := string(bytesVal)
-	
+
 	// Check if it looks like a numeric value
 	if numericPattern.MatchString(strVal) {
 		// It's a numeric string, return as string to preserve precision
 		// Example: "999.99", "700.0000", "824.000"
 		return strVal
 	}
-	
+
 	// Not numeric, return original []byte
 	// (could be GUID, binary data, etc. which will be Base64 encoded as intended)
 	return bytesVal

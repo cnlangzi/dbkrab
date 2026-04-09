@@ -80,8 +80,8 @@ type MSSQLConfig struct {
 // GracefulDegradationConfig contains graceful degradation settings for MSSQL disconnection
 type GracefulDegradationConfig struct {
 	Enabled             bool   `yaml:"enabled"`
-	MaxDisconnectDuration string `yaml:"max_disconnect_duration"` // e.g., "30m"
-	ReconnectBaseDelay  string `yaml:"reconnect_base_delay"`     // e.g., "5s"
+	MaxDisconnectDuration string `yaml:"max_disconnect_duration"` // e.g., "30m"`
+	ReconnectBaseDelay  string `yaml:"reconnect_base_delay"`     // e.g., "5s"`
 	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
