@@ -101,13 +101,21 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 			slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
 			maxWaitTime = 30 * time.Second
 		}
+		// Derive pollInterval from CDC poll configuration
+		pollInterval, err := cfg.Interval()
+		if err != nil {
+			slog.Warn("invalid cdc.interval, poll-interval gating disabled", "error", err)
+			pollInterval = 0
+		}
 		poller.txBuffer = NewTransactionBuffer(
 			maxWaitTime,
+			pollInterval,
 			cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
 			cfg.CDC.TransactionBuffer.MaxBatchBytes,
 		)
 		slog.Info("transaction buffer enabled",
 			"max_wait_time", maxWaitTime,
+			"poll_interval", pollInterval,
 			"max_transactions_per_batch", cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
 			"max_batch_bytes", cfg.CDC.TransactionBuffer.MaxBatchBytes)
 	}
@@ -954,6 +962,13 @@ func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
 		maxWaitTime = 30 * time.Second
 	}
 
+	// Derive pollInterval from CDC poll configuration
+	pollInterval, err := newCfg.Interval()
+	if err != nil {
+		slog.Warn("invalid cdc.interval, poll-interval gating disabled", "error", err)
+		pollInterval = 0
+	}
+
 	// Close old buffer
 	if p.txBuffer != nil {
 		p.txBuffer.Close()
@@ -962,12 +977,14 @@ func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
 	// Create new buffer with updated config
 	p.txBuffer = NewTransactionBuffer(
 		maxWaitTime,
+		pollInterval,
 		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
 		newCfg.CDC.TransactionBuffer.MaxBatchBytes,
 	)
 
 	slog.Info("transaction buffer rebuilt",
 		"max_wait_time", maxWaitTime,
+		"poll_interval", pollInterval,
 		"max_transactions_per_batch", newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
 		"max_batch_bytes", newCfg.CDC.TransactionBuffer.MaxBatchBytes)
 
