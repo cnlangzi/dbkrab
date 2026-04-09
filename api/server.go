@@ -1087,6 +1087,11 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 		}
 	}
 
+	// Ensure we return empty array, not null
+	if sinks == nil {
+		sinks = []map[string]any{}
+	}
+
 	return c.View(map[string]any{
 		"success": true,
 		"count":   len(sinks),
@@ -1162,6 +1167,11 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		if !strings.HasPrefix(tableName, "sqlite_") {
 			tables = append(tables, tableName)
 		}
+	}
+
+	// Ensure we return empty array, not null
+	if tables == nil {
+		tables = []string{}
 	}
 
 	return c.View(map[string]any{
@@ -1271,7 +1281,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	// Fetch results
-	var results []map[string]any
+	results := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
