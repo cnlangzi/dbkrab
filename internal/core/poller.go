@@ -80,10 +80,13 @@ type tablePollResult struct {
 
 // NewPoller creates a new poller
 func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
+	// Parse SQL Server timezone from config
+	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
+	
 	poller := &Poller{
 		cfg:      cfg,
 		db:       db,
-		querier:  cdc.NewQuerier(db),
+		querier:  cdc.NewQuerier(db, mssqlTimezone),
 		cdcAdmin: cdcadmin.NewAdmin(&cfg.MSSQL),
 		offsets:  offsetStore,
 		store:    store,
