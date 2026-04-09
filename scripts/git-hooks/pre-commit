@@ -27,9 +27,9 @@ if ! make vet; then
     exit 1
 fi
 
-# Run tests
+# Run tests (full test suite, includes regression tests)
 echo "🧪 Running tests..."
-if ! make test-short; then
+if ! make test; then
     echo "❌ Tests failed. Please fix the issues before committing."
     exit 1
 fi
