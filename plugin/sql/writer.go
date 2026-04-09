@@ -183,6 +183,7 @@ func (w *Writer) deleteInTx(tx *sql.Tx, config *SinkConfig, ds *DataSet) error {
 // buildInsertSQL builds INSERT SQL based on conflict strategy
 // row is needed for ConflictError to properly check if record exists
 func (w *Writer) buildInsertSQL(table, pk string, columns []string, row []interface{}, strategy OnConflictStrategy) (string, error) {
+	table = strings.ToLower(table)
 	// Escape column names
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
@@ -224,6 +225,7 @@ func (w *Writer) buildInsertSQL(table, pk string, columns []string, row []interf
 
 // buildUpdateSQL builds UPDATE SQL based on conflict strategy
 func (w *Writer) buildUpdateSQL(table, pk string, columns []string, row []interface{}, strategy OnConflictStrategy) (string, []interface{}, error) {
+	table = strings.ToLower(table)
 	// Find PK index
 	pkIndex := -1
 	for i, col := range columns {
@@ -284,6 +286,7 @@ func (w *Writer) buildUpdateSQL(table, pk string, columns []string, row []interf
 // For DELETE, ConflictSkip and ConflictOverwrite behave the same (idempotent)
 // ConflictError checks if rows were actually deleted
 func (w *Writer) buildDeleteSQL(table, pk string, numValues int, strategy OnConflictStrategy) (string, error) {
+	table = strings.ToLower(table)
 	// Build the IN clause placeholders
 	placeholders := make([]string, numValues)
 	for i := range numValues {
