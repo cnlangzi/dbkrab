@@ -118,3 +118,51 @@ func TestLoadNonExistentSkill(t *testing.T) {
 		t.Error("expected error for nonexistent skill")
 	}
 }
+
+func TestNormalizeSQLParams(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "mixed case parameters",
+			input: "SELECT * FROM Cost WHERE Id = @Cost_Id AND name = @Cost_Name",
+			want:  "SELECT * FROM Cost WHERE Id = @cost_id AND name = @cost_name",
+		},
+		{
+			name:  "uppercase parameters",
+			input: "INSERT INTO Orders (ID, Amount) VALUES (@ORDER_ID, @AMOUNT)",
+			want:  "INSERT INTO Orders (ID, Amount) VALUES (@order_id, @amount)",
+		},
+		{
+			name:  "already lowercase",
+			input: "UPDATE items SET qty = @qty WHERE id = @item_id",
+			want:  "UPDATE items SET qty = @qty WHERE id = @item_id",
+		},
+		{
+			name:  "no parameters",
+			input: "SELECT COUNT(*) FROM table",
+			want:  "SELECT COUNT(*) FROM table",
+		},
+		{
+			name:  "complex SQL with multiple params",
+			input: "SELECT @CDC_LSN, @cdc_tx_id, @Cost_Id, @Cost_item_id FROM cdc.dbo_Cost_CT",
+			want:  "SELECT @cdc_lsn, @cdc_tx_id, @cost_id, @cost_item_id FROM cdc.dbo_Cost_CT",
+		},
+		{
+			name:  "parameters with underscores",
+			input: "@User_First_Name, @User_Last_Name, @created_at",
+			want:  "@user_first_name, @user_last_name, @created_at",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeSQLForTest(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeSQLParams() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
