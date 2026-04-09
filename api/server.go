@@ -117,7 +117,7 @@ func (s *Server) Start() error {
 
 	// Initialize sinks root for secure file access
 	// os.Root provides safe access to files within a directory tree
-	if s.config != nil && len(s.config.Sinks.Databases) > 0 {
+	if s.config != nil && len(s.config.Sinks) > 0 {
 		var err error
 		s.sinksRoot, err = os.OpenRoot(s.config.Sinks.BasePath())
 		if err != nil {
@@ -1064,8 +1064,8 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 	var sinks []map[string]any
 
 	// Get sinks from config (sinks and plugins are same-level in config)
-	if s.config != nil && len(s.config.Sinks.Databases) > 0 {
-		for _, dbCfg := range s.config.Sinks.Databases {
+	if s.config != nil && len(s.config.Sinks) > 0 {
+		for _, dbCfg := range s.config.Sinks {
 			sink := map[string]any{
 				"name":       dbCfg.Name,
 				"type":       dbCfg.Type,

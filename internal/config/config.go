@@ -87,15 +87,14 @@ type AppConfig struct {
 	Path string `yaml:"path"`
 }
 
-// SinksConfig contains business sinks configuration
-type SinksConfig struct {
-	Databases []DatabaseConfig `yaml:"databases"`
-}
+// SinksConfig is a slice of DatabaseConfig for business sinks.
+// It unmarshals directly from a YAML array.
+type SinksConfig []DatabaseConfig
 
-// ToMap converts Databases to a map keyed by Name (for plugin/API compatibility).
-func (s *SinksConfig) ToMap() map[string]DatabaseConfig {
-	m := make(map[string]DatabaseConfig, len(s.Databases))
-	for _, db := range s.Databases {
+// ToMap converts to a map keyed by Name (for plugin/API compatibility).
+func (s SinksConfig) ToMap() map[string]DatabaseConfig {
+	m := make(map[string]DatabaseConfig, len(s))
+	for _, db := range s {
 		m[db.Name] = db
 	}
 	return m
@@ -103,11 +102,11 @@ func (s *SinksConfig) ToMap() map[string]DatabaseConfig {
 
 // BasePath returns the parent directory of the first sink's path.
 // Used internally by the API server for file serving.
-func (s *SinksConfig) BasePath() string {
-	if len(s.Databases) == 0 || s.Databases[0].Path == "" {
+func (s SinksConfig) BasePath() string {
+	if len(s) == 0 || s[0].Path == "" {
 		return "./data/sinks"
 	}
-	return filepath.Dir(s.Databases[0].Path)
+	return filepath.Dir(s[0].Path)
 }
 
 // OffsetConfig contains offset storage configuration
