@@ -83,7 +83,7 @@ fi
 # ============================================
 echo "🚀 Starting dbkrab..."
 cd "$INSTALL_DIR"
-nohup "$INSTALL_DIR/dbkrab" -config "$CONFIG_DEST" -api-port 9021 > "$LOG_FILE" 2>&1 &
+nohup "$INSTALL_DIR/dbkrab" -config "$CONFIG_DEST" > "$LOG_FILE" 2>&1 &
 NEW_PID=$!
 
 # Save PID file (requires sudo for /var/run)
