@@ -178,6 +178,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			case time.Time:
 				commitTime = convertCommitTime(v, q.timezone)
 			case string:
+				// Parse string and reinterpret timezone
 				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
 					commitTime = convertCommitTime(parsed, q.timezone)
 				}
