@@ -1319,7 +1319,6 @@ func (s *Server) handleSinksPage(c *xun.Context) error {
 	})
 }
 
-// handleSinkQueryPage handles GET /sinks/{id}
 func formatFileSize(size int64) string {
 	const (
 		KB = 1024
