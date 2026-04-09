@@ -63,7 +63,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		}
 
 		// Get sinks for this operation using FilterByOperation
-		sinkConfigs := e.skill.FilterByOperation(Operation(sinkType))
+		sinkConfigs := e.skill.FilterByOperation(sinkType)
 		if len(sinkConfigs) > 0 {
 			sinkParams := e.cdcParamsToMap(cdcParams)
 
@@ -89,7 +89,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 						OnConflict: sinkCfg.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  sinkType,
+					OpType:  core.Operation(sinkType),
 				}
 				allOps = append(allOps, sinkOp)
 			}
@@ -303,16 +303,16 @@ func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
 	return m
 }
 
-// operationToSinkType converts core.Operation to core.Operation
+// operationToSinkType converts core.Operation to sql.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
+func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	switch op {
 	case core.OpInsert:
-		return core.OpInsert
+		return Insert
 	case core.OpUpdateAfter:
-		return core.OpUpdateAfter
+		return Update // Map core.OpUpdateAfter (4) to sql.Update (2) for sink filtering
 	case core.OpDelete:
-		return core.OpDelete
+		return Delete
 	default:
 		return 0 // 0 is not valid, indicates skip
 	}
