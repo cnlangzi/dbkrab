@@ -1,0 +1,30 @@
+name: sync_inventory
+description: "inventory CDC sync to inventory DB"
+
+on:
+  - inventory
+
+database: inventory
+
+sinks:
+  - name: sync
+    when: [insert, update]
+    sql: |
+      SELECT
+        @cdc_lsn as cdc_lsn,
+        @cdc_tx_id as cdc_transaction_id,
+        @cdc_table as cdc_source_table,
+        @cdc_operation as cdc_operation,
+        i.product_id,
+        i.quantity
+      FROM inventory i
+      WHERE i.product_id IN (@inventory_product_id);
+    output: inventory_sync
+    primary_key: product_id
+
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @inventory_product_id as product_id
+    output: inventory_sync
+    primary_key: product_id
