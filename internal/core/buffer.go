@@ -172,9 +172,8 @@ func estimateChangeSize(change Change) int {
 // GetCompleteTransactions returns transactions that are ready for delivery
 // Delivery conditions (OR):
 // 1. All involved tables have max(tableCommitTime) > tx.CommitTime (commit-time gating)
-// 2. now.Sub(tx.CommitTime) > pollInterval (poll-interval gating safety boundary)
-// 3. now.Sub(tx.FirstSeenTime) > maxWaitTime (timeout fallback)
-// 4. Batch limits reached
+// 2. now.Sub(tx.CommitTime) > pollInterval * 2 (poll-interval gating safety boundary)
+// 3. Batch limits reached
 func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
@@ -230,29 +229,31 @@ func (tb *TransactionBuffer) GetCompleteTransactions() []*Transaction {
 func (tb *TransactionBuffer) shouldDeliver(pending *pendingTransaction, now time.Time) DeliveryReason {
 	// Already marked complete
 	if pending.complete {
-		return DeliveryReasonTimeout // Use timeout as generic "marked complete" reason
+		return DeliveryReasonPollInterval // Use poll-interval as generic "marked complete" reason
 	}
 
-	// Condition 3: now.Sub(tx.FirstSeenTime) > maxWaitTime (timeout fallback)
-	if !pending.firstSeen.IsZero() && tb.maxWaitTime > 0 && now.Sub(pending.firstSeen) > tb.maxWaitTime {
-		slog.Debug("transaction ready for delivery by timeout",
-			"tx_id", pending.transactionID,
-			"first_seen", pending.firstSeen,
-			"age", now.Sub(pending.firstSeen),
-			"max_wait_time", tb.maxWaitTime)
-		return DeliveryReasonTimeout
-	}
+	// NOTE: maxWaitTime timeout fallback removed - poll-interval gating is sufficient
+	// Transactions are delivered either by commit-time gating (Condition 1) or
+	// poll-interval gating (Condition 2), both derived from CDC poll configuration
 
 	// Condition 2: now.Sub(tx.CommitTime) > pollInterval * safetyMultiplier (poll-interval gating)
 	// This is a safety boundary: even if other tables haven't confirmed,
 	// we deliver after pollInterval * 2 has passed since commit
-	if !pending.commitTime.IsZero() && tb.pollInterval > 0 {
+	// Use FirstSeenTime as fallback if CommitTime is not available
+	if tb.pollInterval > 0 {
+		var age time.Duration
+		if !pending.commitTime.IsZero() {
+			age = now.Sub(pending.commitTime)
+		} else {
+			age = now.Sub(pending.firstSeen)
+		}
 		safetyThreshold := tb.pollInterval * pollIntervalSafetyMultiplier
-		if now.Sub(pending.commitTime) > safetyThreshold {
+		if age > safetyThreshold {
 			slog.Debug("transaction ready for delivery by poll-interval gating",
 				"tx_id", pending.transactionID,
 				"commit_time", pending.commitTime,
-				"age_since_commit", now.Sub(pending.commitTime),
+				"first_seen", pending.firstSeen,
+				"age", age,
 				"poll_interval", tb.pollInterval,
 				"safety_threshold", safetyThreshold)
 			return DeliveryReasonPollInterval
@@ -352,32 +353,24 @@ func (tb *TransactionBuffer) buildTransaction(pending *pendingTransaction) *Tran
 	return tx
 }
 
-// cleanupLoop periodically checks for timed-out transactions
+// cleanupLoop is kept for potential future use (e.g., periodic memory cleanup)
+// Currently just a placeholder - no timeout-based delivery
 func (tb *TransactionBuffer) cleanupLoop() {
+	// Reserved for future use - e.g., periodic cleanup of stale transactions
+	// No-op now since timeout fallback was removed
 	for {
 		select {
-		case <-tb.cleanupTicker.C:
-			// Just check for timeouts, don't deliver
-			// Delivery happens when GetCompleteTransactions is called
-			tb.checkTimeouts()
 		case <-tb.stopCh:
-			tb.cleanupTicker.Stop()
 			return
 		}
 	}
 }
 
-// checkTimeouts marks timed-out transactions as complete (internal use)
+// checkTimeouts is kept for potential future use (e.g., memory management)
+// Currently no timeout logic - transactions are delivered by commit-time or poll-interval gating
 func (tb *TransactionBuffer) checkTimeouts() {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-
-	now := time.Now()
-	for _, pending := range tb.pending {
-		if tb.maxWaitTime > 0 && now.Sub(pending.firstSeen) > tb.maxWaitTime {
-			pending.complete = true
-		}
-	}
+	// Reserved for future use - e.g., periodic cleanup of stale transactions
+	// Currently all delivery is handled by shouldDeliver() conditions
 }
 
 // Close stops the cleanup loop
