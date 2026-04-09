@@ -14,6 +14,11 @@ const (
 	DeliveryReasonPollInterval DeliveryReason = "poll_interval"  // Poll interval gating safety boundary
 	DeliveryReasonTimeout      DeliveryReason = "timeout"        // maxWaitTime timeout fallback
 	DeliveryReasonBatchLimit   DeliveryReason = "batch_limit"   // Batch size limits reached
+
+	// pollIntervalSafetyMultiplier is the multiplier for poll-interval gating
+	// 2x provides a sliding safety window to account for cross-table changes
+	// that may arrive in different poll cycles
+	pollIntervalSafetyMultiplier = 2.0
 )
 
 // TransactionBuffer holds pending transactions waiting for completion
@@ -238,16 +243,20 @@ func (tb *TransactionBuffer) shouldDeliver(pending *pendingTransaction, now time
 		return DeliveryReasonTimeout
 	}
 
-	// Condition 2: now.Sub(tx.CommitTime) > pollInterval (poll-interval gating)
+	// Condition 2: now.Sub(tx.CommitTime) > pollInterval * safetyMultiplier (poll-interval gating)
 	// This is a safety boundary: even if other tables haven't confirmed,
-	// we deliver after pollInterval has passed since commit
-	if !pending.commitTime.IsZero() && tb.pollInterval > 0 && now.Sub(pending.commitTime) > tb.pollInterval {
-		slog.Debug("transaction ready for delivery by poll-interval gating",
-			"tx_id", pending.transactionID,
-			"commit_time", pending.commitTime,
-			"age_since_commit", now.Sub(pending.commitTime),
-			"poll_interval", tb.pollInterval)
-		return DeliveryReasonPollInterval
+	// we deliver after pollInterval * 2 has passed since commit
+	if !pending.commitTime.IsZero() && tb.pollInterval > 0 {
+		safetyThreshold := tb.pollInterval * pollIntervalSafetyMultiplier
+		if now.Sub(pending.commitTime) > safetyThreshold {
+			slog.Debug("transaction ready for delivery by poll-interval gating",
+				"tx_id", pending.transactionID,
+				"commit_time", pending.commitTime,
+				"age_since_commit", now.Sub(pending.commitTime),
+				"poll_interval", tb.pollInterval,
+				"safety_threshold", safetyThreshold)
+			return DeliveryReasonPollInterval
+		}
 	}
 
 	// Condition 1: All involved tables have max(tableCommitTime) > tx.CommitTime
