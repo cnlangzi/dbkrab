@@ -219,7 +219,6 @@ func (s *Server) registerPageRoutes() {
 	
 	// Register sinks pages explicitly
 	s.app.Get("/sinks", s.handleSinksPage)
-	s.app.Get("/sinks/{id}", s.handleSinkQueryPage)
 }
 
 // handlePlugins handles GET /api/plugins
