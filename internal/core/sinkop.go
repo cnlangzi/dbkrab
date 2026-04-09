@@ -9,6 +9,7 @@ type DataSet struct {
 // SinkConfig represents sink configuration
 type SinkConfig struct {
 	Name       string
+	Database   string // Database name (maps to platform-configured storage)
 	Output     string
 	PrimaryKey string
 	OnConflict string
