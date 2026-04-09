@@ -89,16 +89,16 @@ tables:
   - dbo.orders
   - dbo.order_items
 
-polling_interval: 500ms
+cdc:
+  interval: 500ms
 
 plugins:
   sql:
     enabled: true
     path: ./skills
 
-api_port: 3000
-
-sink:
+app:
+  listen: 3000
   type: sqlite
   path: ./data/system/dbkrab.db
 ```

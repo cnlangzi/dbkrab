@@ -59,10 +59,7 @@ Processes CDC changes using SQL as the domain-specific language.
 
 Go + HTMX dashboard for operations.
 
-- Skills management (create/edit/delete)
-- DLQ monitoring and replay
-- CDC table status
-- Gap detection alerts
+- Skills management, DLQ monitoring, CDC status, Gap detection
 
 ---
 
@@ -156,7 +153,7 @@ For each CDC change (row):
 |--------|-------------|
 | `mssql.*` | MSSQL connection settings |
 | `tables` | CDC tables to monitor |
-| `polling_interval` | Poll frequency |
+| `cdc.interval` | Poll frequency |
 | `plugins.sql.path` | Skills directory |
-| `api_port` | Dashboard port (default 3000) |
-| `sink.path` | System SQLite path |
+| `app.listen` | Dashboard port |
+| `app.path` | System SQLite path |
