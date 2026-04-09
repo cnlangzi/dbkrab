@@ -159,10 +159,10 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/skills/list", s.handleSkillsList, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/files", s.handleSkillsFiles, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/files/html", s.handleSkillsFilesHTML) // HTML fragment for HTMX
-	api.Get("/skills/{name}", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/skills/{id}", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
-	api.Post("/skills/{name}/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
-	api.Delete("/skills/{name}", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/{id}/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Delete("/skills/{id}", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/validate", s.handleSkillValidate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/file/{path...}", s.handleSkillFileGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/file/{path}/save", s.handleSkillFileSave, xun.WithViewer(&xun.JsonViewer{}))
@@ -216,7 +216,7 @@ func (s *Server) registerPageRoutes() {
 	// Register skills pages explicitly
 	s.app.Get("/skills", s.handleSkillsPage)
 	s.app.Get("/skills/new", s.handleSkillsNewPage)
-	s.app.Get("/skills/edit/{name}", s.handleSkillsEditPage)
+	s.app.Get("/skills/edit/{id}", s.handleSkillsEditPage)
 	
 	// Register sinks pages explicitly
 	s.app.Get("/sinks", s.handleSinksPage)
