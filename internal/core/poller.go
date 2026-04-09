@@ -110,9 +110,9 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 	}
 
 	// Initialize gap detector if CDC protection is enabled
-	if cfg.CDC.Protection.Enabled {
+	if cfg.CDC.Gap.Enabled {
 		poller.gapDetector = cdc.NewGapDetector(db)
-		poller.alertManager = alert.NewAlertManager(cfg.CDC.Protection.Alert)
+		poller.alertManager = alert.NewAlertManager(cfg.CDC.Gap.Alert)
 		slog.Info("CDC gap protection enabled")
 	}
 
@@ -667,8 +667,8 @@ func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 
 // checkGaps checks for CDC gaps across all monitored tables
 func (p *Poller) checkGaps(ctx context.Context) error {
-	warningLagBytes := p.cfg.CDC.Protection.WarningLagBytes
-	criticalLagBytes := p.cfg.CDC.Protection.CriticalLagBytes
+	warningLagBytes := p.cfg.CDC.Gap.WarningLagBytes
+	criticalLagBytes := p.cfg.CDC.Gap.CriticalLagBytes
 
 	// Parse duration thresholds with explicit error handling
 	warningLagDuration, err := p.cfg.WarningLagDuration()
@@ -908,7 +908,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	}
 
 	// Apply cdc_protection thresholds (safe to update immediately)
-	p.cfg.CDC.Protection = newCfg.CDC.Protection
+	p.cfg.CDC.Gap = newCfg.CDC.Gap
 	slog.Debug("cdc_protection thresholds updated")
 
 	// Apply graceful_degradation params (safe to update immediately)
