@@ -185,6 +185,22 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 	case "list":
 		return APIResponse{Success: true, Data: m.List()}
 
+	case "get_skill":
+		id, _ := params["id"].(string)
+		if id == "" {
+			return APIResponse{Success: false, Error: "id required"}
+		}
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		if m.sqlPlugin == nil {
+			return APIResponse{Success: false, Error: "SQL plugin not initialized"}
+		}
+		skill, ok := m.sqlPlugin.Skills.Get(id)
+		if !ok {
+			return APIResponse{Success: false, Error: "skill not found: " + id}
+		}
+		return APIResponse{Success: true, Data: skill}
+
 	case "get":
 		name, _ := params["name"].(string)
 		if name == "" {

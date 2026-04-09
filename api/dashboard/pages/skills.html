@@ -171,7 +171,7 @@ function renderSkillsList(skills) {
         const statusText = skill.status === 'error' ? 'Error' : 'Active';
         
         html += `
-            <a href="/skills/edit/${skill.name}" class="block p-4 hover:bg-surfaceHover transition-colors">
+            <a href="/skills/edit/${skill.id}" class="block p-4 hover:bg-surfaceHover transition-colors">
                 <div class="flex items-start justify-between">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-2">

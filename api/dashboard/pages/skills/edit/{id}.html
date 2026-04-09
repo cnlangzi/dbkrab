@@ -44,9 +44,9 @@
             <div class="text-sm text-text">
                 <p class="font-medium text-text mb-1">Editing Tips</p>
                 <ul class="text-textMuted space-y-1">
-                    <li>• Changes are saved to <code class="px-1 py-0.5 bg-surfaceHover rounded">skills/{{.Data.Name}}.yml</code></li>
+                    <li>• ID: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-id">{{.Data.Id}}</code></li>
+                    <li>• File: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-file">-</code></li>
                     <li>• Plugin will auto-reload after ~1 second</li>
-                    <li>• Make sure <code class="px-1 py-0.5 bg-surfaceHover rounded">name</code> field matches filename</li>
                     <li>• At least one table must be specified in <code class="px-1 py-0.5 bg-surfaceHover rounded">on</code> field</li>
                 </ul>
             </div>
@@ -63,17 +63,20 @@
 </div>
 
 <script>
-const skillName = '{{.Data.Name}}';
+// Skill ID from URL
+const skillId = '{{.Data.Id}}';
 
 // Load skill content
 async function loadSkill() {
     try {
-        const response = await fetch('/api/skills/' + skillName);
+        const response = await fetch('/api/skills/' + skillId);
         const data = await response.json();
         
         if (data.success) {
             document.getElementById('yaml-editor').value = data.content;
-            document.getElementById('page-title').textContent = 'Edit: ' + skillName;
+            document.getElementById('page-title').textContent = 'Edit: ' + data.name;
+            document.getElementById('skill-id').textContent = data.id;
+            document.getElementById('skill-file').textContent = data.file;
         } else {
             showError('Failed to load skill: ' + data.error);
         }
@@ -110,10 +113,10 @@ async function saveSkill() {
     showStatus('Saving...', 'info');
     
     try {
-        const response = await fetch('/api/skills/' + skillName + '/save', {
+        const response = await fetch('/api/skills/' + skillId + '/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: skillName, content })
+            body: JSON.stringify({ content })
         });
         const result = await response.json();
         
