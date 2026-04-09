@@ -1320,23 +1320,6 @@ func (s *Server) handleSinksPage(c *xun.Context) error {
 }
 
 // handleSinkQueryPage handles GET /sinks/{id}
-func (s *Server) handleSinkQueryPage(c *xun.Context) error {
-	id := c.Request.PathValue("id")
-	
-	// Find sink by ID for display name
-	sink, err := s.getSinkById(id)
-	sinkName := id
-	if err == nil {
-		sinkName = sink.Name
-	}
-	
-	return c.View(map[string]any{
-		"activeTab": "sinks",
-		"title":     fmt.Sprintf("Sink: %s", sinkName),
-		"sinkId":    id,
-		"sinkName":  sinkName,
-	})
-}
 func formatFileSize(size int64) string {
 	const (
 		KB = 1024
