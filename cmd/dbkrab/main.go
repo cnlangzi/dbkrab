@@ -90,12 +90,12 @@ func main() {
 		"pool_max_idle_time", "5m")
 
 	// Create offset store
-	offsetStore, err := offset.NewStoreFromConfig(cfg.Offset.Type, cfg.Offset.JSONPath, cfg.Offset.SQLitePath)
+	offsetStore, err := offset.NewStoreFromConfig(cfg.CDC.Offset.Type, cfg.CDC.Offset.JSONPath, cfg.CDC.Offset.SQLitePath)
 	if err != nil {
 		slog.Error("failed to create offset store", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("offset store initialized", "type", cfg.Offset.Type)
+	slog.Info("offset store initialized", "type", cfg.CDC.Offset.Type)
 
 	// Create store
 	var store *app.Store

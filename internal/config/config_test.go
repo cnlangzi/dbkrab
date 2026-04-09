@@ -30,10 +30,13 @@ tables:
   - dbo.orders
   - dbo.users
 
-polling_interval: 1s
-offset_file: ./data/test-offset.json
+cdc:
+  polling_interval: 1s
+  offset:
+    type: json
+    json_path: ./data/test-offset.json
 
-sink:
+app:
   type: sqlite
   path: ./data/test-cdc.db
 `
@@ -70,8 +73,8 @@ sink:
 	}
 
 	// Check defaults
-	if cfg.Interval != "1s" {
-		t.Errorf("Interval = %v, want 1s", cfg.Interval)
+	if cfg.CDC.PollingInterval != "1s" {
+		t.Errorf("Interval = %v, want 1s", cfg.CDC.PollingInterval)
 	}
 
 	// Check sink
@@ -112,14 +115,14 @@ tables:
 	}
 
 	// Check defaults
-	if cfg.Interval != "500ms" {
-		t.Errorf("Interval default = %v, want 500ms", cfg.Interval)
+	if cfg.CDC.PollingInterval != "500ms" {
+		t.Errorf("Interval default = %v, want 500ms", cfg.CDC.PollingInterval)
 	}
-	if cfg.Offset.Type != "json" {
-		t.Errorf("Offset.Type default = %v, want json", cfg.Offset.Type)
+	if cfg.CDC.Offset.Type != "json" {
+		t.Errorf("Offset.Type default = %v, want json", cfg.CDC.Offset.Type)
 	}
-	if cfg.Offset.JSONPath != "./data/offset.json" {
-		t.Errorf("Offset.JSONPath default = %v, want ./data/offset.json", cfg.Offset.JSONPath)
+	if cfg.CDC.Offset.JSONPath != "./data/offset.json" {
+		t.Errorf("Offset.JSONPath default = %v, want ./data/offset.json", cfg.CDC.Offset.JSONPath)
 	}
 	if cfg.App.Type != "sqlite" {
 		t.Errorf("App.Type default = %v, want sqlite", cfg.App.Type)
@@ -127,7 +130,7 @@ tables:
 }
 
 func TestPollingInterval(t *testing.T) {
-	cfg := &Config{Interval: "1s"}
+	cfg := &Config{CDC: CDCConfig{PollingInterval: "1s"}}
 	d, err := cfg.PollingInterval()
 	if err != nil {
 		t.Fatalf("PollingInterval() error = %v", err)
@@ -137,7 +140,7 @@ func TestPollingInterval(t *testing.T) {
 	}
 
 	// Invalid duration
-	cfg = &Config{Interval: "invalid"}
+	cfg = &Config{CDC: CDCConfig{PollingInterval: "invalid"}}
 	_, err = cfg.PollingInterval()
 	if err == nil {
 		t.Error("Expected error for invalid duration")

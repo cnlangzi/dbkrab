@@ -92,27 +92,27 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 	}
 
 	// Initialize transaction buffer if enabled
-	if cfg.TransactionBuffer.Enabled {
-		maxWaitTime, err := time.ParseDuration(cfg.TransactionBuffer.MaxWaitTime)
+	if cfg.CDC.TransactionBuffer.Enabled {
+		maxWaitTime, err := time.ParseDuration(cfg.CDC.TransactionBuffer.MaxWaitTime)
 		if err != nil {
 			slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
 			maxWaitTime = 30 * time.Second
 		}
 		poller.txBuffer = NewTransactionBuffer(
 			maxWaitTime,
-			cfg.TransactionBuffer.MaxTransactionsPerBatch,
-			cfg.TransactionBuffer.MaxBatchBytes,
+			cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
+			cfg.CDC.TransactionBuffer.MaxBatchBytes,
 		)
 		slog.Info("transaction buffer enabled",
 			"max_wait_time", maxWaitTime,
-			"max_transactions_per_batch", cfg.TransactionBuffer.MaxTransactionsPerBatch,
-			"max_batch_bytes", cfg.TransactionBuffer.MaxBatchBytes)
+			"max_transactions_per_batch", cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
+			"max_batch_bytes", cfg.CDC.TransactionBuffer.MaxBatchBytes)
 	}
 
 	// Initialize gap detector if CDC protection is enabled
-	if cfg.CDCProtection.Enabled {
+	if cfg.CDC.Protection.Enabled {
 		poller.gapDetector = cdc.NewGapDetector(db)
-		poller.alertManager = alert.NewAlertManager(cfg.CDCProtection.Alert)
+		poller.alertManager = alert.NewAlertManager(cfg.CDC.Protection.Alert)
 		slog.Info("CDC gap protection enabled")
 	}
 
@@ -667,8 +667,8 @@ func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 
 // checkGaps checks for CDC gaps across all monitored tables
 func (p *Poller) checkGaps(ctx context.Context) error {
-	warningLagBytes := p.cfg.CDCProtection.WarningLagBytes
-	criticalLagBytes := p.cfg.CDCProtection.CriticalLagBytes
+	warningLagBytes := p.cfg.CDC.Protection.WarningLagBytes
+	criticalLagBytes := p.cfg.CDC.Protection.CriticalLagBytes
 
 	// Parse duration thresholds with explicit error handling
 	warningLagDuration, err := p.cfg.WarningLagDuration()
@@ -873,10 +873,10 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	newCfg := p.pendingCfg
 
 	// Check if transaction_buffer change requires drain
-	if newCfg.TransactionBuffer.Enabled != p.cfg.TransactionBuffer.Enabled ||
-		newCfg.TransactionBuffer.MaxWaitTime != p.cfg.TransactionBuffer.MaxWaitTime ||
-		newCfg.TransactionBuffer.MaxTransactionsPerBatch != p.cfg.TransactionBuffer.MaxTransactionsPerBatch ||
-		newCfg.TransactionBuffer.MaxBatchBytes != p.cfg.TransactionBuffer.MaxBatchBytes {
+	if newCfg.CDC.TransactionBuffer.Enabled != p.cfg.CDC.TransactionBuffer.Enabled ||
+		newCfg.CDC.TransactionBuffer.MaxWaitTime != p.cfg.CDC.TransactionBuffer.MaxWaitTime ||
+		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch != p.cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch ||
+		newCfg.CDC.TransactionBuffer.MaxBatchBytes != p.cfg.CDC.TransactionBuffer.MaxBatchBytes {
 		// Need to drain buffer before applying
 		if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
 			slog.Info("transaction_buffer changed, waiting for buffer to drain")
@@ -888,10 +888,10 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	}
 
 	// Safe to apply config now
-	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.Interval)
+	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.CDC.PollingInterval)
 
 	// Apply polling_interval change
-	if newCfg.Interval != p.cfg.Interval {
+	if newCfg.CDC.PollingInterval != p.cfg.CDC.PollingInterval {
 		newInterval, err := newCfg.PollingInterval()
 		if err != nil {
 			slog.Warn("invalid polling_interval in new config", "error", err)
@@ -908,7 +908,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	}
 
 	// Apply cdc_protection thresholds (safe to update immediately)
-	p.cfg.CDCProtection = newCfg.CDCProtection
+	p.cfg.CDC.Protection = newCfg.CDC.Protection
 	slog.Debug("cdc_protection thresholds updated")
 
 	// Apply graceful_degradation params (safe to update immediately)
@@ -935,7 +935,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 
 // rebuildTxBuffer rebuilds the transaction buffer with new config
 func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
-	if !newCfg.TransactionBuffer.Enabled {
+	if !newCfg.CDC.TransactionBuffer.Enabled {
 		// Disable transaction buffer
 		if p.txBuffer != nil {
 			p.txBuffer.Close()
@@ -945,7 +945,7 @@ func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
 		return nil
 	}
 
-	maxWaitTime, err := time.ParseDuration(newCfg.TransactionBuffer.MaxWaitTime)
+	maxWaitTime, err := time.ParseDuration(newCfg.CDC.TransactionBuffer.MaxWaitTime)
 	if err != nil {
 		slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
 		maxWaitTime = 30 * time.Second
@@ -959,14 +959,14 @@ func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
 	// Create new buffer with updated config
 	p.txBuffer = NewTransactionBuffer(
 		maxWaitTime,
-		newCfg.TransactionBuffer.MaxTransactionsPerBatch,
-		newCfg.TransactionBuffer.MaxBatchBytes,
+		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
+		newCfg.CDC.TransactionBuffer.MaxBatchBytes,
 	)
 
 	slog.Info("transaction buffer rebuilt",
 		"max_wait_time", maxWaitTime,
-		"max_transactions_per_batch", newCfg.TransactionBuffer.MaxTransactionsPerBatch,
-		"max_batch_bytes", newCfg.TransactionBuffer.MaxBatchBytes)
+		"max_transactions_per_batch", newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
+		"max_batch_bytes", newCfg.CDC.TransactionBuffer.MaxBatchBytes)
 
 	return nil
 }
