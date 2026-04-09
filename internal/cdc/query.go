@@ -80,7 +80,9 @@ func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 }
 
 // GetChanges queries CDC changes for a table
-func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLSN, toLSN []byte) ([]Change, error) {
+// captureInstance is used for MSSQL CDC queries (must include schema prefix)
+// tableName is the original table name used for returned Change.Table (without schema prefix)
+func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN, toLSN []byte) ([]Change, error) {
 	// Validate capture instance to prevent SQL injection
 	if !validCaptureInstance.MatchString(captureInstance) {
 		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
@@ -201,8 +203,14 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 			data[strings.ToLower(col)] = val
 		}
 
+		// Extract original table name from captureInstance (format: schema_table)
+		tableName := captureInstance
+		if idx := strings.Index(captureInstance, "_"); idx > 0 {
+			tableName = captureInstance[idx+1:]
+		}
+
 		changes = append(changes, Change{
-			Table:         captureInstance,
+			Table:         tableName,
 			TransactionID: txID,
 			LSN:           lsn,
 			Operation:     int(op),
