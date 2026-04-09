@@ -241,31 +241,22 @@ This generates: `DELETE FROM order_sync WHERE order_id = @orders_order_id`
 
 ---
 
-## Jobs (Pre-fetch)
+## Sinks
 
-Jobs run in parallel for every change (not filtered by operation):
+Sinks run for each change, filtered by operation type:
 
 ```yaml
-name: with_jobs
+name: sync_orders
 on:
   - orders
 
-jobs:
-  - name: log_event
-    sql: |
-      SELECT 
-        @cdc_lsn as cdc_lsn,
-        @orders_order_id as order_id,
-        GETDATE() as created_at;
-    output: event_log
-
 sinks:
-  insert:
-    - name: sync
-      sql: |
-        SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-      output: order_sync
-      primary_key: order_id
+  - name: sync
+    when: [insert, update]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: order_sync
+    primary_key: order_id
 ```
 
 ---
@@ -274,8 +265,6 @@ sinks:
 
 1. **Use `IN (@id)` for single-value**: SQL Server requires `IN` even for single values
 2. **Separate skill DBs**: Use `sqlite: ./data/sinks/myskill.db` for isolation
-3. **Jobs are parallel**: All jobs run concurrently for each change
-4. **Sinks are sequential**: Sinks run in order within a change
 
 ---
 

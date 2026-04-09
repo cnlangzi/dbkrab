@@ -169,15 +169,15 @@ func TestOperationString(t *testing.T) {
 	}
 }
 
-func TestOperationToJobType(t *testing.T) {
-	if OperationToJobType(Insert) != "insert" {
-		t.Errorf("OperationToJobType(Insert) = %s, want insert", OperationToJobType(Insert))
+func TestOperationToSinkType(t *testing.T) {
+	if OperationToSinkType(Insert) != "insert" {
+		t.Errorf("OperationToSinkType(Insert) = %s, want insert", OperationToSinkType(Insert))
 	}
-	if OperationToJobType(Update) != "update" {
-		t.Errorf("OperationToJobType(Update) = %s, want update", OperationToJobType(Update))
+	if OperationToSinkType(Update) != "update" {
+		t.Errorf("OperationToSinkType(Update) = %s, want update", OperationToSinkType(Update))
 	}
-	if OperationToJobType(Delete) != "delete" {
-		t.Errorf("OperationToJobType(Delete) = %s, want delete", OperationToJobType(Delete))
+	if OperationToSinkType(Delete) != "delete" {
+		t.Errorf("OperationToSinkType(Delete) = %s, want delete", OperationToSinkType(Delete))
 	}
 }
 

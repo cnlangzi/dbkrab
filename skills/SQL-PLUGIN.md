@@ -30,7 +30,7 @@ Core Poller (Transaction-based batch collection)
 │  1. Input Mapper                             │
 │     CDC data → SQL Parameters                │
 │                                              │
-│  2. Job Executor                             │
+│  2. Sink Executor                             │
 │     SQL → DataSet                            │
 │                                              │
 │  3. Sink Writer                              │

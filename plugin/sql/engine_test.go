@@ -91,7 +91,7 @@ func TestEngine_Handle(t *testing.T) {
 		}
 	})
 
-	t.Run("operationToJobType", func(t *testing.T) {
+	t.Run("operationToSinkType", func(t *testing.T) {
 		engine := &Engine{skill: skill}
 
 		tests := []struct {
@@ -106,9 +106,9 @@ func TestEngine_Handle(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.op.String(), func(t *testing.T) {
-				got := engine.operationToJobType(tt.op)
+				got := engine.operationToSinkType(tt.op)
 				if got != tt.want {
-					t.Errorf("operationToJobType(%v) = %v, want %v", tt.op, got, tt.want)
+					t.Errorf("operationToSinkType(%v) = %v, want %v", tt.op, got, tt.want)
 				}
 			})
 		}
