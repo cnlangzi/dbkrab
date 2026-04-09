@@ -15,16 +15,16 @@ import (
 
 // Manager manages SQL plugins.
 type Manager struct {
-	plugins      map[string]Plugin  // SQL plugin registry
-	sqlLoader    *sql.Loader        // SQL plugin loader
-	swManager  *sinkwriter.Manager // Routes sinks to appropriate writers
-	mu           sync.RWMutex
+	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
+	sqlPlugin *sql.Plugin       // direct reference to SQLPlugin for fast access
+	swManager *sinkwriter.Manager // Routes sinks to appropriate writers
+	mu        sync.RWMutex
 }
 
 // NewManager creates a new plugin manager
 func NewManager() *Manager {
 	return &Manager{
-		plugins:     make(map[string]Plugin),
+		plugins:   make(map[string]Plugin),
 		swManager: sinkwriter.NewManager(),
 	}
 }
@@ -45,20 +45,12 @@ func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
 
 	// Load SQL plugins if enabled
 	if sqlCfg.Enabled && sqlCfg.Path != "" {
-		loader := sql.NewLoader(sqlCfg.Path)
-		skills, err := loader.LoadAll()
-		if err != nil {
-			return fmt.Errorf("load SQL plugins: %w", err)
-		}
+		plugin := sql.New(sqlCfg.Path, db)
+		// The plugin manages its own file watching internally
+		plugin.StartWatch()
 
-		for name, skill := range skills {
-			plug := sql.NewPlugin(name, skill, loader, db)
-			// Each plugin manages its own file watching internally
-			plug.StartWatch()
-			m.plugins[name] = plug
-		}
-
-		m.sqlLoader = loader
+		m.sqlPlugin = plugin
+		m.plugins["sql"] = plugin
 	}
 
 	return nil
@@ -69,9 +61,9 @@ func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for name, p := range m.plugins {
-		if err := p.Stop(); err != nil {
-			fmt.Printf("Warning: failed to stop plugin %s: %v\n", name, err)
+	if m.sqlPlugin != nil {
+		if err := m.sqlPlugin.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop SQL plugin: %v\n", err)
 		}
 	}
 
@@ -100,6 +92,9 @@ func (m *Manager) Unload(name string) error {
 	}
 
 	delete(m.plugins, name)
+	if name == "sql" {
+		m.sqlPlugin = nil
+	}
 	return nil
 }
 
@@ -144,20 +139,21 @@ func (m *Manager) List() []PluginInfo {
 	defer m.mu.RUnlock()
 
 	var list []PluginInfo
-	for _, p := range m.plugins {
-		splug, ok := p.(*sql.Plugin)
-		if !ok {
-			continue
+
+	// List skills from the SQL plugin
+	if m.sqlPlugin != nil {
+		for _, skill := range m.sqlPlugin.Skills.List() {
+			list = append(list, PluginInfo{
+				Name:     skill.Name,
+				Id:       skill.Id,
+				File:     skill.File,
+				Path:     "skills/sql/" + skill.File,
+				LoadedAt: time.Now(),
+				Type:     "sql",
+			})
 		}
-		list = append(list, PluginInfo{
-			Name:     splug.YamlName(),
-			Id:       splug.SkillId(),
-			File:     splug.SkillFile(),
-			Path:     m.pluginPath(p),
-			LoadedAt: m.pluginLoadedAt(p),
-			Type:     p.Type(),
-		})
 	}
+
 	return list
 }
 
@@ -165,43 +161,12 @@ func (m *Manager) List() []PluginInfo {
 func (m *Manager) HasSQLPlugins() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, p := range m.plugins {
-		if p.Type() == "sql" {
-			return true
-		}
-	}
-	return false
+	return m.sqlPlugin != nil
 }
 
 // HasWASMPlugins returns true if any WASM plugins are loaded
 func (m *Manager) HasWASMPlugins() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, p := range m.plugins {
-		if p.Type() == "wasm" {
-			return true
-		}
-	}
 	return false
-}
-
-// pluginPath returns a human-readable path for a plugin
-func (m *Manager) pluginPath(p Plugin) string {
-	switch plug := p.(type) {
-	case *sql.Plugin:
-		return "skills/sql/" + plug.Name()
-	}
-	return ""
-}
-
-// pluginLoadedAt returns the actual load time of a plugin
-func (m *Manager) pluginLoadedAt(p Plugin) time.Time {
-	switch p.(type) {
-	case *sql.Plugin:
-		// SQL plugins don't track load time yet; return zero time
-		return time.Time{}
-	}
-	return time.Time{}
 }
 
 // PluginInfo contains plugin metadata (used by API)
@@ -226,20 +191,19 @@ func (m *Manager) HandleAPI(action string, params map[string]interface{}) APIRes
 			return APIResponse{Success: false, Error: "name required"}
 		}
 		m.mu.RLock()
-		plug, ok := m.plugins[name]
+		plug := m.sqlPlugin
 		m.mu.RUnlock()
-		if !ok {
+		if plug == nil {
 			return APIResponse{Success: false, Error: "plugin not found"}
 		}
 		return APIResponse{Success: true, Data: PluginInfo{
 			Name:     plug.Name(),
-			Path:     m.pluginPath(plug),
-			LoadedAt: m.pluginLoadedAt(plug),
+			Path:     "skills/sql/",
+			LoadedAt: time.Now(),
 			Type:     plug.Type(),
 		}}
 
 	case "load":
-		// WASM plugins are no longer supported; SQL plugins are loaded via Init
 		return APIResponse{Success: false, Error: "load not supported for SQL plugins (loaded via Init)"}
 
 	case "unload":
