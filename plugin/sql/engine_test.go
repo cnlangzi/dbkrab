@@ -96,12 +96,12 @@ func TestEngine_Handle(t *testing.T) {
 
 		tests := []struct {
 			op   core.Operation
-			want core.Operation
+			want Operation
 		}{
-			{core.OpInsert, core.OpInsert},
-			{core.OpUpdateAfter, core.OpUpdateAfter},
-			{core.OpDelete, core.OpDelete},
-			{core.OpUpdateBefore, 0}, // Should be skipped
+			{core.OpInsert, Insert},           // 1 → 1
+			{core.OpUpdateAfter, Update},      // 4 → 2 (key fix for sink filtering)
+			{core.OpDelete, Delete},           // 3 → 3
+			{core.OpUpdateBefore, 0},          // Should be skipped
 		}
 
 		for _, tt := range tests {
@@ -125,6 +125,9 @@ func TestEngine_ShortTableName(t *testing.T) {
 		{"sys.orders", "orders"},
 		{"cdc.orders", "orders"},
 		{"dbo.my_table", "my_table"},
+		// Underscore prefix support (for CDC tables like dbo_Cost)
+		{"dbo_Cost", "Cost"},
+		{"cdc.dbo_Cost_CT", "dbo_Cost_CT"}, // Only removes first prefix
 	}
 
 	for _, tt := range tests {

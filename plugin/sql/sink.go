@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,34 +39,43 @@ func (s *SQLiteSink) Write(ops []core.Sink) error {
 		return nil
 	}
 
+	slog.Info("SQLiteSink.Write", "ops", len(ops), "pool_path", s.pool.Path())
+
 	ctx := context.Background()
 	tx, err := s.pool.Write().BeginTx(ctx, nil)
 	if err != nil {
+		slog.Error("SQLiteSink: failed to begin transaction", "error", err)
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	for _, op := range ops {
+		slog.Info("SQLiteSink: processing op", "output", op.Config.Output, "op_type", op.OpType, "rows", len(op.DataSet.Rows))
 		switch op.OpType {
 		case core.OpInsert:
 			if err := s.insertInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteSink: insert failed", "output", op.Config.Output, "error", err)
 				return fmt.Errorf("insert %s: %w", op.Config.Output, err)
 			}
 		case core.OpUpdateAfter:
 			if err := s.updateInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteSink: update failed", "output", op.Config.Output, "error", err)
 				return fmt.Errorf("update %s: %w", op.Config.Output, err)
 			}
 		case core.OpDelete:
 			if err := s.deleteInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteSink: delete failed", "output", op.Config.Output, "error", err)
 				return fmt.Errorf("delete %s: %w", op.Config.Output, err)
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		slog.Error("SQLiteSink: commit failed", "error", err)
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
+	slog.Info("SQLiteSink: write successful", "ops", len(ops))
 	return nil
 }
 

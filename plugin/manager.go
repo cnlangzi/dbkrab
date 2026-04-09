@@ -4,6 +4,7 @@ import (
 	"context"
 	dbsql "database/sql"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -120,14 +121,22 @@ func (m *Manager) Handle(tx *core.Transaction) error {
 			return fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
 		}
 
+		slog.Info("plugin.Handle returned", "plugin", splug.Name(), "sinks_count", len(sinks))
+		for i, s := range sinks {
+			slog.Info("sink detail", "idx", i, "database", s.Config.Database, "output", s.Config.Output, "rows", len(s.DataSet.Rows))
+		}
+
 		allSinks = append(allSinks, sinks...)
 	}
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
+		slog.Info("sinkWriter.Write called", "total_sinks", len(allSinks))
 		if err := m.swManager.Write(allSinks); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
+	} else {
+		slog.Warn("no sinks to write", "tx_id", tx.ID)
 	}
 
 	return nil

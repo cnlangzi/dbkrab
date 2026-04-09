@@ -339,9 +339,12 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// Always use processDirect - no transaction buffer needed
 	// All changes from the same poll cycle arrive together, simplifying cross-table handling
+	slog.Info("poll collected changes", "total_changes", len(allChanges), "valid_results", len(validResults))
 	if len(allChanges) > 0 {
+		slog.Info("processDirect: processing changes", "changes", len(allChanges))
 		return p.processDirect(ctx, allChanges, results)
 	}
+	slog.Info("poll: no changes to process")
 	// No changes but still update offsets for observability
 	return p.updateOffsets(results, allChanges)
 }

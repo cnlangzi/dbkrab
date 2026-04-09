@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -50,9 +51,13 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
+		slog.Info("Engine.Handle: change", "table", change.Table, "operation", change.Operation)
+
 		// Get corresponding job type for this operation
 		sinkType := e.operationToSinkType(change.Operation)
+		slog.Info("Engine.Handle: sinkType", "operation", change.Operation, "sinkType", sinkType)
 		if sinkType == 0 {
+			slog.Warn("Engine.Handle: skipping operation (sinkType=0)", "operation", change.Operation)
 			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
@@ -63,23 +68,28 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		}
 
 		// Get sinks for this operation using FilterByOperation
-		sinkConfigs := e.skill.FilterByOperation(Operation(sinkType))
+		sinkConfigs := e.skill.FilterByOperation(sinkType)
 		if len(sinkConfigs) > 0 {
+			slog.Info("Engine.Handle: got sinkConfigs", "count", len(sinkConfigs))
 			sinkParams := e.cdcParamsToMap(cdcParams)
 
 			// Filter sinks by table and execute
 			for _, sinkCfg := range sinkConfigs {
+				slog.Info("Engine.Handle: checking sinkCfg.On", "name", sinkCfg.Name, "on", sinkCfg.On, "table", change.Table)
 				if sinkCfg.On != "" && sinkCfg.On != change.Table {
+					slog.Info("Engine.Handle: sinkCfg.On mismatch, skipping")
 					continue
 				}
 
 				// Execute sink SQL against MSSQL
 				ds, err := e.executor.ExecuteDriver(sinkCfg.SQL, sinkParams)
 				if err != nil {
+			slog.Info("Engine.Handle: executing SQL", "sink", sinkCfg.Name, "on", sinkCfg.On)
 					return nil, fmt.Errorf("execute sink %s: %w", sinkCfg.Name, err)
 				}
 
 				// Collect sink operation
+			slog.Info("Engine.Handle: SQL result", "sink", sinkCfg.Name, "rows", len(ds.Rows), "columns", len(ds.Columns))
 				sinkOp := core.Sink{
 					Config: core.SinkConfig{
 						Name:       sinkCfg.Name,
@@ -89,7 +99,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 						OnConflict: sinkCfg.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  sinkType,
+					OpType:  core.Operation(sinkType),
 				}
 				allOps = append(allOps, sinkOp)
 			}
@@ -279,12 +289,20 @@ func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 	// Add all data fields with table prefix
 	shortTable := shortTableName(change.Table)
 	for k, v := range change.Data {
-		params.Fields[fmt.Sprintf("%s_%s", shortTable, k)] = v
+		// Use lowercase key from CDC data, but SQL expects mixed case
+		// Map: cost_id -> Cost_Id, costitem_id -> Costitem_Id
+		fieldName := k
+		if k == "id" {
+			fieldName = shortTable + "_Id" // Match SQL @Cost_Id
+		} else {
+			fieldName = shortTable + "_" + k // Keep as-is for other fields
+		}
+		params.Fields[fieldName] = v
 	}
 
-	// Add id field if exists
+	// Add id field if exists (already added above, but keep for safety)
 	if id, ok := change.Data["id"]; ok {
-		params.Fields[shortTable+"_id"] = id
+		params.Fields[shortTable+"_Id"] = id // Use proper case
 	}
 
 	return params, nil
@@ -303,16 +321,16 @@ func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
 	return m
 }
 
-// operationToSinkType converts core.Operation to core.Operation
+// operationToSinkType converts core.Operation to sqlplugin.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
+func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	switch op {
 	case core.OpInsert:
-		return core.OpInsert
+		return Insert
 	case core.OpUpdateAfter:
-		return core.OpUpdateAfter
+		return Update // Map OpUpdateAfter (4) to Update (2)
 	case core.OpDelete:
-		return core.OpDelete
+		return Delete
 	default:
 		return 0 // 0 is not valid, indicates skip
 	}
@@ -320,8 +338,8 @@ func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
 
 // shortTableName extracts short table name (e.g., dbo.orders -> orders)
 func shortTableName(table string) string {
-	// Handle common prefixes
-	for _, prefix := range []string{"dbo.", "sys.", "cdc.", "alwayson."} {
+	// Handle common prefixes (both dot and underscore separated)
+	for _, prefix := range []string{"dbo.", "sys.", "cdc.", "alwayson.", "dbo_", "sys_", "cdc_", "alwayson_"} {
 		if len(table) > len(prefix) && table[:len(prefix)] == prefix {
 			return table[len(prefix):]
 		}

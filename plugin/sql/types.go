@@ -2,6 +2,7 @@ package sql
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -143,18 +144,26 @@ func (s *Skill) FilterByOperation(opType Operation) []SinkConfig {
 	case Delete:
 		opStr = "delete"
 	default:
+		slog.Warn("FilterByOperation: unknown opType", "opType", opType)
 		return nil
 	}
 
+	slog.Info("FilterByOperation: filtering", "opStr", opStr, "sinks_count", len(s.Sinks))
+
 	var result []SinkConfig
 	for _, sink := range s.Sinks {
-		for _, when := range sink.When {
+		slog.Info("FilterByOperation: checking sink", "sink_name", sink.Name, "when_count", len(sink.When), "when_slice", sink.When)
+		for i, when := range sink.When {
+			slog.Info("FilterByOperation: comparing", "idx", i, "when", when, "opStr", opStr, "match", when == opStr)
 			if when == opStr {
+				slog.Info("FilterByOperation: matched", "sink_name", sink.Name)
 				result = append(result, sink.SinkConfig)
 				break
 			}
 		}
 	}
+
+	slog.Info("FilterByOperation: result", "matched", len(result))
 	return result
 }
 
