@@ -17,7 +17,7 @@ import (
 type Manager struct {
 	plugins      map[string]Plugin  // SQL plugin registry
 	sqlLoader    *sql.Loader        // SQL plugin loader
-	sinkManager  *sinkwriter.Manager // Routes sinks to appropriate writers
+	swManager  *sinkwriter.Manager // Routes sinks to appropriate writers
 	mu           sync.RWMutex
 }
 
@@ -25,7 +25,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		plugins:     make(map[string]Plugin),
-		sinkManager: sinkwriter.NewManager(),
+		swManager: sinkwriter.NewManager(),
 	}
 }
 
@@ -33,14 +33,14 @@ func NewManager() *Manager {
 func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
 	Enabled       bool
 	Path          string
-	SinkDatabases map[string]any // database name -> config
+	SinkConfigs map[string]any // database name -> config
 }, dbConfigs map[string]config.DatabaseConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Configure sink writer manager
 	if dbConfigs != nil {
-		m.sinkManager.Configure(dbConfigs)
+		m.swManager.Configure(dbConfigs)
 	}
 
 	// Load SQL plugins if enabled
@@ -76,8 +76,8 @@ func (m *Manager) Stop() error {
 	}
 
 	// Close sink manager
-	if m.sinkManager != nil {
-		if err := m.sinkManager.Close(); err != nil {
+	if m.swManager != nil {
+		if err := m.swManager.Close(); err != nil {
 			fmt.Printf("Warning: failed to close sink manager: %v\n", err)
 		}
 	}
@@ -130,7 +130,7 @@ func (m *Manager) Handle(tx *core.Transaction) error {
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
-		if err := m.sinkManager.Write(allSinks); err != nil {
+		if err := m.swManager.Write(allSinks); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}
