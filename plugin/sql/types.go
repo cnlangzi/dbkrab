@@ -77,6 +77,7 @@ type Skill struct {
 
 	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
 	Id   string `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
+	Raw  string `yaml:"-"` // Auto-assigned: raw YAML content
 }
 
 // Sink represents a single sink configuration with operation filter

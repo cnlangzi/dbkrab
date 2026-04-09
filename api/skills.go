@@ -98,24 +98,24 @@ func (s *Server) handleSkillsNewPage(c *xun.Context) error {
 	})
 }
 
-// handleSkillsEditPage handles GET /skills/edit/{name}
+// handleSkillsEditPage handles GET /skills/edit/{id}
 func (s *Server) handleSkillsEditPage(c *xun.Context) error {
 	// Use Go 1.22+ native PathValue for route params
-	name := c.Request.PathValue("name")
+	id := c.Request.PathValue("id")
 	
-	if name == "" {
+	if id == "" {
 		return c.View(map[string]any{
 			"title":     "Edit Skill",
 			"activeTab": "skills",
-			"Name":      "",
-			"Error":     "Skill name required",
+			"Id":        "",
+			"Error":     "Skill ID required",
 		})
 	}
 	
 	return c.View(map[string]any{
-		"title":     "Edit: " + name,
+		"title":     "Edit: " + id,
 		"activeTab": "skills",
-		"Name":      name,
+		"Id":        id,
 	})
 }
 
@@ -136,33 +136,32 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 			continue
 		}
 
-		// Use metadata from manager (already loaded from skill file)
-		skillInfo := SkillInfo{
-			Name:   p.Name,   // YAML name field
-			Id:     p.Id,     // SHA256(file)[:12]
-			File:   p.File,   // Relative file path
-			Status: "loaded",
-			Files:  []string{p.File},
+		// Get skill from memory via HandleAPI
+		resp := s.manager.HandleAPI("get_skill", map[string]any{"id": p.Id})
+		if !resp.Success {
+			continue
 		}
 
-		// Read skill file for additional metadata (description, tables, SQL files)
-		skillPath := filepath.Join("skills", p.File)
-		if data, err := os.ReadFile(skillPath); err == nil {
-			var skill sql.Skill
-			if err := yaml.Unmarshal(data, &skill); err == nil {
-				skillInfo.Description = skill.Description
-				skillInfo.Tables = skill.On
+		skill, ok := resp.Data.(*sql.Skill)
+		if !ok {
+			continue
+		}
 
-				// Collect SQL files referenced in the skill
-				for _, sink := range skill.Sinks {
-					if sink.SQLFile != "" {
-						skillInfo.Files = append(skillInfo.Files, sink.SQLFile)
-					}
-				}
+		skillInfo := SkillInfo{
+			Name:        skill.Name,
+			Id:          skill.Id,
+			File:        skill.File,
+			Description: skill.Description,
+			Tables:      skill.On,
+			Status:      "loaded",
+			Files:       []string{skill.File},
+		}
+
+		// Collect SQL files referenced in the skill
+		for _, sink := range skill.Sinks {
+			if sink.SQLFile != "" {
+				skillInfo.Files = append(skillInfo.Files, sink.SQLFile)
 			}
-		} else {
-			skillInfo.Status = "error"
-			skillInfo.Error = "Failed to read skill file"
 		}
 
 		skills = append(skills, skillInfo)
@@ -348,34 +347,51 @@ func (s *Server) handleSkillsFiles(c *xun.Context) error {
 	})
 }
 
-// handleSkillGet handles GET /api/skills/{name}
+// handleSkillGet handles GET /api/skills/{id}
+// The id parameter is the skill ID (SHA256(file)[:12])
 func (s *Server) handleSkillGet(c *xun.Context) error {
-	name := c.Request.PathValue("name")
-	if name == "" {
+	id := c.Request.PathValue("id")
+	if id == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill name required",
+			"error":   "Skill ID required",
 		})
 	}
 
-	skillPath := filepath.Join("skills", name+".yml")
-
-	data, err := os.ReadFile(skillPath)
-	if err != nil {
+	if s.manager == nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Failed to read skill: " + err.Error(),
+			"error":   "Plugin manager not initialized",
 		})
 	}
 
-	// Calculate version hash
-	hash := sha256.Sum256(data)
+	// Get skill from memory via HandleAPI
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   resp.Error,
+		})
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Invalid skill data",
+		})
+	}
+
+	// Calculate version hash from raw content
+	hash := sha256.Sum256([]byte(skill.Raw))
 	version := hex.EncodeToString(hash[:])
 
 	return c.View(map[string]any{
 		"success": true,
-		"name":    name,
-		"content": string(data),
+		"name":    skill.Name,
+		"file":    skill.File,
+		"id":      skill.Id,
+		"content": skill.Raw,
 		"version": version,
 	})
 }
@@ -451,15 +467,42 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	})
 }
 
-// handleSkillSave handles POST /api/skills/{name}/save
+// handleSkillSave handles POST /api/skills/{id}/save
+// The id parameter is the skill ID (SHA256(file)[:12])
 func (s *Server) handleSkillSave(c *xun.Context) error {
-	name := c.Request.PathValue("name")
-	if name == "" {
+	id := c.Request.PathValue("id")
+	if id == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill name required",
+			"error":   "Skill ID required",
 		})
 	}
+
+	if s.manager == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Plugin manager not initialized",
+		})
+	}
+
+	// Get existing skill from memory to find file path
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   resp.Error,
+		})
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Invalid skill data",
+		})
+	}
+
+	filePath := skill.File
 
 	var req SaveSkillRequest
 	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
@@ -469,17 +512,9 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 		})
 	}
 
-	// Security: prevent path traversal
-	if !isValidSkillName(name) {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "Invalid skill name",
-		})
-	}
-
 	// Validate YAML syntax before saving
-	var skill sql.Skill
-	if err := yaml.Unmarshal([]byte(req.Content), &skill); err != nil {
+	var newSkill sql.Skill
+	if err := yaml.Unmarshal([]byte(req.Content), &newSkill); err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid YAML syntax: " + err.Error(),
@@ -487,26 +522,18 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 	}
 
 	// Validate required fields
-	if skill.Name == "" {
+	if newSkill.Name == "" {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Skill name is required in YAML",
 		})
 	}
 
-	if len(skill.On) == 0 {
+	if len(newSkill.On) == 0 {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "At least one table must be specified in 'on' field",
 		})
-	}
-
-	// Note: YAML name no longer needs to match filename (issue #60)
-
-	// Determine file path: use skill.File if set (loaded from subdir), else URL name
-	filePath := name
-	if skill.File != "" {
-		filePath = skill.File
 	}
 
 	// Security: ensure path is within skills directory
@@ -528,9 +555,7 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 	}
 
 	// Skill will be auto-reloaded by the internal file watcher (StartWatch)
-	if s.manager != nil {
-		slog.Info("Skill saved, file watcher will auto-reload", "skill", name)
-	}
+	slog.Info("Skill saved, file watcher will auto-reload", "id", id, "file", filePath)
 
 	return c.View(map[string]any{
 		"success": true,
@@ -538,26 +563,45 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 	})
 }
 
-// handleSkillDelete handles DELETE /api/skills/{name}
+// handleSkillDelete handles DELETE /api/skills/{id}
+// The id parameter is the skill ID (SHA256(file)[:12])
 func (s *Server) handleSkillDelete(c *xun.Context) error {
-	name := c.Request.PathValue("name")
-	if name == "" {
+	id := c.Request.PathValue("id")
+	if id == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill name required",
+			"error":   "Skill ID required",
 		})
 	}
 
-	// Security: prevent path traversal
-	if !isValidSkillName(name) {
+	if s.manager == nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid skill name",
+			"error":   "Plugin manager not initialized",
 		})
 	}
+
+	// Get existing skill from memory to find file path
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   resp.Error,
+		})
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Invalid skill data",
+		})
+	}
+
+	filePath := skill.File
 
 	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", name+".yml")
+	skillPath := filepath.Join("skills", filePath)
 	cleanPath := filepath.Clean(skillPath)
 	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
 		return c.View(map[string]any{
@@ -570,7 +614,7 @@ func (s *Server) handleSkillDelete(c *xun.Context) error {
 	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill not found",
+			"error":   "Skill file not found",
 		})
 	}
 
@@ -582,12 +626,7 @@ func (s *Server) handleSkillDelete(c *xun.Context) error {
 		})
 	}
 
-	// Unload plugin if loaded
-	if s.manager != nil {
-		if err := s.manager.Unload(name); err != nil {
-			slog.Warn("Failed to unload plugin after deletion", "skill", name, "error", err)
-		}
-	}
+	slog.Info("Skill file deleted, will be removed from memory by file watcher", "id", id)
 
 	return c.View(map[string]any{
 		"success": true,
