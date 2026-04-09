@@ -346,12 +346,6 @@ func (p *Poller) poll(ctx context.Context) error {
 	return p.updateOffsets(results, allChanges)
 }
 
-// processWithBuffer is DEPRECATED - not used in simplified polling
-func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, results []tablePollResult) error {
-	slog.Warn("processWithBuffer called but transaction buffer is deprecated")
-	return nil
-}
-
 // processDirect processes changes without transaction buffer (legacy behavior)
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult) error {
 
@@ -827,19 +821,6 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 
 	slog.Info("config reload complete")
 	return nil
-}
-
-// rebuildTxBuffer is DEPRECATED - not used in simplified polling
-// Kept for backward compatibility
-func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
-	slog.Warn("rebuildTxBuffer called but transaction buffer is deprecated")
-	return nil
-}
-
-// flushBuffer is DEPRECATED - kept for backward compatibility
-func (p *Poller) flushBuffer(ctx context.Context) {
-	// No-op - transaction buffer no longer used
-	slog.Debug("flushBuffer called but transaction buffer is deprecated")
 }
 
 // tablesEqual checks if two table lists are equal (order-independent)
