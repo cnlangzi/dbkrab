@@ -73,6 +73,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 				sinkOp := core.Sink{
 					Config: core.SinkConfig{
 						Name:       sinkCfg.Name,
+						Database:   e.skill.Database, // Database name from Skill
 						Output:     sinkCfg.Output,
 						PrimaryKey: sinkCfg.PrimaryKey,
 						OnConflict: sinkCfg.OnConflict,
@@ -225,6 +226,7 @@ func mergeSinkGroup(key sinkKey, sinks []core.Sink) (core.Sink, error) {
 	return core.Sink{
 		Config: core.SinkConfig{
 			Name:       sinks[0].Config.Name,
+			Database:   sinks[0].Config.Database, // Preserve database name
 			Output:     key.table,
 			PrimaryKey: key.pk,
 			OnConflict: firstOnConflict,
