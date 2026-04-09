@@ -3,6 +3,7 @@ package sql
 import (
 	"database/sql"
 	"regexp"
+	"strings"
 )
 
 // Parameter represents a named parameter in SQL template
@@ -32,7 +33,7 @@ func (e *ParamExtractor) ExtractParamNames(sqlTmpl string) []string {
 
 	for _, match := range matches {
 		if len(match) >= 2 {
-			name := match[1]
+			name := strings.ToLower(match[1])
 			if !seen[name] {
 				names = append(names, name)
 				seen[name] = true
