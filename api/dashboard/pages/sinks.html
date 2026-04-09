@@ -95,7 +95,7 @@ function renderSinks(sinks) {
                     ? '<span class="px-2 py-1 text-xs rounded-full bg-success/20 text-success">Active</span>'
                     : '<span class="px-2 py-1 text-xs rounded-full bg-warning/20 text-warning">Not Found</span>';
                 const clickHandler = exists 
-                    ? `onclick="window.location.href='/sinks/${encodeURIComponent(sink.name)}'"` 
+                    ? `onclick="window.location.href='/sinks/${sink.id}'"` 
                     : 'onclick="showNotFound()"';
                 
                 return `
@@ -110,6 +110,7 @@ function renderSinks(sinks) {
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2">
                                     <h4 class="text-base sm:text-lg font-semibold text-text truncate">${escapeHtml(sink.name)}</h4>
+                                    <span class="text-xs text-textMuted font-mono">${sink.id}</span>
                                     ${statusBadge}
                                 </div>
                                 <p class="text-sm text-textMuted truncate">${escapeHtml(sink.file)}</p>

@@ -201,8 +201,8 @@ func (s *Server) registerAPIRoutes() {
 
 	// Sinks management routes
 	api.Get("/sinks/list", s.handleSinksList, xun.WithViewer(&xun.JsonViewer{}))
-	api.Get("/sinks/{name}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
-	api.Post("/sinks/{name}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
+	api.Get("/sinks/{id}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/sinks/{id}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
@@ -219,7 +219,7 @@ func (s *Server) registerPageRoutes() {
 	
 	// Register sinks pages explicitly
 	s.app.Get("/sinks", s.handleSinksPage)
-	s.app.Get("/sinks/{name}", s.handleSinkQueryPage)
+	s.app.Get("/sinks/{id}", s.handleSinkQueryPage)
 }
 
 // handlePlugins handles GET /api/plugins
@@ -1066,6 +1066,7 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 	if s.config != nil && len(s.config.Sinks) > 0 {
 		for _, dbCfg := range s.config.Sinks {
 			sink := map[string]any{
+				"id":         dbCfg.Id,
 				"name":       dbCfg.Name,
 				"type":       dbCfg.Type,
 				"file":       dbCfg.Path,
@@ -1094,28 +1095,29 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 	})
 }
 
-// getSinkPath finds the sink path from config by name
-func (s *Server) getSinkPath(name string) (string, error) {
-	for _, sink := range s.config.Sinks {
-		if sink.Name == name {
-			return sink.Path, nil
+// getSinkById finds the sink by ID from config
+func (s *Server) getSinkById(id string) (*config.DatabaseConfig, error) {
+	for i := range s.config.Sinks {
+		if s.config.Sinks[i].Id == id {
+			return &s.config.Sinks[i], nil
 		}
 	}
-	return "", fmt.Errorf("sink not found: %s", name)
+	return nil, fmt.Errorf("sink not found: %s", id)
 }
 
-// handleSinkTables handles GET /api/sinks/{name}/tables
+
+// handleSinkTables handles GET /api/sinks/{id}/tables
 func (s *Server) handleSinkTables(c *xun.Context) error {
-	name := c.Request.PathValue("name")
-	if name == "" {
+	id := c.Request.PathValue("id")
+	if id == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sink name is required",
+			"error":   "sink id is required",
 		})
 	}
 
-	// Find sink path from config
-	sinkPath, err := s.getSinkPath(name)
+	// Find sink by ID
+	sink, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1124,15 +1126,15 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 	}
 
 	// Check if database file exists
-	if _, err := os.Stat(sinkPath); err != nil {
+	if _, err := os.Stat(sink.Path); err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sinkPath),
+			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
 		})
 	}
 
 	// Open read-only connection
-	db, err := sql.Open("sqlite", sinkPath+"?mode=ro")
+	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1170,18 +1172,18 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 	})
 }
 
-// handleSinkQuery handles POST /api/sinks/{name}/query
+// handleSinkQuery handles POST /api/sinks/{id}/query
 func (s *Server) handleSinkQuery(c *xun.Context) error {
-	name := c.Request.PathValue("name")
-	if name == "" {
+	id := c.Request.PathValue("id")
+	if id == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "sink name is required",
+			"error":   "sink id is required",
 		})
 	}
 
-	// Find sink path from config
-	sinkPath, err := s.getSinkPath(name)
+	// Find sink by ID
+	sink, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1228,15 +1230,15 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	// Check if database file exists
-	if _, err := os.Stat(sinkPath); err != nil {
+	if _, err := os.Stat(sink.Path); err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sinkPath),
+			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
 		})
 	}
 
 	// Open read-only connection
-	db, err := sql.Open("sqlite", sinkPath+"?mode=ro")
+	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1308,17 +1310,24 @@ func (s *Server) handleSinksPage(c *xun.Context) error {
 	})
 }
 
-// handleSinkQueryPage handles GET /sinks/{name}
+// handleSinkQueryPage handles GET /sinks/{id}
 func (s *Server) handleSinkQueryPage(c *xun.Context) error {
-	name := c.Request.PathValue("name")
+	id := c.Request.PathValue("id")
+	
+	// Find sink by ID for display name
+	sink, err := s.getSinkById(id)
+	sinkName := id
+	if err == nil {
+		sinkName = sink.Name
+	}
+	
 	return c.View(map[string]any{
 		"activeTab": "sinks",
-		"title":     fmt.Sprintf("Sink: %s", name),
-		"sinkName":  name,
+		"title":     fmt.Sprintf("Sink: %s", sinkName),
+		"sinkId":    id,
+		"sinkName":  sinkName,
 	})
 }
-
-// formatFileSize formats file size in human-readable format
 func formatFileSize(size int64) string {
 	const (
 		KB = 1024
