@@ -27,7 +27,7 @@ type Config struct {
 
 // CDCConfig aggregates all CDC-related configuration
 type CDCConfig struct {
-	PollingInterval string                 `yaml:"polling_interval"`
+	Interval        string                 `yaml:"interval"`
 	Offset          OffsetConfig           `yaml:"offset"`
 	Gap            CDCProtectionConfig    `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
@@ -152,8 +152,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Set defaults
-	if cfg.CDC.PollingInterval == "" {
-		cfg.CDC.PollingInterval = "500ms"
+	if cfg.CDC.Interval == "" {
+		cfg.CDC.Interval = "500ms"
 	}
 	if cfg.CDC.Offset.Type == "" {
 		cfg.CDC.Offset.Type = "json"
@@ -249,8 +249,8 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func (c *Config) PollingInterval() (time.Duration, error) {
-	return time.ParseDuration(c.CDC.PollingInterval)
+func (c *Config) Interval() (time.Duration, error) {
+	return time.ParseDuration(c.CDC.Interval)
 }
 
 // CDCCheckInterval returns the CDC gap check interval
