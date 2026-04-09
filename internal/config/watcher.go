@@ -147,8 +147,8 @@ func (w *Watcher) logRestartWarnings(newCfg *Config) {
 			"old_user", oldCfg.MSSQL.User,
 			"new_user", newCfg.MSSQL.User)
 	}
-	if oldCfg.Sink.Path != newCfg.Sink.Path {
-		slog.Warn("sink path change requires restart", "old", oldCfg.Sink.Path, "new", newCfg.Sink.Path)
+	if oldCfg.App.Path != newCfg.App.Path {
+		slog.Warn("app path change requires restart", "old", oldCfg.App.Path, "new", newCfg.App.Path)
 	}
 	if oldCfg.Offset.Type != newCfg.Offset.Type {
 		slog.Warn("offset type change requires restart", "old", oldCfg.Offset.Type, "new", newCfg.Offset.Type)
