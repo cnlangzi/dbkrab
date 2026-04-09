@@ -78,7 +78,7 @@ For each change:
 
 ### Sinks
 
-Sinks are configured under `sinks` as a flat list. Each sink has a `when` field that specifies which operations it handles:
+Sinks are configured as a flat list with a `when` field:
 
 | `when` value | Trigger | Use Case |
 |-------------|---------|----------|
@@ -102,10 +102,13 @@ on:
 sinks:
   - name: job_name
     when: [insert, update]        # Required: [insert, update] or [delete]
+    on: table_name              # Optional: table filter (for multi-table)
     sql: |
       SELECT ... FROM source_table WHERE id = @table_id;
+    sql_file: path/to.sql       # Optional: external SQL file
     output: target_table
     primary_key: id
+    on_conflict: skip         # Optional: skip|overwrite|error
 
   - name: delete_job
     when: [delete]
@@ -115,29 +118,25 @@ sinks:
     primary_key: id
 ```
 
-### Fields
+### Sink Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Skill name |
-| `on` | Yes | Tables to monitor |
-| `database` | No | Target database name (maps to platform-configured storage) |
-| `sinks` | Yes | Output configurations |
-| `sinks[].name` | Yes | Sink identifier |
-| `sinks[].when` | Yes | Operation filter: `[insert, update]` or `[delete]` |
-| `sinks[].on` | No | Table filter (empty = all tables) |
-| `sinks[].sql` | Yes* | SQL template (*or sql_file) |
-| `sinks[].sql_file` | Yes* | External SQL file (*or sql) |
-| `sinks[].output` | Yes | Target table name |
-| `sinks[].primary_key` | Yes | Primary key column |
-| `sinks[].on_conflict` | No | Conflict strategy: skip/overwrite/error (default: skip) |
+| `name` | Yes | Sink identifier |
+| `when` | Yes | Operation filter: `[insert, update]` or `[delete]` |
+| `on` | No | Table filter (for multi-table CDC) |
+| `sql` | Yes* | SQL template (*or sql_file) |
+| `sql_file` | Yes* | External SQL file (*or sql) |
+| `output` | Yes | Target table name |
+| `primary_key` | Yes | Primary key column |
+| `on_conflict` | No | Conflict strategy: skip\|overwrite\|error (default: skip) |
 
 ---
 
 ## Operations
 
-| __$operation | Trigger |
-|-------------|---------|
+| __$operation | Sink Trigger |
+|---------------|--------------|
 | 1 | DELETE - triggers `when: [delete]` sinks |
 | 2 | INSERT - triggers `when: [insert, update]` sinks |
 | 4 | UPDATE (after) - triggers `when: [insert, update]` sinks |
@@ -270,25 +269,25 @@ sinks:
 ### Direct Mapping
 
 ```yaml
-- name: sync_delete
-  when: [delete]
-  sql: |
-    SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
-  output: order_sync
-  primary_key: order_id
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_order_id as order_id;
+    output: order_sync
+    primary_key: order_id
 ```
 
 ### Target Lookup Required
 
 ```yaml
-- name: sync_delete
-  when: [delete]
-  sql: |
-    SELECT @orders_order_id as target_id 
-    FROM order_sync 
-    WHERE source_order_id = @orders_order_id;
-  output: order_sync
-  primary_key: id
+  - name: sync_delete
+    when: [delete]
+    sql: |
+      SELECT @orders_order_id as target_id 
+      FROM order_sync 
+      WHERE source_order_id = @orders_order_id;
+    output: order_sync
+    primary_key: id
 ```
 
 ---
