@@ -346,62 +346,10 @@ func (p *Poller) poll(ctx context.Context) error {
 	return p.updateOffsets(results, allChanges)
 }
 
-// processWithBuffer processes changes using transaction buffer for cross-table integrity
+// processWithBuffer is DEPRECATED - not used in simplified polling
 func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, results []tablePollResult) error {
-
-	// Add all changes to buffer
-	for _, change := range allChanges {
-		p.txBuffer.Add(change)
-	}
-
-	// Get complete transactions (timed out)
-	completeTxs := p.txBuffer.GetCompleteTransactions()
-	if len(completeTxs) == 0 {
-		return nil
-	}
-
-	// Process complete transactions
-	var processErrors []error
-	for _, tx := range completeTxs {
-		// Handler processing with retry (plugin writes to its own sink)
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(tx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("handler error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "handler")
-			}
-		}
-
-		// Store processing with retry (platform store - CDC tracking only)
-		if p.store != nil {
-			err := retry.DoWithName(ctx, func() error {
-				return p.store.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("store error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "store")
-				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-			}
-		}
-	}
-
-	// Update offsets only if all transactions succeeded
-	if len(processErrors) > 0 {
-		return fmt.Errorf("store errors: %v", processErrors)
-	}
-
-	// Update offsets (same logic as processDirect)
-	return p.updateOffsets(results, allChanges)
+	slog.Warn("processWithBuffer called but transaction buffer is deprecated")
+	return nil
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
