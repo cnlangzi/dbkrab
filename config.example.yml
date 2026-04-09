@@ -31,8 +31,8 @@ plugins:
   sql:
     enabled: true
     path: ./skills/sql
-    # Database configurations (maps database names to actual storage)
-    databases:
+    # Sink database configurations (maps database names to actual storage)
+    sink_databases:
       business:
         type: sqlite
         path: ./data/sinks/business.db

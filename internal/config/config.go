@@ -35,7 +35,7 @@ type PluginsConfig struct {
 type PluginConfig struct {
 	Enabled   *bool                  `yaml:"enabled"` // true/on/1=enable, otherwise disabled
 	Path      string                 `yaml:"path"`
-	Databases map[string]DatabaseConfig `yaml:"databases"` // Database name -> storage config
+	SinkDatabases map[string]DatabaseConfig `yaml:"sink_databases"` // Sink database name -> storage config
 }
 
 // DatabaseConfig contains configuration for a named database

@@ -31,9 +31,9 @@ func NewManager() *Manager {
 
 // Init initializes all SQL plugins based on the provided config.
 func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
-	Enabled   bool
-	Path      string
-	Databases map[string]any // database name -> config
+	Enabled       bool
+	Path          string
+	SinkDatabases map[string]any // database name -> config
 }, dbConfigs map[string]config.DatabaseConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
