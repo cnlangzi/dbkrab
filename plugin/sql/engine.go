@@ -27,7 +27,7 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
-// It extracts CDC changes, executes jobs against MSSQL
+// It extracts CDC changes, executes sinks against MSSQL
 // Returns all job operations as []core.Sink for the caller to write
 // Multiple sinks targeting the same table+pk are merged into a single sink
 func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {

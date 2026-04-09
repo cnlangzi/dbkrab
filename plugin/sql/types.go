@@ -203,15 +203,15 @@ func (s *Skill) ValidateSinks() error {
 	return nil
 }
 
-// FilterSinks filters jobs by table name (for multi-table CDC)
-func FilterSinks(jobs []SinkConfig, tableName string) []SinkConfig {
+// FilterSinks filters sinks by table name (for multi-table CDC)
+func FilterSinks(sinks []SinkConfig, tableName string) []SinkConfig {
 	if tableName == "" {
-		return jobs
+		return sinks
 	}
 	var filtered []SinkConfig
-	for _, job := range jobs {
-		if job.On == "" || job.On == tableName {
-			filtered = append(filtered, job)
+	for _, sink := range sinks {
+		if sink.On == "" || sink.On == tableName {
+			filtered = append(filtered, sink)
 		}
 	}
 	return filtered
