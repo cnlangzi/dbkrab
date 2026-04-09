@@ -21,7 +21,7 @@ MSSQL CDC Tables
 ┌─────────────────────────────────────────┐
 │     SQL Plugin Engine (Hot-Reload)      │
 │  • Skill Loader                         │
-│  • Job Executor (parallel SQL)          │
+│  • Sink Executor (parallel SQL)          │
 │  • Sink Executor (per-change SQL)       │
 └─────────────────────────────────────────┘
     │
@@ -95,7 +95,7 @@ dbkrab/
 ├── plugin/sql/           # SQL plugin engine
 │   ├── engine.go         # Main executor
 │   ├── loader.go         # Skill YAML loader
-│   ├── executor.go       # Job/sink executor
+│   ├── executor.go       # Sink executor
 │   ├── writer.go         # SQLite writer (upsert)
 │   └── pool.go          # SQLite connection pool
 ├── api/
@@ -124,13 +124,13 @@ CDC data is injected as SQL parameters:
 | `@cdc_operation` | Operation type (1=DELETE, 2=INSERT, 4=UPDATE) |
 | `@{table}_{field}` | Data field value (e.g., `@orders_order_id`) |
 
-### Jobs vs Sinks
+### Sinks
 
-| | Jobs | Sinks |
-|---|---|---|
-| **Execution** | Parallel for all changes | Per-change, filtered by operation |
-| **Output** | Independent SQLite table | Target table |
-| **Use case** | Pre-fetch/denormalize | Final sync output |
+| | Sinks |
+|---|---|
+| **Execution** | Per-change, filtered by operation |
+| **Output** | Target table |
+| **Use case** | Final sync output |
 
 ### Transaction Boundary
 
@@ -143,12 +143,11 @@ All writes (jobs + sinks) for a single CDC change are committed in one transacti
 ```
 For each CDC change (row):
     1. Build params for this change
-    2. Execute all jobs in parallel → DataSets
-    3. Execute matching sinks → DataSets
-    4. Begin transaction
-    5. Write all DataSets to SQLite (upsert)
-    6. Commit transaction
-    7. If failed → write to DLQ
+    2. Execute matching sinks → DataSets
+    3. Begin transaction
+    4. Write all DataSets to SQLite (upsert)
+    5. Commit transaction
+    6. If failed → write to DLQ
 ```
 
 ---

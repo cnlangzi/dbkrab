@@ -87,7 +87,7 @@ type Sink struct {
 
 // SinkConfig represents a single job configuration
 type SinkConfig struct {
-	Name        string `yaml:"name"`          // Job name
+	Name        string `yaml:"name"`          // Sink name
 	On          string `yaml:"on"`            // Table filter (required for multi-table)
 	SQL         string `yaml:"sql"`           // Inline SQL template
 	SQLFile     string `yaml:"sql_file"`      // External SQL file path
@@ -116,8 +116,8 @@ type DataSet struct {
 	Rows    [][]interface{}
 }
 
-// OperationToJobType converts Operation to job type string
-func OperationToJobType(op Operation) string {
+// OperationToSinkType converts Operation to sink type string
+func OperationToSinkType(op Operation) string {
 	switch op {
 	case Insert:
 		return "insert"

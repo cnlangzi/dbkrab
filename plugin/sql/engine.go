@@ -11,7 +11,7 @@ import (
 )
 
 // Engine is the SQL Plugin execution engine
-// It transforms CDC changes into DataSets through Jobs and Sinks
+// It transforms CDC changes into DataSets through Sinks
 // The caller (e.g., SQLite Sink) is responsible for writing the DataSets
 type Engine struct {
 	skill    *Skill
@@ -41,8 +41,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
 		// Get corresponding job type for this operation
-		jobType := e.operationToJobType(change.Operation)
-		if jobType == 0 {
+		sinkType := e.operationToSinkType(change.Operation)
+		if sinkType == 0 {
 			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
@@ -53,34 +53,34 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		}
 
 		// Get sinks for this operation using FilterByOperation
-		jobs := e.skill.FilterByOperation(Operation(jobType))
-		if len(jobs) > 0 {
-			jobParams := e.cdcParamsToMap(cdcParams)
+		sinkConfigs := e.skill.FilterByOperation(Operation(sinkType))
+		if len(sinkConfigs) > 0 {
+			sinkParams := e.cdcParamsToMap(cdcParams)
 
-			// Filter jobs by table and execute
-			for _, job := range jobs {
-				if job.On != "" && job.On != change.Table {
+			// Filter sinks by table and execute
+			for _, sinkCfg := range sinkConfigs {
+				if sinkCfg.On != "" && sinkCfg.On != change.Table {
 					continue
 				}
 
-				// Execute job SQL against MSSQL
-				ds, err := e.executor.ExecuteDriver(job.SQL, jobParams)
+				// Execute sink SQL against MSSQL
+				ds, err := e.executor.ExecuteDriver(sinkCfg.SQL, sinkParams)
 				if err != nil {
-					return nil, fmt.Errorf("execute job %s: %w", job.Name, err)
+					return nil, fmt.Errorf("execute sink %s: %w", sinkCfg.Name, err)
 				}
 
-				// Collect job operation
-				jobOp := core.Sink{
+				// Collect sink operation
+				sinkOp := core.Sink{
 					Config: core.SinkConfig{
-						Name:       job.Name,
-						Output:     job.Output,
-						PrimaryKey: job.PrimaryKey,
-						OnConflict: job.OnConflict,
+						Name:       sinkCfg.Name,
+						Output:     sinkCfg.Output,
+						PrimaryKey: sinkCfg.PrimaryKey,
+						OnConflict: sinkCfg.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  jobType,
+					OpType:  sinkType,
 				}
-				allOps = append(allOps, jobOp)
+				allOps = append(allOps, sinkOp)
 			}
 		}
 	}
@@ -291,9 +291,9 @@ func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
 	return m
 }
 
-// operationToJobType converts core.Operation to core.Operation
+// operationToSinkType converts core.Operation to core.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToJobType(op core.Operation) core.Operation {
+func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
 	switch op {
 	case core.OpInsert:
 		return core.OpInsert
