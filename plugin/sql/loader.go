@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,34 @@ func NewLoader(pluginsDir string) *Loader {
 func hashFile(file string) string {
 	h := sha256.Sum256([]byte(file))
 	return hex.EncodeToString(h[:])[:12]
+}
+
+// normalizeSQLParams converts all SQL parameter names (@xxx) to lowercase
+// This ensures consistent parameter matching regardless of case in templates
+// MSSQL parameter names are case-insensitive, so this is safe
+var sqlParamRegex = regexp.MustCompile(`@([a-zA-Z_][a-zA-Z0-9_]*)`)
+
+func normalizeSQLParams(sql string) string {
+	return sqlParamRegex.ReplaceAllStringFunc(sql, func(match string) string {
+		// Keep the @ symbol, lowercase the rest
+		return "@" + strings.ToLower(match[1:])
+	})
+}
+
+// normalizeSkillSQL normalizes all SQL in a skill's sinks
+// Called after loading to handle inline SQL
+func normalizeSkillSQL(skill *Skill) {
+	for i := range skill.Sinks {
+		sink := &skill.Sinks[i]
+		if sink.SQL != "" {
+			sink.SQL = normalizeSQLParams(sink.SQL)
+		}
+	}
+}
+
+// Test helper for testing SQL normalization
+func NormalizeSQLForTest(sql string) string {
+	return normalizeSQLParams(sql)
 }
 
 // Load loads and parses a SQL plugin from the given relative file path.
@@ -85,6 +114,7 @@ func (l *Loader) Load(file string) (*Skill, error) {
 }
 
 // loadSQLFiles loads external SQL files referenced in sinks
+// All SQL parameter names (@xxx) are normalized to lowercase for consistency
 func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
 	// skillDir is passed in - it's the directory containing the skill.yml file
 	// This allows skills to organize their SQL files in subdirectories if needed
@@ -98,7 +128,8 @@ func (l *Loader) loadSQLFiles(skill *Skill, skillDir string) error {
 			if err != nil {
 				return fmt.Errorf("read sink SQL file %s: %w", sink.SQLFile, ErrSQLFileNotFound)
 			}
-			sink.SQL = string(data)
+			// Normalize SQL parameter names to lowercase
+			sink.SQL = normalizeSQLParams(string(data))
 		}
 	}
 
