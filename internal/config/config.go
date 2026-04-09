@@ -17,7 +17,7 @@ type Config struct {
 
 	CDC                CDCConfig              `yaml:"cdc"`
 
-	APIPort            int                    `yaml:"api_port"`
+	Listen          int                    `yaml:"listen"`
 	App                AppConfig              `yaml:"app"`
 	Sinks              SinksConfig            `yaml:"sinks"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
@@ -81,6 +81,8 @@ type GracefulDegradationConfig struct {
 
 // AppConfig contains the app-level database storage configuration (CDC transactions, DLQ, poller state)
 type AppConfig struct {
+	Listen      int    `yaml:"listen"`
+	Host        string `yaml:"host"`
 	Type string `yaml:"type"`
 	Path string `yaml:"path"`
 }
@@ -170,8 +172,8 @@ func Load(path string) (*Config, error) {
 	if cfg.App.Path == "" {
 		cfg.App.Path = "./data/system/dbkrab.db"
 	}
-	if cfg.APIPort == 0 {
-		cfg.APIPort = 9020
+	if cfg.App.Listen == 0 {
+		cfg.App.Listen = 9020
 	}
 
 	// CDC protection defaults

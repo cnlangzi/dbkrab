@@ -181,9 +181,13 @@ func main() {
 	}
 
 	// Start API/Dashboard server
-	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, store, *apiPort, *configPath, cfg, configWatcher)
+	apiPort := cfg.App.Listen
+	if apiPort == 0 {
+		apiPort = 9020 // fallback
+	}
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, store, apiPort, *configPath, cfg, configWatcher)
 	go func() {
-		slog.Info("Dashboard starting", "port", *apiPort, "url", fmt.Sprintf("http://localhost:%d", *apiPort))
+		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {
 			slog.Warn("Dashboard stopped", "error", err)
 		}
