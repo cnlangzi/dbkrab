@@ -23,44 +23,69 @@ tables:
   - dbo.order_items
 
 # -----------------------------------------------------------------------------
-# 轮询间隔
+# CDC 配置（聚合所有 CDC 相关设置）
 # -----------------------------------------------------------------------------
-# CDC 日志轮询频率，默认 500ms
-polling_interval: 500ms
+cdc:
+  # 轮询间隔：CDC 日志轮询频率，默认 500ms
+  polling_interval: 500ms
 
-# -----------------------------------------------------------------------------
-# Offset 存储配置
-# -----------------------------------------------------------------------------
-# 记录每个表的消费位置，支持 JSON 文件或 SQLite
-offset:
-  type: json             # 存储类型：json | sqlite
-  json_path: ./data/offset.json   # JSON 文件路径（type=json 时使用）
-  sqlite_path: ./data/offset.db   # SQLite 文件路径（type=sqlite 时使用）
+  # Offset 存储配置：记录每个表的消费位置
+  offset:
+    type: json             # 存储类型：json | sqlite
+    json_path: ./data/offset.json   # JSON 文件路径
+    sqlite_path: ./data/offset.db   # SQLite 文件路径
+
+  # 事务缓冲区配置：用于跨表事务一致性和批量处理优化
+  transaction_buffer:
+    enabled: false            # 是否启用事务缓冲
+    max_wait_time: 30s        # 单个事务最大等待时间
+    max_transactions_per_batch: 1000   # 每批次最大事务数
+    max_batch_bytes: 10485760  # 10MB，每批次最大字节数
+
+  # Gap 保护配置：防止 CDC 清理导致数据丢失
+  protection:
+    enabled: true             # 是否启用 Gap 检测
+    check_interval: 1m        # 检测频率
+    warning_lag_bytes: 104857600        # 100MB，警告阈值
+    warning_lag_duration: 1h            # 1小时，警告阈值
+    critical_lag_bytes: 1073741824      # 1GB，严重阈值
+    critical_lag_duration: 6h          # 6小时，严重阈值
+
+    # 数据丢失时的恢复策略
+    recovery:
+      strategy: manual         # manual | snapshot | timestamp
+
+    # 告警配置
+    alert:
+      enabled: true           # 是否发送告警
+      webhook_url: https://hooks.example.com/alert
+      channels:
+        - type: feishu
+          url: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+        - type: webhook
+          url: https://hooks.slack.com/services/xxx
 
 # -----------------------------------------------------------------------------
 # API 服务端口
 # -----------------------------------------------------------------------------
-# HTTP API 监听端口（路由在代码中写死）
 api_port: 9020
 
 # -----------------------------------------------------------------------------
 # 应用存储配置（CDC 事务、DLQ、轮询状态）
 # -----------------------------------------------------------------------------
-# 存储 dbkrab 自身运行所需的全部数据
 app:
-  type: sqlite           # 目前仅支持 sqlite
-  path: ./data/system/dbkrab.db   # 数据库文件路径
+  type: sqlite
+  path: ./data/system/dbkrab.db
 
 # -----------------------------------------------------------------------------
 # 业务 Sink 配置（数据输出目标）
 # -----------------------------------------------------------------------------
-# 将 CDC 数据写入业务数据库的配置
 sinks:
-  - name: business          # 数据库名称（唯一标识）
-    description: 业务主数据库   # 用途描述
-    type: sqlite            # 数据库类型：sqlite | duckdb | mssql
-    path: ./data/sinks/business/business.db   # 文件数据库路径
-    migrations: ./data/sinks/business/migrations  # 迁移 SQL 目录
+  - name: business
+    description: 业务主数据库
+    type: sqlite
+    path: ./data/sinks/business/business.db
+    migrations: ./data/sinks/business/migrations
   - name: analytics
     description: 分析数据库
     type: duckdb
@@ -68,84 +93,33 @@ sinks:
     migrations: ./data/sinks/analytics/migrations
 
 # -----------------------------------------------------------------------------
-# 事务缓冲区配置
-# -----------------------------------------------------------------------------
-# 用于跨表事务一致性和批量处理优化
-transaction_buffer:
-  enabled: false            # 是否启用事务缓冲
-  max_wait_time: 30s        # 单个事务最大等待时间，超过即释放
-  max_transactions_per_batch: 1000   # 每批次最大事务数，达到即交付
-  max_batch_bytes: 10485760  # 10MB，每批次最大字节数，达到即交付
-
-# -----------------------------------------------------------------------------
-# CDC Gap 保护配置（防止 CDC 清理导致数据丢失）
-# -----------------------------------------------------------------------------
-cdc_protection:
-  enabled: true             # 是否启用 Gap 检测
-
-  # 检测频率
-  check_interval: 1m        # 多久检查一次
-
-  # 警告阈值（触发告警，继续轮询）
-  warning_lag_bytes: 104857600        # 100MB，字节数阈值
-  warning_lag_duration: 1h            # 1小时，时长阈值
-
-  # 严重阈值（触发告警，继续轮询）
-  critical_lag_bytes: 1073741824      # 1GB，字节数阈值
-  critical_lag_duration: 6h          # 6小时，时长阈值
-
-  # 数据丢失时的恢复策略
-  recovery:
-    strategy: manual         # manual | snapshot | timestamp
-                          # manual: 暂停等待人工处理（推荐生产环境）
-                          # snapshot: 自动全量重载
-                          # timestamp: 基于时间戳恢复
-
-  # 告警配置
-  alert:
-    enabled: true           # 是否发送告警
-    webhook_url: https://hooks.example.com/alert  # 通用 Webhook
-
-    # 多渠道告警
-    channels:
-      - type: feishu         # 飞书机器人
-        url: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-      - type: webhook        # 通用 Webhook
-        url: https://hooks.slack.com/services/xxx
-
-# -----------------------------------------------------------------------------
 # MSSQL 断连优雅降级
 # -----------------------------------------------------------------------------
-# 当 MSSQL 连接断开时的重连策略，避免进程直接退出
 graceful_degradation:
-  enabled: true              # 是否启用优雅降级
-  max_disconnect_duration: 30m    # 最大断连时长，超过则告警
-  reconnect_base_delay: 5s        # 初始重连间隔
-  reconnect_max_delay: 60s         # 最大重连间隔（指数退避上限）
+  enabled: true
+  max_disconnect_duration: 30m
+  reconnect_base_delay: 5s
+  reconnect_max_delay: 60s
 
 # -----------------------------------------------------------------------------
 # 插件配置
 # -----------------------------------------------------------------------------
 plugins:
   sql:
-    enabled: true            # 是否启用 SQL 插件
-    path: ./skills/sql       # 插件目录路径
+    enabled: true
+    path: ./skills/sql
 
 # -----------------------------------------------------------------------------
 # 日志配置
 # -----------------------------------------------------------------------------
 logging:
-  level: info               # 日志级别：debug | info | warn | error
-
-  # 控制台输出
+  level: info
   console:
-    enabled: true           # 是否输出到 stdout
-
-  # 文件输出
+    enabled: true
   file:
-    enabled: true           # 是否输出到文件
-    path: ./logs/dbkrab.log  # 日志文件路径
-    max_size_mb: 100         # 单文件最大 MB
-    max_age_days: 7           # 保留天数
-    max_files: 4             # 保留文件数
-    compress: true           # 是否 gzip 压缩旧日志
+    enabled: true
+    path: ./logs/dbkrab.log
+    max_size_mb: 100
+    max_age_days: 7
+    max_files: 4
+    compress: true

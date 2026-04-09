@@ -14,17 +14,23 @@ import (
 type Config struct {
 	MSSQL              MSSQLConfig            `yaml:"mssql"`
 	Tables             []string               `yaml:"tables"`
-	Interval           string                 `yaml:"polling_interval"`
-	Offset             OffsetConfig           `yaml:"offset"`
+
+	CDC                CDCConfig              `yaml:"cdc"`
 
 	APIPort            int                    `yaml:"api_port"`
 	App                AppConfig              `yaml:"app"`
 	Sinks              SinksConfig            `yaml:"sinks"`
-	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
-	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
 	Plugins            PluginsConfig          `yaml:"plugins"`
 	Logging            logging.LoggingConfig  `yaml:"logging"`
+}
+
+// CDCConfig aggregates all CDC-related configuration
+type CDCConfig struct {
+	PollingInterval string                 `yaml:"polling_interval"`
+	Offset          OffsetConfig           `yaml:"offset"`
+	Protection      CDCProtectionConfig    `yaml:"protection"`
+	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
 // PluginsConfig contains plugin configuration
@@ -146,17 +152,17 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Set defaults
-	if cfg.Interval == "" {
-		cfg.Interval = "500ms"
+	if cfg.CDC.PollingInterval == "" {
+		cfg.CDC.PollingInterval = "500ms"
 	}
-	if cfg.Offset.Type == "" {
-		cfg.Offset.Type = "json"
+	if cfg.CDC.Offset.Type == "" {
+		cfg.CDC.Offset.Type = "json"
 	}
-	if cfg.Offset.JSONPath == "" {
-		cfg.Offset.JSONPath = "./data/offset.json"
+	if cfg.CDC.Offset.JSONPath == "" {
+		cfg.CDC.Offset.JSONPath = "./data/offset.json"
 	}
-	if cfg.Offset.SQLitePath == "" {
-		cfg.Offset.SQLitePath = "./data/offset.db"
+	if cfg.CDC.Offset.SQLitePath == "" {
+		cfg.CDC.Offset.SQLitePath = "./data/offset.db"
 	}
 	if cfg.App.Type == "" {
 		cfg.App.Type = "sqlite"
@@ -169,34 +175,34 @@ func Load(path string) (*Config, error) {
 	}
 
 	// CDC protection defaults
-	if cfg.CDCProtection.CheckInterval == "" {
-		cfg.CDCProtection.CheckInterval = "1m"
+	if cfg.CDC.Protection.CheckInterval == "" {
+		cfg.CDC.Protection.CheckInterval = "1m"
 	}
-	if cfg.CDCProtection.WarningLagBytes == 0 {
-		cfg.CDCProtection.WarningLagBytes = 100 * 1024 * 1024 // 100MB
+	if cfg.CDC.Protection.WarningLagBytes == 0 {
+		cfg.CDC.Protection.WarningLagBytes = 100 * 1024 * 1024 // 100MB
 	}
-	if cfg.CDCProtection.CriticalLagBytes == 0 {
-		cfg.CDCProtection.CriticalLagBytes = 1024 * 1024 * 1024 // 1GB
+	if cfg.CDC.Protection.CriticalLagBytes == 0 {
+		cfg.CDC.Protection.CriticalLagBytes = 1024 * 1024 * 1024 // 1GB
 	}
-	if cfg.CDCProtection.WarningLagDuration == "" {
-		cfg.CDCProtection.WarningLagDuration = "1h"
+	if cfg.CDC.Protection.WarningLagDuration == "" {
+		cfg.CDC.Protection.WarningLagDuration = "1h"
 	}
-	if cfg.CDCProtection.CriticalLagDuration == "" {
-		cfg.CDCProtection.CriticalLagDuration = "6h"
+	if cfg.CDC.Protection.CriticalLagDuration == "" {
+		cfg.CDC.Protection.CriticalLagDuration = "6h"
 	}
-	if cfg.CDCProtection.Recovery.Strategy == "" {
-		cfg.CDCProtection.Recovery.Strategy = "manual" // Default to manual intervention
+	if cfg.CDC.Protection.Recovery.Strategy == "" {
+		cfg.CDC.Protection.Recovery.Strategy = "manual" // Default to manual intervention
 	}
 
 	// Transaction buffer defaults
-	if cfg.TransactionBuffer.MaxWaitTime == "" {
-		cfg.TransactionBuffer.MaxWaitTime = "30s"
+	if cfg.CDC.TransactionBuffer.MaxWaitTime == "" {
+		cfg.CDC.TransactionBuffer.MaxWaitTime = "30s"
 	}
-	if cfg.TransactionBuffer.MaxTransactionsPerBatch == 0 {
-		cfg.TransactionBuffer.MaxTransactionsPerBatch = 1000
+	if cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch == 0 {
+		cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch = 1000
 	}
-	if cfg.TransactionBuffer.MaxBatchBytes == 0 {
-		cfg.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
+	if cfg.CDC.TransactionBuffer.MaxBatchBytes == 0 {
+		cfg.CDC.TransactionBuffer.MaxBatchBytes = 10 * 1024 * 1024 // 10MB
 	}
 
 	// Plugin defaults
@@ -244,31 +250,31 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) PollingInterval() (time.Duration, error) {
-	return time.ParseDuration(c.Interval)
+	return time.ParseDuration(c.CDC.PollingInterval)
 }
 
 // CDCCheckInterval returns the CDC gap check interval
 func (c *Config) CDCCheckInterval() (time.Duration, error) {
-	if c.CDCProtection.CheckInterval == "" {
+	if c.CDC.Protection.CheckInterval == "" {
 		return 1 * time.Minute, nil
 	}
-	return time.ParseDuration(c.CDCProtection.CheckInterval)
+	return time.ParseDuration(c.CDC.Protection.CheckInterval)
 }
 
 // WarningLagDuration returns the warning lag duration threshold
 func (c *Config) WarningLagDuration() (time.Duration, error) {
-	if c.CDCProtection.WarningLagDuration == "" {
+	if c.CDC.Protection.WarningLagDuration == "" {
 		return 1 * time.Hour, nil
 	}
-	return time.ParseDuration(c.CDCProtection.WarningLagDuration)
+	return time.ParseDuration(c.CDC.Protection.WarningLagDuration)
 }
 
 // CriticalLagDuration returns the critical lag duration threshold
 func (c *Config) CriticalLagDuration() (time.Duration, error) {
-	if c.CDCProtection.CriticalLagDuration == "" {
+	if c.CDC.Protection.CriticalLagDuration == "" {
 		return 6 * time.Hour, nil
 	}
-	return time.ParseDuration(c.CDCProtection.CriticalLagDuration)
+	return time.ParseDuration(c.CDC.Protection.CriticalLagDuration)
 }
 
 // Save writes the config to a YAML file
