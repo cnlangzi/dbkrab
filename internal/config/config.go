@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +48,7 @@ type PluginConfig struct {
 
 // DatabaseConfig contains configuration for a named database
 type DatabaseConfig struct {
+	Id              string `yaml:"-"`                // Auto-generated 12-char hash ID (not in YAML)
 	Name            string `yaml:"name"`             // Sink name (used as key in array format)
 	Description    string `yaml:"description"`     // Human-readable description
 	Type            string `yaml:"type"`            // sqlite, duckdb, mssql, etc.
@@ -247,7 +250,20 @@ func Load(path string) (*Config, error) {
 		cfg.Logging.File.Enabled = true
 	}
 
+	// Generate sink IDs (12-char hash based on name+path)
+	for i := range cfg.Sinks {
+		if cfg.Sinks[i].Id == "" {
+			cfg.Sinks[i].Id = generateSinkId(cfg.Sinks[i].Name, cfg.Sinks[i].Path)
+		}
+	}
+
 	return &cfg, nil
+}
+
+// generateSinkId generates a 12-char hash ID from name+path
+func generateSinkId(name, path string) string {
+	h := sha256.Sum256([]byte(name + ":" + path))
+	return hex.EncodeToString(h[:])[:12]
 }
 
 func (c *Config) Interval() (time.Duration, error) {

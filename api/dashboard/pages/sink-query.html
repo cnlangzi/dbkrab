@@ -79,6 +79,7 @@
 </div>
 
 <script>
+const sinkId = '{{.Data.sinkId}}';
 const sinkName = '{{.Data.sinkName}}';
 let availableTables = [];
 
@@ -87,7 +88,7 @@ document.addEventListener('DOMContentLoaded', loadTables);
 
 async function loadTables() {
     try {
-        const response = await fetch(`/api/sinks/${encodeURIComponent(sinkName)}/tables`);
+        const response = await fetch(`/api/sinks/${encodeURIComponent(sinkId)}/tables`);
         const data = await response.json();
         
         if (data.success) {
@@ -146,7 +147,7 @@ async function executeQuery() {
     `;
     
     try {
-        const response = await fetch(`/api/sinks/${encodeURIComponent(sinkName)}/query`, {
+        const response = await fetch(`/api/sinks/${encodeURIComponent(sinkId)}/query`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
