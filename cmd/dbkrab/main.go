@@ -198,7 +198,7 @@ func main() {
 		Enabled:   config.IsEnabled(cfg.Plugins.SQL.Enabled),
 		Path:      cfg.Plugins.SQL.Path,
 		SinkConfigs: nil, // passed via dbConfigs
-	}, cfg.Sinks.Databases); err != nil {
+	}, cfg.Sinks.ToMap()); err != nil {
 		slog.Warn("plugin initialization failed", "error", err)
 	}
 

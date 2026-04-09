@@ -75,8 +75,8 @@ sink:
 	}
 
 	// Check sink
-	if cfg.Sink.Type != "sqlite" {
-		t.Errorf("Sink.Type = %v, want sqlite", cfg.Sink.Type)
+	if cfg.App.Type != "sqlite" {
+		t.Errorf("App.Type = %v, want sqlite", cfg.App.Type)
 	}
 }
 
@@ -121,8 +121,8 @@ tables:
 	if cfg.Offset.JSONPath != "./data/offset.json" {
 		t.Errorf("Offset.JSONPath default = %v, want ./data/offset.json", cfg.Offset.JSONPath)
 	}
-	if cfg.Sink.Type != "sqlite" {
-		t.Errorf("Sink.Type default = %v, want sqlite", cfg.Sink.Type)
+	if cfg.App.Type != "sqlite" {
+		t.Errorf("App.Type default = %v, want sqlite", cfg.App.Type)
 	}
 }
 
