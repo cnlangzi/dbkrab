@@ -117,11 +117,11 @@ func (s *Server) Start() error {
 
 	// Initialize sinks root for secure file access
 	// os.Root provides safe access to files within a directory tree
-	if s.config != nil && s.config.Sinks.BasePath != "" {
+	if s.config != nil && len(s.config.Sinks.Databases) > 0 {
 		var err error
-		s.sinksRoot, err = os.OpenRoot(s.config.Sinks.BasePath)
+		s.sinksRoot, err = os.OpenRoot(s.config.Sinks.BasePath())
 		if err != nil {
-			slog.Warn("failed to open sinks root, sinks API will be limited", "error", err, "path", s.config.Sinks.BasePath)
+			slog.Warn("failed to open sinks root, sinks API will be limited", "error", err, "path", s.config.Sinks.BasePath())
 		}
 	}
 
@@ -1168,7 +1168,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 	}
 	
 	// Build full path for SQLite driver
-	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
+	dbPath := filepath.Join(s.config.Sinks.BasePath(), dbRelPath)
 	
 	// Open read-only connection
 	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
@@ -1289,7 +1289,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 	
 	// Build full path for SQLite driver
-	dbPath := filepath.Join(s.config.Sinks.BasePath, dbRelPath)
+	dbPath := filepath.Join(s.config.Sinks.BasePath(), dbRelPath)
 	
 	// Open read-only connection
 	db, err := sql.Open("sqlite", dbPath+"?mode=ro")

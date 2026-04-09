@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/alert"
@@ -80,55 +81,25 @@ type AppConfig struct {
 
 // SinksConfig contains business sinks configuration
 type SinksConfig struct {
-	// BasePath is used internally by the API server for file serving.
-	// When sinks are configured as an array, this is derived from the first sink's path
-	// or can be set explicitly for backward compatibility.
-	BasePath  string                      `yaml:"base_path"`
-	Databases map[string]DatabaseConfig   `yaml:"databases"` // Database name -> storage config
+	Databases []DatabaseConfig `yaml:"databases"`
 }
 
-// SinkEntry is used for YAML unmarshaling of the array format.
-// Name is extracted from the array element and used as the map key.
-type SinkEntry struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Type        string `yaml:"type"`
-	Path        string `yaml:"path"`
-	Migrations  string `yaml:"migrations"`
+// ToMap converts Databases to a map keyed by Name (for plugin/API compatibility).
+func (s *SinksConfig) ToMap() map[string]DatabaseConfig {
+	m := make(map[string]DatabaseConfig, len(s.Databases))
+	for _, db := range s.Databases {
+		m[db.Name] = db
+	}
+	return m
 }
 
-// UnmarshalYAML allows SinksConfig to accept both the old map format and the new array format.
-func (s *SinksConfig) UnmarshalYAML(unmarshal func(any) error) error {
-	// Try to unmarshal as array first (new format)
-	var entries []SinkEntry
-	if err := unmarshal(&entries); err == nil {
-		s.Databases = make(map[string]DatabaseConfig)
-		for _, entry := range entries {
-			if entry.Name == "" {
-				continue // skip entries without a name
-			}
-			s.Databases[entry.Name] = DatabaseConfig{
-				Name:           entry.Name,
-				Description:    entry.Description,
-				Type:          entry.Type,
-				Path:          entry.Path,
-				MigrationPath: entry.Migrations,
-			}
-		}
-		return nil
+// BasePath returns the parent directory of the first sink's path.
+// Used internally by the API server for file serving.
+func (s *SinksConfig) BasePath() string {
+	if len(s.Databases) == 0 || s.Databases[0].Path == "" {
+		return "./data/sinks"
 	}
-
-	// Fall back to old map format (backward compatibility)
-	var old struct {
-		BasePath  string                      `yaml:"base_path"`
-		Databases map[string]DatabaseConfig   `yaml:"databases"`
-	}
-	if err := unmarshal(&old); err != nil {
-		return err
-	}
-	s.BasePath = old.BasePath
-	s.Databases = old.Databases
-	return nil
+	return filepath.Dir(s.Databases[0].Path)
 }
 
 // OffsetConfig contains offset storage configuration
@@ -192,9 +163,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.App.Path == "" {
 		cfg.App.Path = "./data/system/dbkrab.db"
-	}
-	if cfg.Sinks.BasePath == "" {
-		cfg.Sinks.BasePath = "./data/sinks"
 	}
 	if cfg.APIPort == 0 {
 		cfg.APIPort = 9020
