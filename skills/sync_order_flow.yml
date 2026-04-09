@@ -5,6 +5,8 @@ on:
   - orders
   - order_items
 
+database: business
+
 sinks:
   - name: orders_sync
     when: [insert, update]

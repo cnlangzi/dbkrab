@@ -47,10 +47,19 @@ sink:
   type: sqlite
   path: ./data/system/dbkrab.db
 
-# Business sinks output directory (per-skill SQLite files)
-# Each skill can specify its own sqlite path in the skill YAML
+# Business sinks output configuration
 sinks:
   base_path: ./data/sinks
+  # Sink database configurations (maps database names to actual storage)
+  databases:
+    business:
+      type: sqlite
+      path: ./data/sinks/business/business.db
+      migrations: ./data/sinks/business/migrations
+    analytics:
+      type: duckdb
+      path: ./data/sinks/analytics.duckdb
+      migrations: ./data/sinks/analytics/migrations
 
 # Transaction buffer for cross-table integrity and batch processing
 transaction_buffer:

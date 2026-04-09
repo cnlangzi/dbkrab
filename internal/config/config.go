@@ -33,8 +33,17 @@ type PluginsConfig struct {
 
 // PluginConfig contains plugin configuration for SQL plugins
 type PluginConfig struct {
-	Enabled *bool `yaml:"enabled"` // true/on/1=enable, otherwise disabled
-	Path    string `yaml:"path"`
+	Enabled   *bool                  `yaml:"enabled"` // true/on/1=enable, otherwise disabled
+	Path      string                 `yaml:"path"`
+	SinkDatabases map[string]DatabaseConfig `yaml:"sink_databases"` // Sink database name -> storage config
+}
+
+// DatabaseConfig contains configuration for a named database
+type DatabaseConfig struct {
+	Type            string `yaml:"type"`             // sqlite, duckdb, mssql, etc.
+	Path            string `yaml:"path"`             // Path for file-based databases
+	MigrationPath  string `yaml:"migrations"`     // Path to migration SQL files
+	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
 }
 
 // IsEnabled returns true only if val is explicitly set to true, "on", or "1"
@@ -69,7 +78,8 @@ type SinkConfig struct {
 
 // SinksConfig contains business sinks configuration
 type SinksConfig struct {
-	BasePath string `yaml:"base_path"` // Base path for business sink databases
+	BasePath   string                     `yaml:"base_path"` // Base path for business sink databases
+	Databases map[string]DatabaseConfig `yaml:"databases"` // Database name -> storage config
 }
 
 // OffsetConfig contains offset storage configuration

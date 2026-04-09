@@ -7,31 +7,41 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/plugin/sql"
+	"github.com/cnlangzi/dbkrab/sinkwriter"
 )
 
 // Manager manages SQL plugins.
 type Manager struct {
-	plugins   map[string]Plugin  // SQL plugin registry
-	sqlLoader *sql.Loader        // SQL plugin loader
-	mu        sync.RWMutex
+	plugins      map[string]Plugin  // SQL plugin registry
+	sqlLoader    *sql.Loader        // SQL plugin loader
+	swManager  *sinkwriter.Manager // Routes sinks to appropriate writers
+	mu           sync.RWMutex
 }
 
 // NewManager creates a new plugin manager
 func NewManager() *Manager {
 	return &Manager{
-		plugins: make(map[string]Plugin),
+		plugins:     make(map[string]Plugin),
+		swManager: sinkwriter.NewManager(),
 	}
 }
 
 // Init initializes all SQL plugins based on the provided config.
 func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
-	Enabled bool
-	Path    string
-}) error {
+	Enabled       bool
+	Path          string
+	SinkConfigs map[string]any // database name -> config
+}, dbConfigs map[string]config.DatabaseConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Configure sink writer manager
+	if dbConfigs != nil {
+		m.swManager.Configure(dbConfigs)
+	}
 
 	// Load SQL plugins if enabled
 	if sqlCfg.Enabled && sqlCfg.Path != "" {
@@ -64,6 +74,14 @@ func (m *Manager) Stop() error {
 			fmt.Printf("Warning: failed to stop plugin %s: %v\n", name, err)
 		}
 	}
+
+	// Close sink manager
+	if m.swManager != nil {
+		if err := m.swManager.Close(); err != nil {
+			fmt.Printf("Warning: failed to close sink manager: %v\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -86,18 +104,34 @@ func (m *Manager) Unload(name string) error {
 }
 
 // Handle processes a transaction through all SQL plugins.
-// Each plugin writes to its own sink if configured.
+// Each plugin transforms data and returns sinks with Database field set.
+// The sink manager routes sinks to appropriate writers based on Database field.
 func (m *Manager) Handle(tx *core.Transaction) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	// Collect all sink operations from all plugins
+	var allSinks []core.Sink
 
 	for _, p := range m.plugins {
 		splug, ok := p.(*sql.Plugin)
 		if !ok {
 			continue
 		}
-		if err := splug.Handle(tx); err != nil {
+
+		// Transform and get sinks with Database field
+		sinks, err := splug.Handle(tx)
+		if err != nil {
 			return fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
+		}
+
+		allSinks = append(allSinks, sinks...)
+	}
+
+	// Route sinks to appropriate writers based on Database field
+	if len(allSinks) > 0 {
+		if err := m.swManager.Write(allSinks); err != nil {
+			return fmt.Errorf("sink write: %w", err)
 		}
 	}
 

@@ -72,7 +72,7 @@ type Skill struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 	On          []string    `yaml:"on"`            // Tables to monitor
-	SQLite      string      `yaml:"sqlite"`        // Path to SQLite sink database (resolves to data/sinks/{name}/{name}.db)
+	Database    string      `yaml:"database"`      // Target database name (maps to platform-configured storage)
 	Sinks       []Sink      `yaml:"sinks"`
 
 	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path

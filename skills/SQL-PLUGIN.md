@@ -31,15 +31,19 @@ Core Poller (Transaction-based batch collection)
 │     CDC data → SQL Parameters                │
 │                                              │
 │  2. Sink Executor                             │
-│     SQL → DataSet                            │
-│                                              │
-│  3. Sink Writer                              │
-│     Batch upsert to SQLite                   │
+│     SQL → DataSet (with Database name)      │
 └─────────────────────────────────────────────┘
     ↓
-┌────────┐
-│ SQLite │
-└────────┘
+┌─────────────────────────────────────────────┐
+│        SinkWriter Manager (Platform)        │
+│                                              │
+│  Routes sinks to appropriate writers        │
+│  based on Database field                    │
+└─────────────────────────────────────────────┘
+    ↓
+┌────────┐  ┌────────┐  ┌────────┐
+│ SQLite │  │ DuckDB │  │ MSSQL  │
+└────────┘  └────────┘  └────────┘
 ```
 
 ---
@@ -90,7 +94,7 @@ Sinks are configured under `sinks` as a flat list. Each sink has a `when` field 
 ```yaml
 name: plugin_name
 description: "Optional description"
-sqlite: ./data/sinks/business.db   # Optional separate SQLite
+database: business   # Database name (maps to platform-configured storage)
 
 on:
   - table_name
@@ -117,7 +121,7 @@ sinks:
 |-------|----------|-------------|
 | `name` | Yes | Skill name |
 | `on` | Yes | Tables to monitor |
-| `sqlite` | No | Separate SQLite database path |
+| `database` | No | Target database name (maps to platform-configured storage) |
 | `sinks` | Yes | Output configurations |
 | `sinks[].name` | Yes | Sink identifier |
 | `sinks[].when` | Yes | Operation filter: `[insert, update]` or `[delete]` |
