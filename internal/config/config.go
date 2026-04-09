@@ -17,7 +17,7 @@ type Config struct {
 	Offset             OffsetConfig           `yaml:"offset"`
 
 	APIPort            int                    `yaml:"api_port"`
-	Sink               SinkConfig             `yaml:"sink"`
+	App                AppConfig              `yaml:"app"`
 	Sinks              SinksConfig            `yaml:"sinks"`
 	CDCProtection      CDCProtectionConfig    `yaml:"cdc_protection"`
 	TransactionBuffer  TransactionBufferConfig `yaml:"transaction_buffer"`
@@ -71,7 +71,8 @@ type GracefulDegradationConfig struct {
 	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
-type SinkConfig struct {
+// AppConfig contains the app-level database storage configuration (CDC transactions, DLQ, poller state)
+type AppConfig struct {
 	Type string `yaml:"type"`
 	Path string `yaml:"path"`
 }
@@ -138,11 +139,11 @@ func Load(path string) (*Config, error) {
 	if cfg.Offset.SQLitePath == "" {
 		cfg.Offset.SQLitePath = "./data/offset.db"
 	}
-	if cfg.Sink.Type == "" {
-		cfg.Sink.Type = "sqlite"
+	if cfg.App.Type == "" {
+		cfg.App.Type = "sqlite"
 	}
-	if cfg.Sink.Path == "" {
-		cfg.Sink.Path = "./data/system/dbkrab.db"
+	if cfg.App.Path == "" {
+		cfg.App.Path = "./data/system/dbkrab.db"
 	}
 	if cfg.Sinks.BasePath == "" {
 		cfg.Sinks.BasePath = "./data/sinks"
