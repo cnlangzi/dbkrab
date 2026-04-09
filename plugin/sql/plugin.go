@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,7 +58,7 @@ func New(path string, db *sql.DB) *Plugin {
 
 	// Load all skills from the directory
 	if err := p.loadAllSkills(); err != nil {
-		fmt.Printf("Warning: failed to load initial skills: %v\n", err)
+		slog.Warn("failed to load initial skills", "error", err, "path", path)
 	}
 
 	// Initialize engine with first skill (or nil if no skills)
@@ -86,7 +87,7 @@ func (p *Plugin) loadAllSkills() error {
 		filePath := filepath.Join(p.watchDir, entry.Name())
 		skill, err := p.loadSkillFile(filePath)
 		if err != nil {
-			fmt.Printf("Warning: failed to load skill %s: %v\n", entry.Name(), err)
+			slog.Warn("failed to load skill", "file", entry.Name(), "error", err)
 			continue
 		}
 
@@ -159,7 +160,7 @@ func calcFileSHA256(filePath string) (string, error) {
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			fmt.Printf("Warning: failed to close file %s: %v\n", filePath, closeErr)
+			slog.Warn("failed to close file", "path", filePath, "error", closeErr)
 		}
 	}()
 
@@ -263,7 +264,7 @@ func (p *Plugin) checkChanges() {
 
 				id := hashFile(path)
 				p.Skills.Delete(id)
-				fmt.Printf("Removed skill: %s\n", path)
+			slog.Info("skill removed", "path", path)
 				continue
 			}
 
@@ -283,12 +284,12 @@ func (p *Plugin) checkChanges() {
 
 				skill, err := p.loadSkillFile(path)
 				if err != nil {
-					fmt.Printf("Warning: failed to reload skill %s: %v\n", path, err)
+				slog.Warn("failed to reload skill", "path", path, "error", err)
 					continue
 				}
 
 				p.Skills.Set(skill)
-				fmt.Printf("Reloaded skill: %s (id: %s)\n", path, skill.Id)
+			slog.Info("skill reloaded", "path", path, "skill_id", skill.Id)
 			} else {
 				// Hash unchanged, clear debounce
 				entry.debounceAt = time.Time{}
