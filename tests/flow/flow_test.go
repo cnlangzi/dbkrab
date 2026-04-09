@@ -122,7 +122,7 @@ func newTestHarness(t *testing.T) *testHarness {
 }
 
 func (h *testHarness) cleanup() {
-	os.RemoveAll(h.tmpDir)
+	_ = os.RemoveAll(h.tmpDir)
 }
 
 // setupSkillFixtures copies skill fixtures to the test skills directory
@@ -152,14 +152,16 @@ func (h *testHarness) setupSkillFixtures() {
 // setupPluginManager creates a plugin manager with skill fixtures
 func (h *testHarness) setupPluginManager(dbConfigs map[string]config.DatabaseConfig) *plugin.Manager {
 	mgr := plugin.NewManager()
-	mgr.Init(context.Background(), nil, struct {
+	if err := mgr.Init(context.Background(), nil, struct {
 		Enabled      bool
 		Path         string
 		SinkConfigs map[string]any
 	}{
 		Enabled: true,
 		Path:   h.skillPath,
-	}, dbConfigs)
+	}, dbConfigs); err != nil {
+		h.t.Fatalf("plugin manager init failed: %v", err)
+	}
 	return mgr
 }
 
@@ -228,7 +230,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 
 	// Setup plugin manager
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { _ = pluginMgr.Stop() }()
 
 	var handlerCalled bool
 	var handlerErr error
@@ -268,13 +270,13 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	require.Len(t, tx.Changes, 1, "transaction should have one change")
 
 	// Call handler
-	err := handler.Handle(&tx)
+	handler.Handle(&tx)
 	// Note: pluginMgr.Handle may fail without real MSSQL, but that's OK for this test
 
 	assert.True(t, handlerCalled, "handler should be called")
 
 	// Call store
-	err = h.store.Write(&tx)
+	err := h.store.Write(&tx)
 	require.NoError(t, err, "store should not error")
 
 	// Verify store was called
@@ -283,7 +285,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			_ = h.offsetStore.Set(r.table, r.lastLSN.String())
 		}
 	}
 
@@ -301,7 +303,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	h.setupSkillFixtures()
 	dbConfigs := buildDBConfigs("business")
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { _ = pluginMgr.Stop() }()
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
@@ -367,17 +369,17 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	assert.Equal(t, core.OpDelete, tx.Changes[2].Operation)
 
 	// Call handler
-	err := handler.Handle(&tx)
+	handler.Handle(&tx)
 	// May fail without MSSQL, but ordering is preserved
 
 	// Store
-	err = h.store.Write(&tx)
+	err := h.store.Write(&tx)
 	require.NoError(t, err, "store should not error")
 
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String())
+			_ = h.offsetStore.Set(r.table, r.lastLSN.String())
 		}
 	}
 
@@ -404,7 +406,7 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	}
 
 	pluginMgr := h.setupPluginManager(dbConfigs)
-	defer pluginMgr.Stop()
+	defer func() { _ = pluginMgr.Stop() }()
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
@@ -469,11 +471,11 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	assert.Len(t, tables, 3, "should have changes from 3 tables")
 
 	// Process through handler
-	err := handler.Handle(&tx)
+	handler.Handle(&tx)
 	// May fail without MSSQL, but transaction grouping is validated
 
 	// Store
-	err = h.store.Write(&tx)
+	err := h.store.Write(&tx)
 	require.NoError(t, err)
 
 	require.Len(t, h.store.writes, 1)
@@ -516,7 +518,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	tx := txs[0]
 
 	// Set initial offset
-	h.offsetStore.Set("dbo.orders", "0000000001000000")
+	_ = h.offsetStore.Set("dbo.orders", "0000000001000000")
 
 	// Call handler - should fail
 	err := handler.Handle(&tx)
