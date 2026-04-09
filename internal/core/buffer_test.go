@@ -97,9 +97,9 @@ func TestTransactionBufferMultipleTransactions(t *testing.T) {
 	}
 }
 
-// TestTransactionBufferCallback tests timeout callback with delivery reason
+// TestTransactionBufferCallback tests poll-interval callback with delivery reason
 func TestTransactionBufferCallback(t *testing.T) {
-	buffer := NewTransactionBuffer(50*time.Millisecond, 0, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(0, 50*time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	var timeoutCalled bool
@@ -121,8 +121,8 @@ func TestTransactionBufferCallback(t *testing.T) {
 		Data:          map[string]interface{}{"id": 1},
 	})
 
-	// Wait for timeout
-	time.Sleep(100 * time.Millisecond)
+	// Wait for poll-interval gating (2x safety multiplier)
+	time.Sleep(50 * time.Millisecond * pollIntervalSafetyMultiplier * 2)
 
 	// Trigger cleanup
 	buffer.GetCompleteTransactions()
@@ -134,10 +134,10 @@ func TestTransactionBufferCallback(t *testing.T) {
 	mu.Unlock()
 
 	if !called {
-		t.Error("Expected timeout callback to be called")
+		t.Error("Expected poll-interval callback to be called")
 	}
-	if reason != DeliveryReasonTimeout {
-		t.Errorf("Expected delivery reason %s, got %s", DeliveryReasonTimeout, reason)
+	if reason != DeliveryReasonPollInterval {
+		t.Errorf("Expected delivery reason %s, got %s", DeliveryReasonPollInterval, reason)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestTransactionBufferClose(t *testing.T) {
 
 // TestTransactionBufferTableTracking tests that tables are tracked correctly
 func TestTransactionBufferTableTracking(t *testing.T) {
-	buffer := NewTransactionBuffer(100*time.Millisecond, 0, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(0, 50*time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add changes from different tables for same transaction
@@ -184,8 +184,8 @@ func TestTransactionBufferTableTracking(t *testing.T) {
 		})
 	}
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for poll-interval gating (2x safety multiplier)
+	time.Sleep(50 * time.Millisecond * pollIntervalSafetyMultiplier * 2)
 
 	// Get complete transaction
 	complete := buffer.GetCompleteTransactions()
@@ -524,9 +524,9 @@ func TestTransactionWithTablesNeverParticipating(t *testing.T) {
 	}
 }
 
-// TestTimeoutFallback tests that timeout still works as fallback
+// TestTimeoutFallback tests that poll-interval gating works (formerly timeout fallback)
 func TestTimeoutFallback(t *testing.T) {
-	buffer := NewTransactionBuffer(100*time.Millisecond, 0, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(0, 50*time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	commitTime := time.Now().Add(-1 * time.Hour) // Very old commit time
@@ -540,13 +540,13 @@ func TestTimeoutFallback(t *testing.T) {
 		CommitTime:    commitTime,
 	})
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for poll-interval gating (2x safety multiplier)
+	time.Sleep(50 * time.Millisecond * pollIntervalSafetyMultiplier * 2)
 
-	// Should be delivered by timeout
+	// Should be delivered by poll-interval gating
 	complete := buffer.GetCompleteTransactions()
 	if len(complete) != 1 {
-		t.Errorf("Expected 1 complete transaction by timeout, got %d", len(complete))
+		t.Errorf("Expected 1 complete transaction by poll-interval gating, got %d", len(complete))
 	}
 }
 
@@ -555,7 +555,7 @@ func TestDeliveryReasonMetrics(t *testing.T) {
 	var deliveryReasons []DeliveryReason
 	var mu sync.Mutex
 
-	buffer := NewTransactionBuffer(100*time.Millisecond, 0, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(0, 50*time.Millisecond, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	buffer.SetOnTimeout(func(tx *Transaction, reason DeliveryReason) {
@@ -564,7 +564,7 @@ func TestDeliveryReasonMetrics(t *testing.T) {
 		deliveryReasons = append(deliveryReasons, reason)
 	})
 
-	// Add a change and wait for timeout
+	// Add a change and wait for poll-interval gating
 	buffer.Add(Change{
 		Table:         "dbo.Test",
 		TransactionID: "tx-reason-test",
@@ -572,7 +572,7 @@ func TestDeliveryReasonMetrics(t *testing.T) {
 		Data:          map[string]interface{}{"id": 1},
 	})
 
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond * pollIntervalSafetyMultiplier * 2)
 	buffer.GetCompleteTransactions()
 
 	mu.Lock()
@@ -582,7 +582,7 @@ func TestDeliveryReasonMetrics(t *testing.T) {
 	if len(reasons) != 1 {
 		t.Fatalf("Expected 1 delivery reason, got %d", len(reasons))
 	}
-	if reasons[0] != DeliveryReasonTimeout {
-		t.Errorf("Expected delivery reason %s, got %s", DeliveryReasonTimeout, reasons[0])
+	if reasons[0] != DeliveryReasonPollInterval {
+		t.Errorf("Expected delivery reason %s, got %s", DeliveryReasonPollInterval, reasons[0])
 	}
 }
