@@ -209,9 +209,10 @@ func FilterSinks(sinks []SinkConfig, tableName string) []SinkConfig {
 	if tableName == "" {
 		return sinks
 	}
+	tableNameLower := strings.ToLower(tableName)
 	var filtered []SinkConfig
 	for _, sink := range sinks {
-		if sink.On == "" || sink.On == tableName {
+		if sink.On == "" || strings.ToLower(sink.On) == tableNameLower {
 			filtered = append(filtered, sink)
 		}
 	}
