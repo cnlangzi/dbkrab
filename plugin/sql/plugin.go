@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"gopkg.in/yaml.v3"
 )
 
 // debounceEntry tracks pending debounce state for a single file
@@ -24,53 +24,150 @@ type debounceEntry struct {
 }
 
 // Plugin implements the plugin.Plugin interface for SQL plugins.
-// Each SQL plugin wraps a skill (yaml config + SQL templates) with an execution engine.
+// It manages multiple skills (yaml configs + SQL templates) with a shared execution engine.
 // It supports hot-reloading when skill files change.
 // Sink writing is handled by the platform layer based on the Database field in returned sinks.
 type Plugin struct {
-	name    string
-	loader  *Loader
-	db      *sql.DB // database connection (not atomic, set at init/reload time)
+	name     string
+	db       *sql.DB // database connection (set at init/reload time)
+	engine   *Engine // shared, stateless engine
+	watchDir string
+	Skills   *Skills // thread-safe collection of skills
 
-	skill   atomic.Value // *Skill - atomic, lock-free read in Handle()
-	engine  atomic.Value // *Engine - atomic, lock-free read in Handle()
+	mu sync.RWMutex // only for metadata updates
 
-	mu      sync.RWMutex // only for Reload() and metadata updates
-	metadata PluginMetadata
-
-	// internal watch fields (each plugin watches its own files)
-	watchTicker *time.Ticker
-	watchQuit   chan struct{}
-	watchWg     sync.WaitGroup
-	watchDir    string
+	// internal watch fields
+	watchTicker  *time.Ticker
+	watchQuit    chan struct{}
+	watchWg      sync.WaitGroup
 	watchPending map[string]debounceEntry
 }
 
-// NewPlugin creates a new SQL plugin from a skill.
+// New creates a new SQL plugin that manages multiple skills.
 // Pass db=nil if you need to call AttachDB later.
 // Sink writing is handled by the platform layer - this plugin only handles SQL execution.
-func NewPlugin(name string, skill *Skill, loader *Loader, db *sql.DB) *Plugin {
+func New(path string, db *sql.DB) *Plugin {
 	p := &Plugin{
-		name:   name,
-		loader: loader,
-		db:     db,
-		watchDir:    loader.pluginsDir,
+		name:       "sql",
+		db:         db,
+		watchDir:   path,
+		Skills:     NewSkills(),
 		watchPending: make(map[string]debounceEntry),
 	}
 
-	// Initialize skill and engine atomically
-	p.skill.Store(skill)
-	if db != nil {
-		p.engine.Store(NewEngine(skill, db))
+	// Load all skills from the directory
+	if err := p.loadAllSkills(); err != nil {
+		fmt.Printf("Warning: failed to load initial skills: %v\n", err)
 	}
 
-	// Initialize metadata
-	p.initMetadata(skill)
+	// Initialize engine with first skill (or nil if no skills)
+	skills := p.Skills.List()
+	if db != nil && len(skills) > 0 {
+		p.engine = NewEngine(skills[0], db)
+	} else if db != nil {
+		p.engine = NewEngine(nil, db)
+	}
 
 	return p
 }
 
-// StartWatch starts the internal file watcher for this plugin.
+// loadAllSkills loads all skills from the skills directory.
+func (p *Plugin) loadAllSkills() error {
+	entries, err := os.ReadDir(p.watchDir)
+	if err != nil {
+		return fmt.Errorf("read skills directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yml" {
+			continue
+		}
+
+		filePath := filepath.Join(p.watchDir, entry.Name())
+		skill, err := p.loadSkillFile(filePath)
+		if err != nil {
+			fmt.Printf("Warning: failed to load skill %s: %v\n", entry.Name(), err)
+			continue
+		}
+
+		p.Skills.Set(skill)
+	}
+
+	return nil
+}
+
+// loadSkillFile loads a single skill file and returns the skill.
+func (p *Plugin) loadSkillFile(filePath string) (*Skill, error) {
+	// Read skill file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read skill file: %w", err)
+	}
+
+	// Calculate ID from file path
+	id := hashFile(filePath)
+
+	// Parse YAML
+	var skill Skill
+	if err := yaml.Unmarshal(data, &skill); err != nil {
+		return nil, fmt.Errorf("parse skill file: %w", err)
+	}
+
+	// Set File and Id
+	relPath, err := filepath.Rel(p.watchDir, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("get relative path: %w", err)
+	}
+	skill.File = relPath
+	skill.Id = id
+
+	// Load external SQL files
+	skillDir := filepath.Dir(filePath)
+	if err := loadSkillSQLFiles(&skill, skillDir); err != nil {
+		return nil, err
+	}
+
+	// Validate sinks configuration
+	if err := skill.ValidateSinks(); err != nil {
+		return nil, fmt.Errorf("validate sinks: %w", err)
+	}
+
+	return &skill, nil
+}
+
+// loadSkillSQLFiles loads external SQL files referenced in sinks
+func loadSkillSQLFiles(skill *Skill, skillDir string) error {
+	for i := range skill.Sinks {
+		sink := &skill.Sinks[i]
+		if sink.SQLFile != "" {
+			sqlPath := filepath.Join(skillDir, sink.SQLFile)
+			data, err := os.ReadFile(sqlPath)
+			if err != nil {
+				return fmt.Errorf("read sink SQL file %s: %w", sink.SQLFile, ErrSQLFileNotFound)
+			}
+			sink.SQL = string(data)
+		}
+	}
+	return nil
+}
+
+// calcFileSHA256 calculates SHA256 hash of file content
+func calcFileSHA256(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// StartWatch starts the internal file watcher for skill files.
 func (p *Plugin) StartWatch() {
 	p.watchQuit = make(chan struct{})
 	p.watchTicker = time.NewTicker(1 * time.Second)
@@ -105,83 +202,89 @@ func (p *Plugin) watchLoop() {
 
 // checkChanges checks for file changes and triggers reload after debounce.
 func (p *Plugin) checkChanges() {
-	ymlPath := filepath.Join(p.watchDir, p.name+".yml")
-	sqlFiles := p.getSQLFiles()
-
 	now := time.Now()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Check if yml file was deleted
-	if _, err := os.Stat(ymlPath); os.IsNotExist(err) {
-		// File was deleted - trigger reload which will mark it as stale
-		entry := p.watchPending[ymlPath]
-		entry.debounceAt = now.Add(500 * time.Millisecond)
-		entry.modTime = time.Time{}
-		entry.size = 0
-		p.watchPending[ymlPath] = entry
-	} else {
-		info, err := os.Stat(ymlPath)
-		if err == nil {
-			cur := p.watchPending[ymlPath]
-			if info.ModTime().After(cur.modTime) || info.Size() != cur.size {
-				cur.debounceAt = now.Add(500 * time.Millisecond)
-				cur.modTime = info.ModTime()
-				cur.size = info.Size()
-				p.watchPending[ymlPath] = cur
-			}
+	// Get current file list
+	currentFiles := make(map[string]bool)
+	entries, err := os.ReadDir(p.watchDir)
+	if err != nil {
+		return
+	}
+	// Check for deleted or new files
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yml" {
+			continue
+		}
+		filePath := filepath.Join(p.watchDir, entry.Name())
+		currentFiles[filePath] = true
+
+		info, err := os.Stat(filePath)
+		if err != nil {
+			continue
+		}
+
+		cur := p.watchPending[filePath]
+		if info.ModTime().After(cur.modTime) || info.Size() != cur.size {
+			cur.debounceAt = now.Add(500 * time.Millisecond)
+			cur.modTime = info.ModTime()
+			cur.size = info.Size()
+			p.watchPending[filePath] = cur
 		}
 	}
 
-	// Check SQL files
-	for _, sqlPath := range sqlFiles {
-		if _, err := os.Stat(sqlPath); os.IsNotExist(err) {
-			cur := p.watchPending[sqlPath]
+	// Check for files that no longer exist
+	for filePath := range p.watchPending {
+		relName := filepath.Base(filePath)
+		if !currentFiles[relName] && relName != "" {
+			// File was deleted
+			cur := p.watchPending[filePath]
 			cur.debounceAt = now.Add(500 * time.Millisecond)
 			cur.modTime = time.Time{}
 			cur.size = 0
-			p.watchPending[sqlPath] = cur
-		} else {
-			info, err := os.Stat(sqlPath)
-			if err == nil {
-				cur := p.watchPending[sqlPath]
-				if info.ModTime().After(cur.modTime) || info.Size() != cur.size {
-					cur.debounceAt = now.Add(500 * time.Millisecond)
-					cur.modTime = info.ModTime()
-					cur.size = info.Size()
-					p.watchPending[sqlPath] = cur
-				}
-			}
+			p.watchPending[filePath] = cur
 		}
 	}
 
 	// Check if any debounce has expired
 	for path, entry := range p.watchPending {
 		if !entry.debounceAt.IsZero() && now.After(entry.debounceAt) {
-			// Debounce expired - verify content actually changed
+			// Debounce expired - check if file exists
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				// File was deleted - remove skill
+				entry.debounceAt = time.Time{}
+				p.watchPending[path] = entry
+
+				id := hashFile(path)
+				p.Skills.Delete(id)
+				fmt.Printf("Removed skill: %s\n", path)
+				continue
+			}
+
+			// Verify content actually changed
 			newVersion, err := calcFileSHA256(path)
 			if err != nil {
-				// File might be gone or unreadable, clear debounce
 				entry.debounceAt = time.Time{}
 				p.watchPending[path] = entry
 				continue
 			}
 
 			if newVersion != entry.version {
-				// Content actually changed - trigger reload
+				// Content changed - reload skill
 				entry.version = newVersion
 				entry.debounceAt = time.Time{}
 				p.watchPending[path] = entry
 
-				// Call reload outside the lock to avoid deadlock
-				p.mu.Unlock()
-				if err := p.reload(); err != nil {
-					fmt.Printf("Warning: failed to reload SQL plugin %s: %v\n", p.name, err)
-				} else {
-					fmt.Printf("Reloaded SQL plugin: %s\n", p.name)
+				skill, err := p.loadSkillFile(path)
+				if err != nil {
+					fmt.Printf("Warning: failed to reload skill %s: %v\n", path, err)
+					continue
 				}
-				p.mu.Lock()
+
+				p.Skills.Set(skill)
+				fmt.Printf("Reloaded skill: %s (id: %s)\n", path, skill.Id)
 			} else {
 				// Hash unchanged, clear debounce
 				entry.debounceAt = time.Time{}
@@ -191,269 +294,79 @@ func (p *Plugin) checkChanges() {
 	}
 }
 
-// getSQLFiles returns the list of SQL files referenced by this plugin's skill.
-func (p *Plugin) getSQLFiles() []string {
-	skill := p.skill.Load().(*Skill)
-	if skill == nil {
-		return nil
-	}
-
-	var sqlFiles []string
-	seen := make(map[string]bool)
-
-	for _, sink := range skill.Sinks {
-		if sink.SQLFile != "" {
-			sqlPath := filepath.Join(p.watchDir, sink.SQLFile)
-			if !seen[sqlPath] {
-				sqlFiles = append(sqlFiles, sqlPath)
-				seen[sqlPath] = true
-			}
-		}
-	}
-
-	return sqlFiles
-}
-
-// initMetadata initializes plugin metadata from a skill
-func (p *Plugin) initMetadata(skill *Skill) {
-	p.metadata = PluginMetadata{
-		Name:        p.name,
-		Type:        "sql",
-		Status:      "loaded",
-		NeedsReload: false,
-		LoadCount:   1,
-		Files:       make(map[string]FileMetadata),
-	}
-
-	// Track the main .yml file
-	ymlPath := filepath.Join(p.loader.pluginsDir, p.name+".yml")
-	if info, err := os.Stat(ymlPath); err == nil {
-		version, _ := calcFileSHA256(ymlPath)
-		p.metadata.Files[ymlPath] = FileMetadata{
-			Path:        ymlPath,
-			IsSQL:       false,
-			CurVersion:  version,
-			CurModTime:  info.ModTime(),
-			CurSize:     info.Size(),
-			CurLoadedAt: time.Now(),
-			NeedsReload: false,
-			IsDeleted:   false,
-		}
-	}
-
-	// Track referenced .sql files
-	if skill != nil {
-		p.trackSQLFiles(skill)
-	}
-}
-
-// trackSQLFiles adds metadata for SQL files referenced in the skill
-func (p *Plugin) trackSQLFiles(skill *Skill) {
-	skillDir := p.loader.pluginsDir
-
-	for _, sink := range skill.Sinks {
-		if sink.SQLFile != "" {
-			sqlPath := filepath.Join(skillDir, sink.SQLFile)
-			p.addSQLFileMetadata(sqlPath)
-		}
-	}
-}
-
-// addSQLFileMetadata adds metadata for a single SQL file
-func (p *Plugin) addSQLFileMetadata(sqlPath string) {
-	if _, exists := p.metadata.Files[sqlPath]; exists {
-		return // already tracked
-	}
-
-	if info, err := os.Stat(sqlPath); err == nil {
-		version, _ := calcFileSHA256(sqlPath)
-		p.metadata.Files[sqlPath] = FileMetadata{
-			Path:        sqlPath,
-			IsSQL:       true,
-			CurVersion:  version,
-			CurModTime:  info.ModTime(),
-			CurSize:     info.Size(),
-			CurLoadedAt: time.Now(),
-			NeedsReload: false,
-			IsDeleted:   false,
-		}
-	}
-}
-
 // AttachDB sets the database connection for this plugin's engine.
 func (p *Plugin) AttachDB(db *sql.DB) {
 	p.db = db
 
-	skill := p.skill.Load().(*Skill)
-	if skill != nil && db != nil {
-		p.engine.Store(NewEngine(skill, db))
+	if db != nil {
+		skills := p.Skills.List()
+		if len(skills) > 0 {
+			p.engine = NewEngine(skills[0], db)
+		} else {
+			p.engine = NewEngine(nil, db)
+		}
 	}
 }
 
 // Name implements plugin.Plugin
 func (p *Plugin) Name() string { return p.name }
 
-// YamlName returns the skill's Name field from YAML (may differ from file path)
-func (p *Plugin) YamlName() string {
-	return p.skill.Load().(*Skill).Name
-}
-
-// SkillId returns the skill's unique ID (SHA256 of file path, 12 chars)
-func (p *Plugin) SkillId() string {
-	return p.skill.Load().(*Skill).Id
-}
-
-// SkillFile returns the skill's file path relative to plugins directory
-func (p *Plugin) SkillFile() string {
-	return p.skill.Load().(*Skill).File
-}
-
 // Type implements plugin.Plugin
 func (p *Plugin) Type() string { return "sql" }
 
-// Status returns the current plugin status
-func (p *Plugin) Status() string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.metadata.Status
-}
-
-// Metadata returns a copy of the plugin metadata
-func (p *Plugin) Metadata() PluginMetadata {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.metadata
-}
-
-// reload reloads the plugin from disk (internal, called by watchLoop).
-func (p *Plugin) reload() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	ymlPath := filepath.Join(p.loader.pluginsDir, p.name+".yml")
-
-	// Check if main file was deleted
-	if _, err := os.Stat(ymlPath); os.IsNotExist(err) {
-		p.metadata.Status = "stale"
-		if existing, ok := p.metadata.Files[ymlPath]; ok {
-			p.metadata.Files[ymlPath] = FileMetadata{
-				Path:        ymlPath,
-				IsSQL:       false,
-				CurVersion:  existing.CurVersion,
-				NeedsReload: false,
-				IsDeleted:   true,
-			}
-		}
-		return fmt.Errorf("skill file deleted: %s", ymlPath)
-	}
-
-	newSkill, err := p.loader.Load(p.name)
-	if err != nil {
-		p.metadata.Status = "error"
-		p.metadata.LastError = err.Error()
-		return fmt.Errorf("failed to reload skill %s: %w", p.name, err)
-	}
-
-	curVersion := ""
-	if existing, ok := p.metadata.Files[ymlPath]; ok {
-		curVersion = existing.CurVersion
-	}
-	newVersion, err := calcFileSHA256(ymlPath)
-	if err != nil {
-		p.metadata.Status = "error"
-		p.metadata.LastError = fmt.Sprintf("failed to hash file: %v", err)
-		return err
-	}
-
-	if newVersion == curVersion {
-		p.metadata.Status = "loaded"
-		p.metadata.NeedsReload = false
-		if existing, ok := p.metadata.Files[ymlPath]; ok {
-			existing.NewVersion = ""
-			existing.NeedsReload = false
-			p.metadata.Files[ymlPath] = existing
-		}
-		return nil
-	}
-
-	info, _ := os.Stat(ymlPath)
-	var modTime time.Time
-	var size int64
-	if info != nil {
-		modTime = info.ModTime()
-		size = info.Size()
-	}
-	p.metadata.Files[ymlPath] = FileMetadata{
-		Path:         ymlPath,
-		IsSQL:        false,
-		CurVersion:   newVersion,
-		CurModTime:   modTime,
-		CurSize:      size,
-		CurLoadedAt:  time.Now(),
-		NewVersion:   "",
-		NeedsReload:  false,
-		IsDeleted:    false,
-	}
-
-	p.trackSQLFiles(newSkill)
-	p.skill.Store(newSkill)
-
-	if p.db != nil {
-		p.engine.Store(NewEngine(newSkill, p.db))
-	}
-
-	p.metadata.Status = "loaded"
-	p.metadata.NeedsReload = false
-	p.metadata.LastError = ""
-	p.metadata.LoadCount++
-
-	return nil
-}
-
 // Stop implements plugin.Plugin
 func (p *Plugin) Stop() error {
-	// Stop internal watcher
 	p.StopWatch()
 	return nil
 }
 
-// Handle processes a CDC transaction through this SQL plugin.
-// Uses atomic.Value for lock-free read of skill and engine.
-// Returns []core.Sink with Database field set for platform layer to route.
-// The caller (platform layer) is responsible for routing sinks to appropriate SinkWriters.
+// matchTable checks if a skill matches the given table name.
+// A skill matches if its "on" list contains the table, or if "on" is empty (matches all).
+func (p *Plugin) matchTable(skill *Skill, table string) bool {
+	if len(skill.On) == 0 {
+		return true
+	}
+	for _, t := range skill.On {
+		if t == table {
+			return true
+		}
+	}
+	return false
+}
+
+// Handle processes a CDC transaction through all SQL skills.
+// It iterates over all skills, checks if they match the transaction table,
+// and executes the engine for each matching skill.
 func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
-	skill := p.skill.Load().(*Skill) // atomic.Value, lock-free read
-	if skill == nil {
-		return nil, fmt.Errorf("skill not loaded")
+	if tx == nil || len(tx.Changes) == 0 {
+		return nil, nil
 	}
 
-	engine := p.engine.Load().(*Engine) // atomic.Value, lock-free read
-	if engine == nil {
+	if p.engine == nil {
 		return nil, fmt.Errorf("engine not initialized, call AttachDB first")
 	}
 
-	// Execute transformation - returns sinks with Database field set
-	ops, err := engine.Handle(tx)
-	if err != nil {
-		return nil, err
+	var allSinks []core.Sink
+
+	// Get table from first change (all changes in a tx are for the same table)
+	var table string
+	if len(tx.Changes) > 0 {
+		table = tx.Changes[0].Table
 	}
 
-	return ops, nil
-}
+	// Iterate over all skills
+	for _, skill := range p.Skills.List() { // internal RLock
+		if !p.matchTable(skill, table) {
+			continue
+		}
 
-// calcFileSHA256 calculates SHA256 hash of file content
-func calcFileSHA256(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	//nolint:errcheck
-	defer file.Close()
+		sinks, err := p.engine.HandleWithSkill(tx, skill)
+		if err != nil {
+			return nil, fmt.Errorf("skill %s handle: %w", skill.Name, err)
+		}
 
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
+		allSinks = append(allSinks, sinks...)
 	}
 
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return allSinks, nil
 }

@@ -11,8 +11,9 @@ import (
 )
 
 // Engine is the SQL Plugin execution engine
-// It transforms CDC changes into DataSets through Sinks
-// The caller (e.g., SQLite Sink) is responsible for writing the DataSets
+// It is stateless and shared across all skills.
+// The caller is responsible for setting the current skill via HandleWithSkill
+// or by setting e.skill directly before calling Handle.
 type Engine struct {
 	skill    *Skill
 	executor *Executor // MSSQL executor for SQL execution
@@ -24,6 +25,15 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 		skill:    skill,
 		executor: NewExecutorWithDriver(mssqlDB, DriverMSSQL),
 	}
+}
+
+// HandleWithSkill executes the engine with a specific skill, then restores the original skill.
+// This allows the engine to be stateless and shared across all skills.
+func (e *Engine) HandleWithSkill(tx *core.Transaction, skill *Skill) ([]core.Sink, error) {
+	original := e.skill
+	e.skill = skill
+	defer func() { e.skill = original }()
+	return e.Handle(tx)
 }
 
 // Handle processes a core.Transaction through the SQL Plugin
