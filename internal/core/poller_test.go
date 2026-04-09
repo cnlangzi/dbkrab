@@ -114,7 +114,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 func TestCrossTableTransactionIntegrity(t *testing.T) {
 	// Enable transaction buffer
 	maxWaitTime := 100 * time.Millisecond
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(maxWaitTime, 0, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Simulate a transaction spanning 3 tables
@@ -178,7 +178,7 @@ func TestCrossTableTransactionIntegrity(t *testing.T) {
 // TestTransactionBufferTimeout verifies that incomplete transactions are delivered after timeout
 func TestTransactionBufferTimeout(t *testing.T) {
 	maxWaitTime := 50 * time.Millisecond
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(maxWaitTime, 0, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add a single change (incomplete transaction)
@@ -208,7 +208,7 @@ func TestTransactionBufferTimeout(t *testing.T) {
 // TestConcurrentTransactionBufferAccess verifies thread safety of transaction buffer
 func TestConcurrentTransactionBufferAccess(t *testing.T) {
 	maxWaitTime := 1 * time.Second
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(maxWaitTime, 0, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	var wg sync.WaitGroup
