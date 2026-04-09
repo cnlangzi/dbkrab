@@ -11,7 +11,23 @@ import (
 	"strings"
 )
 
-// numericPattern matches numeric strings (integers, decimals, scientific notation)
+// convertCommitTime reinterprets MSSQL driver's "UTC" time as SQL Server's local timezone
+// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
+// The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
+// but Go driver incorrectly treats it as UTC.
+// We reinterpret it using the configured timezone and convert to UTC for storage.
+func convertCommitTime(driverTime time.Time, timezone *time.Location) time.Time {
+	if timezone == nil || timezone == time.Local {
+		// No timezone configured - use driver's value as-is
+		return driverTime.UTC()
+	}
+	// Reinterpret driver's "UTC" time as SQL Server's local timezone, then convert to UTC
+	return time.Date(
+		driverTime.Year(), driverTime.Month(), driverTime.Day(),
+		driverTime.Hour(), driverTime.Minute(), driverTime.Second(), driverTime.Nanosecond(),
+		timezone,
+	).UTC()
+}
 // Examples: "123", "999.99", "700.0000", "-123.45", "1.23e10"
 var numericPattern = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][+-]?\d+)?$`)
 
@@ -30,12 +46,18 @@ type Change struct {
 
 // Querier handles CDC queries against MSSQL
 type Querier struct {
-	db *sql.DB
+	db       *sql.DB
+	timezone *time.Location // SQL Server timezone for CDC timestamp conversion
 }
 
 // NewQuerier creates a new CDC querier
-func NewQuerier(db *sql.DB) *Querier {
-	return &Querier{db: db}
+// timezone should be the SQL Server's timezone (e.g., Asia/Shanghai for UTC+8)
+// If timezone is nil, defaults to time.Local
+func NewQuerier(db *sql.DB, timezone *time.Location) *Querier {
+	if timezone == nil {
+		timezone = time.Local
+	}
+	return &Querier{db: db, timezone: timezone}
 }
 
 // GetMinLSN returns the minimum LSN for a capture instance
@@ -146,13 +168,19 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, fromLS
 		}
 
 		// Get commit time from LSN
+		// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
+		// The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
+		// but Go driver incorrectly treats it as UTC.
+		// We reinterpret it using the configured timezone.
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
 			switch v := values[idx].(type) {
 			case time.Time:
-				commitTime = v
+				commitTime = convertCommitTime(v, q.timezone)
 			case string:
-				commitTime, _ = time.Parse(time.RFC3339Nano, v)
+				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
+					commitTime = convertCommitTime(parsed, q.timezone)
+				}
 			}
 		}
 

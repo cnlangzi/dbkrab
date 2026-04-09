@@ -13,7 +13,10 @@ mssql:
   user: sa                 # Username
   password: your_password  # Password
   database: your_database  # Database name
-  timezone: UTC            # Timezone for datetime conversion (e.g., UTC, Local, Asia/Shanghai)
+  # SQL Server timezone for CDC timestamp conversion
+  # MSSQL datetime type has no timezone info, so we need to specify it
+  # Supports IANA names (e.g., "Asia/Shanghai") or UTC offsets (e.g., "UTC+8")
+  timezone: ""  # Empty = use local timezone
 
 # -----------------------------------------------------------------------------
 # CDC Monitored Tables
