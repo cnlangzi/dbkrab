@@ -1,6 +1,6 @@
 # Flow Tests
 
-Component-level flow tests for the Poller->Handler->SinkWriter pipeline.
+Component-level flow tests for the Poller->Handler->Sinker pipeline.
 
 ## Running Tests
 
@@ -10,17 +10,17 @@ go test -v ./tests/flow
 
 ## Test Coverage
 
-1. **TestFlow_SingleTable_SingleTransaction** - Single INSERT Change: assert Handler called, sink writer wrote correct row, store.Write called, offsets.Set advanced.
+1. **TestFlow_SingleTable_SingleTransaction** - Single INSERT Change: assert Handler called, sinker wrote correct row, store.Write called, offsets.Set advanced.
 
-2. **TestFlow_SingleTable_MultipleOperations** - Single transaction with INSERT+UPDATE+DELETE: assert correct grouping and ordered Sink ops.
+2. **TestFlow_SingleTable_MultipleOperations** - Single transaction with INSERT+UPDATE+DELETE: assert correct grouping and ordered Sinker ops.
 
-3. **TestFlow_CrossTableTransaction** - One transaction spanning three tables (Orders, OrderItems, Inventory): assert one Transaction contains all 3 Changes and sinkwriter routes by database.
+3. **TestFlow_CrossTableTransaction** - One transaction spanning three tables (Orders, OrderItems, Inventory): assert one Transaction contains all 3 Changes and sinker routes by database.
 
-4. **TestFlow_ExactlyOnce_SinkFailure** - Sink writer returns error: assert offsets are NOT advanced and failure is propagated/observable.
+4. **TestFlow_ExactlyOnce_SinkFailure** - Sinker returns error: assert offsets are NOT advanced and failure is propagated/observable.
 
-5. **TestFlow_HandlerFailure_NonBlocking** - Handler returns error: assert sinkwriter still executes for sinks produced, store.Write and offsets.Set still advance as designed.
+5. **TestFlow_HandlerFailure_NonBlocking** - Handler returns error: assert sinker still executes for sinks produced, store.Write and offsets.Set still advance as designed.
 
-6. **TestFlow_MultiDatabaseRouting** - A transaction producing sinks for two databases: assert Manager creates two writers and both write to their respective DBs.
+6. **TestFlow_MultiDatabaseRouting** - A transaction producing sinks for two databases: assert Manager creates two sinkers and both write to their respective DBs.
 
 ## Test Fixtures
 
