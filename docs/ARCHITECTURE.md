@@ -97,7 +97,6 @@ dbkrab/
 │   ├── dashboard/        # HTMX dashboard
 │   └── skills.go         # Skills CRUD API
 ├── skills/               # Skill definitions (YAML)
-├── sink/sqlite/          # System SQLite (offset, DLQ)
 └── data/                 # Data directory
     ├── system/           # System DB (offset, DLQ)
     └── sinks/            # Per-skill SQLite databases
