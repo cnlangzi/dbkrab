@@ -74,7 +74,7 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 }
 
 func (s *Sinker) writeOp(ctx context.Context, tx *sql.Tx, op core.Sink) error {
-	config := core.TableConfig{
+	config := sqliteutil.TableConfig{
 		Output:     op.Config.Output,
 		PrimaryKey: op.Config.PrimaryKey,
 		OnConflict: op.Config.OnConflict,
