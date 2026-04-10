@@ -58,5 +58,4 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.3.0
-          args: --timeout=5m --disable=staticcheck
+          args: --timeout=5m
