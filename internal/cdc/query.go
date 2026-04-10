@@ -1,35 +1,14 @@
 package cdc
 
 import (
-	"time"
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 )
-
-// convertCommitTime reinterprets MSSQL driver's "UTC" time as SQL Server's local timezone
-// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
-// The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
-// but Go driver incorrectly treats it as UTC.
-// We reinterpret it using the configured timezone and convert to UTC for storage.
-func convertCommitTime(driverTime time.Time, timezone *time.Location) time.Time {
-	if timezone == nil || timezone == time.Local {
-		// No timezone configured - use driver's value as-is
-		return driverTime.UTC()
-	}
-	// Reinterpret driver's "UTC" time as SQL Server's local timezone, then convert to UTC
-	return time.Date(
-		driverTime.Year(), driverTime.Month(), driverTime.Day(),
-		driverTime.Hour(), driverTime.Minute(), driverTime.Second(), driverTime.Nanosecond(),
-		timezone,
-	).UTC()
-}
-// Examples: "123", "999.99", "700.0000", "-123.45", "1.23e10"
-var numericPattern = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][+-]?\d+)?$`)
 
 // validCaptureInstance validates capture instance name to prevent SQL injection
 var validCaptureInstance = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
@@ -46,8 +25,9 @@ type Change struct {
 
 // Querier handles CDC queries against MSSQL
 type Querier struct {
-	db       *sql.DB
-	timezone *time.Location // SQL Server timezone for CDC timestamp conversion
+	db        *sql.DB
+	timezone  *time.Location // SQL Server timezone for CDC timestamp conversion
+	factory   *ScannerFactory
 }
 
 // NewQuerier creates a new CDC querier
@@ -57,7 +37,11 @@ func NewQuerier(db *sql.DB, timezone *time.Location) *Querier {
 	if timezone == nil {
 		timezone = time.Local
 	}
-	return &Querier{db: db, timezone: timezone}
+	return &Querier{
+		db:        db,
+		timezone:  timezone,
+		factory:   NewScannerFactory(timezone),
+	}
 }
 
 // GetMinLSN returns the minimum LSN for a capture instance
@@ -122,72 +106,91 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		}
 	}()
 
-	// Get column names
+	// Get column names and types
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("get columns: %w", err)
 	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("get column types: %w", err)
+	}
+
+	// Create column index map for metadata extraction
+	colIndex := make(map[string]int)
+	for i, col := range columns {
+		colIndex[col] = i
+	}
+
+	// Create typed dest slice using ScannerFactory
+	dest := q.factory.CreateDest(columns, colTypes)
 
 	var changes []Change
 	for rows.Next() {
-		// Create values slice for scanning
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
 
-		// Extract CDC metadata by column name
-		colIndex := make(map[string]int)
-		for i, col := range columns {
-			colIndex[col] = i
-		}
-
-		// Get LSN
+		// Extract LSN
 		var lsn []byte
 		if idx, ok := colIndex["__$start_lsn"]; ok {
-			lsn, _ = values[idx].([]byte)
-		}
-
-		// Get transaction ID
-		var txID string
-		if idx, ok := colIndex["__$transaction_id"]; ok {
-			if txBytes, ok := values[idx].([]byte); ok && len(txBytes) > 0 {
-				txID = formatMSSQLGUID(txBytes)
-			} else {
-				txID = fmt.Sprintf("%v", values[idx])
-			}
-		}
-
-		// Get operation (MSSQL returns int64)
-		var op int64
-		if idx, ok := colIndex["__$operation"]; ok {
-			op, _ = values[idx].(int64)
-		}
-
-		// Get commit time from LSN
-		// MSSQL sys.fn_cdc_map_lsn_to_time() returns datetime without timezone info.
-		// The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
-		// but Go driver incorrectly treats it as UTC.
-		// We reinterpret it using the configured timezone.
-		var commitTime time.Time
-		if idx, ok := colIndex["__$commit_time"]; ok {
-			switch v := values[idx].(type) {
-			case time.Time:
-				commitTime = convertCommitTime(v, q.timezone)
-			case string:
-				// Parse string and reinterpret timezone
-				if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
-					commitTime = convertCommitTime(parsed, q.timezone)
+			if scanner, ok := dest[idx].(Scanner); ok {
+				if val, err := scanner.Value(); err == nil && val != nil {
+					if b, ok := val.([]byte); ok {
+						lsn = b
+					}
 				}
 			}
 		}
 
-		// Build data map from all columns (including metadata for completeness)
+		// Extract transaction ID
+		var txID string
+		if idx, ok := colIndex["__$transaction_id"]; ok {
+			if scanner, ok := dest[idx].(Scanner); ok {
+				if val, err := scanner.Value(); err == nil && val != nil {
+					switch v := val.(type) {
+					case string:
+						txID = v
+					case []byte:
+						txID = FormatMSSQLGUID(v)
+					default:
+						txID = fmt.Sprintf("%v", v)
+					}
+				}
+			}
+		}
+
+		// Extract operation
+		var op int64
+		if idx, ok := colIndex["__$operation"]; ok {
+			if scanner, ok := dest[idx].(Scanner); ok {
+				if val, err := scanner.Value(); err == nil && val != nil {
+					switch v := val.(type) {
+					case int64:
+						op = v
+					case int32:
+						op = int64(v)
+					default:
+						// Try to parse from other numeric types
+						fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &op)
+					}
+				}
+			}
+		}
+
+		// Extract commit time
+		var commitTime time.Time
+		if idx, ok := colIndex["__$commit_time"]; ok {
+			if scanner, ok := dest[idx].(Scanner); ok {
+				if val, err := scanner.Value(); err == nil && val != nil {
+					if t, ok := val.(time.Time); ok {
+						commitTime = t
+					}
+				}
+			}
+		}
+
+		// Build data map from non-metadata columns
 		data := make(map[string]interface{})
 		for i, col := range columns {
 			// Skip CDC metadata columns for data map
@@ -195,12 +198,11 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 				continue
 			}
 
-			// Convert MSSQL numeric bytes to string to avoid Base64 encoding in JSON
-			// MSSQL driver returns DECIMAL/NUMERIC as []byte which gets Base64 encoded
-			val := convertMSSQLValue(values[i])
-
-			// Convert column name to lowercase for consistency
-			data[strings.ToLower(col)] = val
+			if scanner, ok := dest[i].(Scanner); ok {
+				if val, err := scanner.Value(); err == nil {
+					data[strings.ToLower(col)] = val
+				}
+			}
 		}
 
 		// Extract original table name from captureInstance (format: schema_table)
@@ -255,53 +257,4 @@ func ParseTableName(fullName string) (schema, table string) {
 // CaptureInstanceName returns the CDC capture instance name
 func CaptureInstanceName(schema, table string) string {
 	return schema + "_" + table
-}
-
-// formatMSSQLGUID formats a 16-byte MSSQL GUID to standard string format
-// MSSQL uniqueidentifier is stored with mixed byte order:
-// - First 4 bytes: little-endian
-// - Next 2 bytes: little-endian
-// - Next 2 bytes: little-endian
-// - Last 8 bytes: big-endian
-// This function returns the canonical GUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-func formatMSSQLGUID(b []byte) string {
-	if len(b) != 16 {
-		// Not a valid GUID, return hex encoding
-		return hex.EncodeToString(b)
-	}
-
-	// MSSQL GUID byte order: 3-2-1-0, 5-4, 7-6, 8-9-10-11-12-13-14-15
-	// (first 3 groups are little-endian, last group is big-endian)
-	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x%02x%02x",
-		b[3], b[2], b[1], b[0], // First 4 bytes (LE)
-		b[5], b[4],             // Next 2 bytes (LE)
-		b[7], b[6],             // Next 2 bytes (LE)
-		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15], // Last 8 bytes (BE)
-	)
-}
-
-// convertMSSQLValue converts MSSQL driver returned values to appropriate types
-// MSSQL driver returns DECIMAL/NUMERIC/FLOAT as []byte which would be Base64 encoded in JSON
-// This function converts numeric []byte to string to preserve precision
-func convertMSSQLValue(val interface{}) interface{} {
-	// Check if value is []byte
-	bytesVal, ok := val.([]byte)
-	if !ok {
-		// Not []byte, return as-is (string, int64, nil, etc.)
-		return val
-	}
-
-	// Convert []byte to string
-	strVal := string(bytesVal)
-
-	// Check if it looks like a numeric value
-	if numericPattern.MatchString(strVal) {
-		// It's a numeric string, return as string to preserve precision
-		// Example: "999.99", "700.0000", "824.000"
-		return strVal
-	}
-
-	// Not numeric, return original []byte
-	// (could be GUID, binary data, etc. which will be Base64 encoded as intended)
-	return bytesVal
 }
