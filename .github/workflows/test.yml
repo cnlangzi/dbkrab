@@ -42,7 +42,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     env:
-      GOLANGCI_JOBS: 4  # Parallel on CI (has more memory)
+      GOLANGCI_JOBS: 8  # More parallelism on CI (more memory)
 
     steps:
       - name: Checkout code
