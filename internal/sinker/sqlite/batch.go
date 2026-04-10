@@ -113,7 +113,7 @@ func NewBatchSQLiteSink(config BatchConfig) (*BatchSQLiteSink, error) {
 	}
 
 	s := &BatchSQLiteSink{
-		config:    config,
+		config:   config,
 		database: config.Sinker.DatabaseName(),
 		buffer:   make([]core.Sink, 0, config.BatchSize),
 		txBuffer: make(map[string]*core.Transaction),

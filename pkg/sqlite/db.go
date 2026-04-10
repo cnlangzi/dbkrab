@@ -121,10 +121,10 @@ func NewFile(ctx context.Context, file string, moduleName string, migrations fs.
 	}
 
 	return New(ctx, Config{
-		File:        file,
-		InMemory:    false,
-		ModuleName:  moduleName,
-		FS:          migrations,
+		File:       file,
+		InMemory:   false,
+		ModuleName: moduleName,
+		FS:         migrations,
 	})
 }
 

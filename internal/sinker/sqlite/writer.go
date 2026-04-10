@@ -15,9 +15,9 @@ import (
 
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
-	name  string
-	db    *pkgSqlite.DB
-	mu    sync.Mutex
+	name   string
+	db     *pkgSqlite.DB
+	mu     sync.Mutex
 	closed bool
 }
 
