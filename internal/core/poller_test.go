@@ -112,9 +112,10 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 
 // TestCrossTableTransactionIntegrity verifies that cross-table transactions are delivered completely
 func TestCrossTableTransactionIntegrity(t *testing.T) {
-	// Enable transaction buffer
-	maxWaitTime := 100 * time.Millisecond
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	// Enable transaction buffer with poll-interval gating (no maxWaitTime)
+	maxWaitTime := 0 * time.Millisecond // No timeout
+	pollInterval := 50 * time.Millisecond
+	buffer := NewTransactionBuffer(maxWaitTime, pollInterval, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Simulate a transaction spanning 3 tables
@@ -144,10 +145,10 @@ func TestCrossTableTransactionIntegrity(t *testing.T) {
 		Data:          map[string]interface{}{"quantity": 10},
 	})
 
-	// Wait for timeout (transaction should be delivered as incomplete)
-	time.Sleep(maxWaitTime * 2)
+	// Wait for poll-interval gating (2x safety multiplier)
+	time.Sleep(pollInterval * pollIntervalSafetyMultiplier * 2)
 
-	// Get complete (timed out) transactions
+	// Get complete (poll-interval gated) transactions
 	completeTxs := buffer.GetCompleteTransactions()
 
 	if len(completeTxs) != 1 {
@@ -177,8 +178,10 @@ func TestCrossTableTransactionIntegrity(t *testing.T) {
 
 // TestTransactionBufferTimeout verifies that incomplete transactions are delivered after timeout
 func TestTransactionBufferTimeout(t *testing.T) {
-	maxWaitTime := 50 * time.Millisecond
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	// No timeout - use poll-interval gating instead
+	maxWaitTime := 0 * time.Millisecond
+	pollInterval := 50 * time.Millisecond
+	buffer := NewTransactionBuffer(maxWaitTime, pollInterval, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	// Add a single change (incomplete transaction)
@@ -195,20 +198,20 @@ func TestTransactionBufferTimeout(t *testing.T) {
 		t.Errorf("Expected no complete transactions initially, got %d", len(complete))
 	}
 
-	// Wait for timeout
-	time.Sleep(maxWaitTime * 2)
+	// Wait for poll-interval gating (2x safety multiplier)
+	time.Sleep(pollInterval * pollIntervalSafetyMultiplier * 2)
 
-	// Now the transaction should be delivered (timed out)
+	// Now the transaction should be delivered (poll-interval gated)
 	complete = buffer.GetCompleteTransactions()
 	if len(complete) != 1 {
-		t.Errorf("Expected 1 timed-out transaction, got %d", len(complete))
+		t.Errorf("Expected 1 poll-interval-gated transaction, got %d", len(complete))
 	}
 }
 
 // TestConcurrentTransactionBufferAccess verifies thread safety of transaction buffer
 func TestConcurrentTransactionBufferAccess(t *testing.T) {
 	maxWaitTime := 1 * time.Second
-	buffer := NewTransactionBuffer(maxWaitTime, 1000, 10*1024*1024)
+	buffer := NewTransactionBuffer(maxWaitTime, 0, 1000, 10*1024*1024)
 	defer buffer.Close()
 
 	var wg sync.WaitGroup

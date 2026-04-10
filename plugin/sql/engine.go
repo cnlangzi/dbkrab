@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -50,9 +51,17 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 	// Process each change (row) individually
 	for _, change := range tx.Changes {
+		slog.Debug("Engine.Handle: processing change",
+			"table", change.Table,
+			"operation", change.Operation.String(),
+			"tx_id", tx.ID)
+
 		// Get corresponding job type for this operation
 		sinkType := e.operationToSinkType(change.Operation)
 		if sinkType == 0 {
+			slog.Warn("Engine.Handle: skipping unknown operation",
+				"operation", change.Operation,
+				"table", change.Table)
 			continue // Skip unknown operations (e.g., UpdateBefore)
 		}
 
@@ -63,21 +72,51 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		}
 
 		// Get sinks for this operation using FilterByOperation
-		sinkConfigs := e.skill.FilterByOperation(Operation(sinkType))
+		sinkConfigs := e.skill.FilterByOperation(sinkType)
+		slog.Debug("Engine.Handle: sink filtering",
+			"skill", e.skill.Name,
+			"sinkType", sinkType,
+			"matched_sinks", len(sinkConfigs))
+
 		if len(sinkConfigs) > 0 {
 			sinkParams := e.cdcParamsToMap(cdcParams)
 
-			// Filter sinks by table and execute
+			// Filter sinks by table and evaluate 'if' conditions
 			for _, sinkCfg := range sinkConfigs {
-				if sinkCfg.On != "" && sinkCfg.On != change.Table {
+				if sinkCfg.On != "" && strings.ToLower(sinkCfg.On) != strings.ToLower(change.Table) {
+					slog.Debug("Engine.Handle: sink table mismatch",
+						"sink", sinkCfg.Name,
+						"sink.On", sinkCfg.On,
+						"change.Table", change.Table)
 					continue
 				}
+
+				// Evaluate 'if' condition if present
+				if !sinkCfg.EvalIf(cdcParams) {
+					slog.Debug("Engine.Handle: sink 'if' condition evaluated to false",
+						"sink", sinkCfg.Name,
+						"if", sinkCfg.If)
+					continue
+				}
+
+				slog.Debug("Engine.Handle: executing sink SQL",
+					"sink", sinkCfg.Name,
+					"output", sinkCfg.Output,
+					"param_count", len(sinkParams))
 
 				// Execute sink SQL against MSSQL
 				ds, err := e.executor.ExecuteDriver(sinkCfg.SQL, sinkParams)
 				if err != nil {
+					slog.Error("Engine.Handle: sink SQL execution failed",
+						"sink", sinkCfg.Name,
+						"error", err)
 					return nil, fmt.Errorf("execute sink %s: %w", sinkCfg.Name, err)
 				}
+
+				slog.Debug("Engine.Handle: sink SQL executed successfully",
+					"sink", sinkCfg.Name,
+					"rows", len(ds.Rows),
+					"columns", len(ds.Columns))
 
 				// Collect sink operation
 				sinkOp := core.Sink{
@@ -89,10 +128,15 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 						OnConflict: sinkCfg.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  sinkType,
+					OpType:  core.Operation(sinkType),
 				}
 				allOps = append(allOps, sinkOp)
 			}
+		} else {
+			slog.Warn("Engine.Handle: no sinks matched operation",
+				"skill", e.skill.Name,
+				"sinkType", sinkType,
+				"table", change.Table)
 		}
 	}
 
@@ -122,7 +166,7 @@ func mergeSinks(sinks []core.Sink) []core.Sink {
 			continue // Skip empty datasets
 		}
 		key := sinkKey{
-			table:  sink.Config.Output,
+			table:  strings.ToLower(sink.Config.Output),
 			pk:     sink.Config.PrimaryKey,
 			opType: sink.OpType,
 		}
@@ -276,15 +320,28 @@ func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 		Fields:       make(map[string]interface{}),
 	}
 
-	// Add all data fields with table prefix
-	shortTable := shortTableName(change.Table)
+	// Add all data fields with table prefix (lowercase for consistency)
+	shortTable := strings.ToLower(shortTableName(change.Table))
+	slog.Debug("Engine.buildCDCParams: mapping fields",
+		"table", change.Table,
+		"shortTable", shortTable,
+		"data_fields", len(change.Data))
+
 	for k, v := range change.Data {
-		params.Fields[fmt.Sprintf("%s_%s", shortTable, k)] = v
+		fieldName := fmt.Sprintf("%s_%s", shortTable, strings.ToLower(k))
+		params.Fields[fieldName] = v
+		slog.Debug("Engine.buildCDCParams: field mapped",
+			"original", k,
+			"mapped", fieldName)
 	}
 
 	// Add id field if exists
 	if id, ok := change.Data["id"]; ok {
-		params.Fields[shortTable+"_id"] = id
+		fieldName := shortTable + "_id"
+		params.Fields[fieldName] = id
+		slog.Debug("Engine.buildCDCParams: id field mapped",
+			"field", fieldName,
+			"value", id)
 	}
 
 	return params, nil
@@ -303,16 +360,16 @@ func (e *Engine) cdcParamsToMap(params CDCParameters) map[string]interface{} {
 	return m
 }
 
-// operationToSinkType converts core.Operation to core.Operation
+// operationToSinkType converts core.Operation to sql.Operation
 // Returns 0 for unknown operations (e.g., UpdateBefore) which indicates skip
-func (e *Engine) operationToSinkType(op core.Operation) core.Operation {
+func (e *Engine) operationToSinkType(op core.Operation) Operation {
 	switch op {
 	case core.OpInsert:
-		return core.OpInsert
+		return Insert
 	case core.OpUpdateAfter:
-		return core.OpUpdateAfter
+		return Update // Map core.OpUpdateAfter (4) to sql.Update (2) for sink filtering
 	case core.OpDelete:
-		return core.OpDelete
+		return Delete
 	default:
 		return 0 // 0 is not valid, indicates skip
 	}

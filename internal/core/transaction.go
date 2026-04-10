@@ -45,10 +45,13 @@ type Change struct {
 
 // Transaction represents a group of changes in the same transaction
 type Transaction struct {
-	TraceID  string      `json:"trace_id"` // Human-readable trace ID for log correlation
-	ID      string      `json:"id"`      // Internal transaction ID
-	Changes []Change   `json:"changes"`
-	CreatedAt time.Time `json:"created_at"`
+	TraceID        string      `json:"trace_id"`         // Human-readable trace ID for log correlation
+	ID             string      `json:"id"`              // Internal transaction ID
+	Changes        []Change    `json:"changes"`
+	CreatedAt      time.Time   `json:"created_at"`
+	CommitTime     time.Time   `json:"commit_time"`     // Transaction commit time (from first change)
+	FirstSeenTime  time.Time   `json:"first_seen_time"` // When first change was added to buffer
+	InvolvedTables []string    `json:"involved_tables"` // Tables that have changes in this transaction
 }
 
 // AddChange adds a change to the transaction

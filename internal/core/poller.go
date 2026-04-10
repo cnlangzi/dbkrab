@@ -38,7 +38,7 @@ type Poller struct {
 	pausedMu      sync.RWMutex
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
-	txBuffer      *TransactionBuffer // For cross-table transaction integrity
+	txBuffer      *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
 	
 	// Graceful degradation fields
 	disconnectStart time.Time
@@ -47,8 +47,6 @@ type Poller struct {
 	// Hot reload fields
 	reloadCh      <-chan *config.Config  // Channel for config reload signals
 	pendingCfg    *config.Config         // Pending config to apply
-	needDrain     bool                   // Signal to drain txBuffer before rebuild
-	needRebuildTx bool                   // Signal to rebuild txBuffer after drain
 }
 
 // Store interface for storing changes
@@ -94,22 +92,10 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 		stopCh:   make(chan struct{}),
 	}
 
-	// Initialize transaction buffer if enabled
+	// TransactionBuffer is deprecated - not needed with simplified polling
+	// Keeping config for backward compatibility but not using it
 	if cfg.CDC.TransactionBuffer.Enabled {
-		maxWaitTime, err := time.ParseDuration(cfg.CDC.TransactionBuffer.MaxWaitTime)
-		if err != nil {
-			slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
-			maxWaitTime = 30 * time.Second
-		}
-		poller.txBuffer = NewTransactionBuffer(
-			maxWaitTime,
-			cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-			cfg.CDC.TransactionBuffer.MaxBatchBytes,
-		)
-		slog.Info("transaction buffer enabled",
-			"max_wait_time", maxWaitTime,
-			"max_transactions_per_batch", cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-			"max_batch_bytes", cfg.CDC.TransactionBuffer.MaxBatchBytes)
+		slog.Warn("transaction_buffer is deprecated, not used in simplified polling")
 	}
 
 	// Initialize gap detector if CDC protection is enabled
@@ -183,30 +169,18 @@ func (p *Poller) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			// Flush buffer before exit
-			p.flushBuffer(ctx)
 			return ctx.Err()
 		case <-p.stopCh:
-			// Flush buffer before stop
-			p.flushBuffer(ctx)
 			return nil
 		case newCfg := <-p.reloadCh:
 			// Config reload signal received
 			p.pendingCfg = newCfg
-			slog.Info("config reload pending, will apply at transaction boundary")
+			slog.Info("config reload pending, will apply at next poll cycle")
 		case <-ticker.C:
-			// Check if need to drain buffer before applying config
-			if p.needDrain {
-				if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
-					// Skip polling, wait for buffer to drain
-					slog.Debug("waiting for txBuffer to drain before applying config")
-					continue
-				}
-				// Buffer is empty, safe to apply config
+			if p.pendingCfg != nil {
 				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
 				}
-				continue
 			}
 
 			if err := p.poll(ctx); err != nil {
@@ -226,7 +200,7 @@ func (p *Poller) Start(ctx context.Context) error {
 				// Continue polling despite errors
 			}
 
-			// Check for pending config after successful poll (at transaction boundary)
+			// Check for pending config after successful poll
 			if p.pendingCfg != nil {
 				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
@@ -363,78 +337,12 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 	}
 
-	// If transaction buffer is enabled, use it for cross-table integrity
-	if p.txBuffer != nil {
-		if len(allChanges) > 0 {
-			return p.processWithBuffer(ctx, allChanges, results)
-		}
-		// No changes but still update offsets for observability
-		return p.updateOffsets(results, allChanges)
-	}
-
-	// Otherwise, use legacy direct processing
+	// Always use processDirect - no transaction buffer needed
+	// All changes from the same poll cycle arrive together, simplifying cross-table handling
 	if len(allChanges) > 0 {
 		return p.processDirect(ctx, allChanges, results)
 	}
 	// No changes but still update offsets for observability
-	return p.updateOffsets(results, allChanges)
-}
-
-// processWithBuffer processes changes using transaction buffer for cross-table integrity
-func (p *Poller) processWithBuffer(ctx context.Context, allChanges []Change, results []tablePollResult) error {
-
-	// Add all changes to buffer
-	for _, change := range allChanges {
-		p.txBuffer.Add(change)
-	}
-
-	// Get complete transactions (timed out)
-	completeTxs := p.txBuffer.GetCompleteTransactions()
-	if len(completeTxs) == 0 {
-		return nil
-	}
-
-	// Process complete transactions
-	var processErrors []error
-	for _, tx := range completeTxs {
-		// Handler processing with retry (plugin writes to its own sink)
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(tx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("handler error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "handler")
-			}
-		}
-
-		// Store processing with retry (platform store - CDC tracking only)
-		if p.store != nil {
-			err := retry.DoWithName(ctx, func() error {
-				return p.store.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("store error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "store")
-				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-			}
-		}
-	}
-
-	// Update offsets only if all transactions succeeded
-	if len(processErrors) > 0 {
-		return fmt.Errorf("store errors: %v", processErrors)
-	}
-
-	// Update offsets (same logic as processDirect)
 	return p.updateOffsets(results, allChanges)
 }
 
@@ -875,20 +783,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 
 	newCfg := p.pendingCfg
 
-	// Check if transaction_buffer change requires drain
-	if newCfg.CDC.TransactionBuffer.Enabled != p.cfg.CDC.TransactionBuffer.Enabled ||
-		newCfg.CDC.TransactionBuffer.MaxWaitTime != p.cfg.CDC.TransactionBuffer.MaxWaitTime ||
-		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch != p.cfg.CDC.TransactionBuffer.MaxTransactionsPerBatch ||
-		newCfg.CDC.TransactionBuffer.MaxBatchBytes != p.cfg.CDC.TransactionBuffer.MaxBatchBytes {
-		// Need to drain buffer before applying
-		if p.txBuffer != nil && !p.txBuffer.IsEmpty() {
-			slog.Info("transaction_buffer changed, waiting for buffer to drain")
-			p.needDrain = true
-			p.needRebuildTx = true
-			// Will apply on next cycle after drain
-			return nil
-		}
-	}
+	// No need to check transaction_buffer changes - not used in simplified polling
 
 	// Safe to apply config now
 	slog.Info("applying config changes", "tables", len(newCfg.Tables), "interval", newCfg.CDC.Interval)
@@ -918,15 +813,7 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 	p.cfg.GracefulDegradation = newCfg.GracefulDegradation
 	slog.Debug("graceful_degradation params updated")
 
-	// Handle transaction_buffer rebuild if needed
-	if p.needRebuildTx {
-		if err := p.rebuildTxBuffer(newCfg); err != nil {
-			slog.Error("failed to rebuild txBuffer", "error", err)
-			return err
-		}
-		p.needRebuildTx = false
-		p.needDrain = false
-	}
+	// No transaction buffer rebuild needed - deprecated
 
 	// Update main config reference
 	p.cfg = newCfg
@@ -934,94 +821,6 @@ func (p *Poller) checkAndApplyConfig(ticker *time.Ticker) error {
 
 	slog.Info("config reload complete")
 	return nil
-}
-
-// rebuildTxBuffer rebuilds the transaction buffer with new config
-func (p *Poller) rebuildTxBuffer(newCfg *config.Config) error {
-	if !newCfg.CDC.TransactionBuffer.Enabled {
-		// Disable transaction buffer
-		if p.txBuffer != nil {
-			p.txBuffer.Close()
-			p.txBuffer = nil
-			slog.Info("transaction buffer disabled")
-		}
-		return nil
-	}
-
-	maxWaitTime, err := time.ParseDuration(newCfg.CDC.TransactionBuffer.MaxWaitTime)
-	if err != nil {
-		slog.Warn("invalid transaction_buffer.max_wait_time, using default 30s", "error", err)
-		maxWaitTime = 30 * time.Second
-	}
-
-	// Close old buffer
-	if p.txBuffer != nil {
-		p.txBuffer.Close()
-	}
-
-	// Create new buffer with updated config
-	p.txBuffer = NewTransactionBuffer(
-		maxWaitTime,
-		newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-		newCfg.CDC.TransactionBuffer.MaxBatchBytes,
-	)
-
-	slog.Info("transaction buffer rebuilt",
-		"max_wait_time", maxWaitTime,
-		"max_transactions_per_batch", newCfg.CDC.TransactionBuffer.MaxTransactionsPerBatch,
-		"max_batch_bytes", newCfg.CDC.TransactionBuffer.MaxBatchBytes)
-
-	return nil
-}
-
-// flushBuffer forces flush all pending transactions (for shutdown)
-func (p *Poller) flushBuffer(ctx context.Context) {
-	if p.txBuffer == nil {
-		return
-	}
-
-	slog.Info("flushing transaction buffer", "pending_count", p.txBuffer.Size())
-
-	// Get all pending transactions
-	completeTxs := p.txBuffer.Flush()
-	if len(completeTxs) == 0 {
-		return
-	}
-
-	// Process each transaction
-	for _, tx := range completeTxs {
-		// Handler processing (plugin writes to its own sink)
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(tx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("flush handler error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "flush_handler")
-			}
-		}
-
-		// Store processing
-		if p.store != nil {
-			err := retry.DoWithName(ctx, func() error {
-				return p.store.Write(tx)
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("flush_store_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("flush store error",
-					"trace_id", tx.TraceID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(tx, err, "flush_store")
-			}
-		}
-	}
-
-	slog.Info("transaction buffer flush complete", "flushed_count", len(completeTxs))
 }
 
 // tablesEqual checks if two table lists are equal (order-independent)

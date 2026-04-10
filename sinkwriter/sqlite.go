@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/fsnotify/fsnotify"
 	_ "modernc.org/sqlite"
 )
 
@@ -23,22 +26,30 @@ type SQLiteWriter struct {
 	dbType        string
 	path          string
 	migrationPath string
+	stopCh        chan struct{}
 }
 
-// NewSQLiteWriter creates a new SQLite sink writer
+// NewSQLiteWriter creates a new SQLite sink writer.
+// path: 直接使用作为数据库文件路径，不再做二次处理
 func NewSQLiteWriter(name, dbType, path, migrationPath string) (*SQLiteWriter, error) {
-	// Resolve path - for SQLite, path is the directory containing the DB file
-	basePath := path
+	// Determine actual db file path and directory
+	var dbPath string
+	var basePath string
+
 	if strings.HasSuffix(strings.ToLower(path), ".db") {
-		basePath = strings.TrimSuffix(path, ".db")
+		// path is the direct database file path
+		dbPath = path
+		basePath = filepath.Dir(path)
+	} else {
+		// path is a directory, use name.db inside it
+		basePath = path
+		dbPath = filepath.Join(path, name+".db")
 	}
 
 	// Create directory if not exists
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
-
-	dbPath := filepath.Join(basePath, name+".db")
 
 	// Initialize database connection
 	db, err := sql.Open("sqlite", buildDSN(dbPath))
@@ -51,13 +62,61 @@ func NewSQLiteWriter(name, dbType, path, migrationPath string) (*SQLiteWriter, e
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	return &SQLiteWriter{
+	w := &SQLiteWriter{
 		name:          name,
 		dbType:        dbType,
 		path:          basePath,
 		migrationPath: migrationPath,
-		db:           db,
-	}, nil
+		db:            db,
+		stopCh:        make(chan struct{}),
+	}
+
+	// Start migration file watcher if configured
+	if migrationPath != "" {
+		go w.watchMigrations(migrationPath)
+	}
+
+	return w, nil
+}
+
+// watchMigrations monitors migration directory for new files and re-runs migrations on debounce.
+func (w *SQLiteWriter) watchMigrations(migrationsDir string) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	defer watcher.Close() //nolint:errcheck
+
+	if err := watcher.Add(migrationsDir); err != nil {
+		return
+	}
+
+	var debounceTimer *time.Timer
+	const debounceDuration = 200 * time.Millisecond
+
+	for {
+		select {
+		case <-w.stopCh:
+			return
+		case event := <-watcher.Events:
+			// Only care about new files
+			if event.Op&fsnotify.Create == 0 {
+				continue
+			}
+			// Reset debounce timer (sliding window)
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			debounceTimer = time.AfterFunc(debounceDuration, func() {
+				if err := w.RunMigrations(); err != nil {
+					// migrations error, log it
+				}
+			})
+		case err := <-watcher.Errors:
+			// ignore watcher errors
+			_ = err
+		}
+	}
 }
 
 // buildDSN builds SQLite DSN with appropriate settings
@@ -78,36 +137,65 @@ func (w *SQLiteWriter) DatabaseType() string {
 // Write writes a batch of sink operations to the database
 func (w *SQLiteWriter) Write(ops []core.Sink) error {
 	if len(ops) == 0 {
+		slog.Debug("SQLiteWriter.Write: no operations to write")
 		return nil
 	}
+
+	slog.Debug("SQLiteWriter.Write: starting batch write",
+		"database", w.name,
+		"operations", len(ops),
+		"path", w.path)
 
 	ctx := context.Background()
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
+		slog.Error("SQLiteWriter.Write: failed to begin transaction",
+			"error", err)
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, op := range ops {
+	for i, op := range ops {
+		slog.Debug("SQLiteWriter.Write: processing operation",
+			"index", i,
+			"output", op.Config.Output,
+			"op_type", op.OpType.String(),
+			"rows", len(op.DataSet.Rows))
+
 		switch op.OpType {
 		case core.OpInsert:
 			if err := w.insertInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: insert failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("insert %s: %w", op.Config.Output, err)
 			}
 		case core.OpUpdateAfter:
 			if err := w.updateInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: update failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("update %s: %w", op.Config.Output, err)
 			}
 		case core.OpDelete:
 			if err := w.deleteInTx(tx, op.Config, op.DataSet); err != nil {
+				slog.Error("SQLiteWriter.Write: delete failed",
+					"output", op.Config.Output,
+					"error", err)
 				return fmt.Errorf("delete %s: %w", op.Config.Output, err)
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		slog.Error("SQLiteWriter.Write: failed to commit transaction",
+			"error", err)
 		return fmt.Errorf("commit transaction: %w", err)
 	}
+
+	slog.Info("SQLiteWriter.Write: batch write completed",
+		"database", w.name,
+		"operations", len(ops))
 
 	return nil
 }
@@ -296,6 +384,9 @@ func (w *SQLiteWriter) ensureTable(tx *sql.Tx, table string, columns []string) e
 // RunMigrations runs any pending migrations in the migrations folder
 func (w *SQLiteWriter) RunMigrations() error {
 	migrationsDir := w.MigrationsPath()
+	if migrationsDir == "" {
+		return nil // No migration configured, skip
+	}
 
 	// Check if migrations directory exists
 	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
@@ -354,11 +445,9 @@ func (w *SQLiteWriter) RunMigrations() error {
 }
 
 // MigrationsPath returns the migrations directory path
+// Returns empty string if not configured (no automatic fallback)
 func (w *SQLiteWriter) MigrationsPath() string {
-	if w.migrationPath != "" {
-		return w.migrationPath
-	}
-	return filepath.Join(w.path, "migrations")
+	return w.migrationPath
 }
 
 // isMigrationFile checks if filename matches migration pattern (e.g., 001_description.sql)
@@ -461,6 +550,9 @@ func splitStatements(content string) []string {
 
 // Close closes the database connection
 func (w *SQLiteWriter) Close() error {
+	if w.stopCh != nil {
+		close(w.stopCh)
+	}
 	if w.db != nil {
 		return w.db.Close()
 	}
