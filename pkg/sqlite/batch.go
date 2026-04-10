@@ -92,8 +92,8 @@ func (btx *BatchTx) Commit() error {
 	bw.pendingCount += len(btx.buf)
 	btx.buf = nil
 
-	// Try to flush based on size, then release lock
-	bw.tryFlushLocked()
+	// Try to flush based on size (already holds lock from BeginTx), then release lock
+	bw.tryFlushLocked() // already holds bw.mu
 	bw.mu.Unlock()
 	return nil
 }
