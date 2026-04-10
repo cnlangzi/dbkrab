@@ -25,8 +25,25 @@ type Store struct {
 }
 
 // NewStore creates a new SQLite store with WAL mode and optimized settings.
+// Creates tables directly if they don't exist (called after sqlite.New which may not run migrations).
 func NewStore(db *sqlite.DB) (*Store, error) {
 	s := &Store{db: db}
+
+	// Create tables directly since migrations may not have run
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS transactions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			transaction_id TEXT NOT NULL,
+			table_name TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			data TEXT,
+			changed_at TIMESTAMP,
+			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("create transactions table: %w", err)
+	}
 
 	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {

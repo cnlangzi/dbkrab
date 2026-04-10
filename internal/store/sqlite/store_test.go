@@ -13,32 +13,6 @@ import (
 func newTestDB(t *testing.T) *sqlite.DB {
 	db, err := sqlite.NewInMemory(context.Background(), "test", nil)
 	require.NoError(t, err)
-	
-	// Manually create tables for testing
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transactions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			transaction_id TEXT NOT NULL,
-			table_name TEXT NOT NULL,
-			operation TEXT NOT NULL,
-			data TEXT,
-			changed_at TIMESTAMP,
-			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	require.NoError(t, err)
-	
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS poller_state (
-			id INTEGER PRIMARY KEY,
-			last_poll_time TIMESTAMP,
-			last_lsn TEXT,
-			total_changes INTEGER DEFAULT 0,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	require.NoError(t, err)
-	
 	return db
 }
 
