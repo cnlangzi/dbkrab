@@ -17,7 +17,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
-	"github.com/yaitoo/sqle"
 	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -26,7 +25,7 @@ import (
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
 	name          string
-	db            *sqle.DB
+	db            *sql.DB
 	dbType        string
 	path          string
 	migrationFS   fs.FS
@@ -93,7 +92,7 @@ func NewSinker(config Config) (*Sinker, error) {
 		path:          config.File,
 		migrationFS:   config.FS,
 		migrationsDir: config.MigrationsDir,
-		db:            sqle.Open(db),
+		db:            db,
 		stopCh:        make(chan struct{}),
 	}
 

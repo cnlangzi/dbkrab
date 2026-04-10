@@ -264,10 +264,10 @@ CREATE TABLE IF NOT EXISTS test_table (
 	require.NoError(t, err)
 
 	sinker, err := NewSinker(Config{
-		Name:           "test",
-		File:           tmpFile,
-		ModuleName:     "test",
-		MigrationsDir:  migrationsDir,
+		Name:          "test",
+		File:          tmpFile,
+		ModuleName:    "test",
+		MigrationsDir: migrationsDir,
 	})
 	require.NoError(t, err)
 	defer sinker.Close()
