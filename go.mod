@@ -9,7 +9,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.40
 	github.com/microsoft/go-mssqldb v1.9.8
 	github.com/stretchr/testify v1.11.1
-	github.com/yaitoo/sqle/migrate v0.0.0
 	github.com/yaitoo/xun v1.1.6
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.29.10

@@ -17,7 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
-	"github.com/yaitoo/sqle/migrate"
+	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -241,22 +241,15 @@ func (s *Sinker) insertInTx(tx *sql.Tx, config sqliteutil.TableConfig, ds *core.
 	return nil
 }
 
-// RunMigrations runs any pending migrations using sqle/migrate
+// RunMigrations runs any pending migrations
 func (s *Sinker) RunMigrations() error {
 	if s.migrationFS == nil && s.migrationsDir == "" {
 		return nil // No migration configured, skip
 	}
 
-	var m *migrate.Migrator
+	// Use embedded FS migrations
 	if s.migrationFS != nil {
-		m = migrate.New(s.db)
-		if err := m.Discover(s.migrationFS, migrate.WithSuffix("sqlite"), migrate.WithModule("dbkrab")); err != nil {
-			return err
-		}
-		if err := m.Init(context.Background()); err != nil {
-			return err
-		}
-		return m.Migrate(context.Background())
+		return sqlite.RunMigrations(s.db, s.migrationFS, "dbkrab")
 	}
 
 	// File-based migrations
