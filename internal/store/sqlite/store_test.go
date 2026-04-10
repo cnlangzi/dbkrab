@@ -12,7 +12,7 @@ import (
 
 func newTestDB(t *testing.T) *sqlite.DB {
 	// Use temp file for testing to avoid in-memory SQLite transaction isolation issues
-	db, err := sqlite.NewFile(context.Background(), t.TempDir()+"/test.db", "test", nil)
+	db, err := sqlite.NewFile(context.Background(), t.TempDir()+"/test.db", "test", "")
 	require.NoError(t, err)
 	return db
 }

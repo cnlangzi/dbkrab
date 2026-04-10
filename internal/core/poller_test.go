@@ -319,7 +319,7 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(tx *Transaction) error {
+func (h *mockHandler) Handle(ctx context.Context, tx *Transaction) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {

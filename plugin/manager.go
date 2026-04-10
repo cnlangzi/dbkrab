@@ -101,7 +101,7 @@ func (m *Manager) Unload(name string) error {
 // Handle processes a transaction through all SQL plugins.
 // Each plugin transforms data and returns sinks with Database field set.
 // The sink manager routes sinks to appropriate writers based on Database field.
-func (m *Manager) Handle(tx *core.Transaction) error {
+func (m *Manager) Handle(ctx context.Context, tx *core.Transaction) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -125,7 +125,7 @@ func (m *Manager) Handle(tx *core.Transaction) error {
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
-		if err := m.swManager.Write(allSinks); err != nil {
+		if err := m.swManager.Write(ctx, allSinks); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}
