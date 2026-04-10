@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -12,17 +13,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+func newTestDB(t *testing.T) (*sql.DB, func()) {
+	f, err := os.CreateTemp("", "batchtest-*.db")
+	require.NoError(t, err)
+	f.Close()
+
+	db, err := sql.Open("sqlite3", f.Name()+"?_journal_mode=WAL&_synchronous=OFF")
 	require.NoError(t, err)
 	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
 	require.NoError(t, err)
-	return db
+
+	return db, func() {
+		db.Close()
+		os.Remove(f.Name())
+	}
 }
 
 func TestBatchWriter_DirectExec(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     3,
@@ -54,8 +63,8 @@ func TestBatchWriter_DirectExec(t *testing.T) {
 }
 
 func TestBatchWriter_BeginTx_Commit(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     10,
@@ -93,8 +102,8 @@ func TestBatchWriter_BeginTx_Commit(t *testing.T) {
 }
 
 func TestBatchWriter_BeginTx_Rollback(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     10,
@@ -129,8 +138,8 @@ func TestBatchWriter_BeginTx_Rollback(t *testing.T) {
 }
 
 func TestBatchWriter_TimeBasedFlush(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     100, // high threshold
@@ -159,8 +168,8 @@ func TestBatchWriter_TimeBasedFlush(t *testing.T) {
 }
 
 func TestBatchWriter_TimeBasedBlockedByActiveBatchTx(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     2,
@@ -197,8 +206,8 @@ func TestBatchWriter_TimeBasedBlockedByActiveBatchTx(t *testing.T) {
 }
 
 func TestBatchWriter_ConcurrentDirectExec(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     100,
@@ -234,8 +243,8 @@ func TestBatchWriter_ConcurrentDirectExec(t *testing.T) {
 }
 
 func TestBatchWriter_GlobalTxReusedAfterFlush(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     2,
@@ -269,8 +278,8 @@ func TestBatchWriter_GlobalTxReusedAfterFlush(t *testing.T) {
 }
 
 func TestBatchWriter_DeferRollbackAfterCommit(t *testing.T) {
-	db := newTestDB(t)
-	defer db.Close()
+	db, cleanup := newTestDB(t); defer cleanup()
+	
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     10,
