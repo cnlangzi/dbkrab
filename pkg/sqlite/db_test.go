@@ -96,8 +96,8 @@ func TestQueryContext(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// Create and insert data using Writer
-	db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
-	db.Writer.Exec("INSERT INTO test (name) VALUES (?)", "test")
+	_, _ = db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
+	_, _ = db.Writer.Exec("INSERT INTO test (name) VALUES (?)", "test")
 
 	// Query using Reader
 	ctx := context.Background()
@@ -115,6 +115,7 @@ func TestQueryContext(t *testing.T) {
 	if err := rows.Scan(&name); err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
+	_ = rows.Close()
 
 	if name != "test" {
 		t.Errorf("expected 'test', got '%s'", name)
