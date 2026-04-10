@@ -65,7 +65,7 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 	d.Writer = NewBatchWriter(writerDB, BatchConfig{
-		BatchSize:     1,
+		BatchSize:     100,
 		FlushInterval: 100 * time.Millisecond,
 		TxTimeout:     30 * time.Second,
 	})
@@ -103,7 +103,7 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 	}
 
 	return &DB{
-		Writer: NewBatchWriter(db, BatchConfig{BatchSize: 1, FlushInterval: 100 * time.Millisecond, TxTimeout: 30 * time.Second}),
+		Writer: NewBatchWriter(db, BatchConfig{BatchSize: 100, FlushInterval: 100 * time.Millisecond, TxTimeout: 30 * time.Second}),
 		Reader: db, // Use same connection for in-memory DB
 		ctx:    ctx,
 	}, nil
