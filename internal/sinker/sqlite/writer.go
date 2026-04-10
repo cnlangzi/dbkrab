@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/cnlangzi/dbkrab/internal/core"

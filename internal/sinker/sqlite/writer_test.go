@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,10 +13,10 @@ import (
 func TestNewSinker(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
-		File:       tmpFile,
-		ModuleName: "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
+		File:          tmpFile,
+		ModuleName:    "test",
+		MigrationPath: "",
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, sinker)
