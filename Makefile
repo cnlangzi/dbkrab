@@ -80,7 +80,7 @@ lint:
 ## vet: Run go vet
 vet:
 	@echo "Running go vet..."
-	$(GO) vet ./...
+	$(GO) vet -p 1 ./...
 
 ## fmt: Format code
 fmt:
