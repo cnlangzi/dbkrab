@@ -1,12 +1,10 @@
+version: 2
+
 run:
   timeout: 5m
 
-linters-settings:
-  govet:
-    check-shadowing: false
-
 linters:
-  disable-all: true
+  default: none
   enable:
     - gofmt
     - govet
