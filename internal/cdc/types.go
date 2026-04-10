@@ -26,7 +26,12 @@ func (n *Nullable[T]) Scan(src interface{}) error {
 		n.val, n.valid = *new(T), false
 		return nil
 	}
-	n.val, n.valid = src.(T), true
+	// Use safe type assertion to avoid panic for mismatched driver types
+	val, ok := src.(T)
+	if !ok {
+		return fmt.Errorf("Nullable[T].Scan: cannot convert %T to %T", src, *new(T))
+	}
+	n.val, n.valid = val, true
 	return nil
 }
 
@@ -53,16 +58,23 @@ func (i *Int64) Scan(src interface{}) error {
 	switch v := src.(type) {
 	case int64:
 		i.val, i.valid = v, true
+		return nil
 	case int32:
 		i.val, i.valid = int64(v), true
+		return nil
 	case int:
 		i.val, i.valid = int64(v), true
+		return nil
 	case []byte:
-		// Try parsing
-		fmt.Sscanf(string(v), "%d", &i.val)
+		if _, err := fmt.Sscanf(string(v), "%d", &i.val); err != nil {
+			i.val, i.valid = 0, false
+			return fmt.Errorf("Int64.Scan: cannot parse %q as int64: %w", string(v), err)
+		}
 		i.valid = true
+		return nil
 	default:
 		i.val, i.valid = 0, false
+		return fmt.Errorf("Int64.Scan: unsupported type %T", src)
 	}
 	return nil
 }
@@ -90,15 +102,23 @@ func (f *Float64) Scan(src interface{}) error {
 	switch v := src.(type) {
 	case float64:
 		f.val, f.valid = v, true
+		return nil
 	case float32:
 		f.val, f.valid = float64(v), true
+		return nil
 	case int64:
 		f.val, f.valid = float64(v), true
+		return nil
 	case []byte:
-		fmt.Sscanf(string(v), "%f", &f.val)
+		if _, err := fmt.Sscanf(string(v), "%f", &f.val); err != nil {
+			f.val, f.valid = 0, false
+			return fmt.Errorf("Float64.Scan: cannot parse %q as float64: %w", string(v), err)
+		}
 		f.valid = true
+		return nil
 	default:
 		f.val, f.valid = 0, false
+		return fmt.Errorf("Float64.Scan: unsupported type %T", src)
 	}
 	return nil
 }
