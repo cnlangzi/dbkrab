@@ -56,17 +56,17 @@ type Store interface {
 }
 
 // Handler interface for custom processing
-// Handle processes a transaction. Plugin implementations write to their own sinks.
+// Handle processes a transaction with the given context for cancellation/timeout.
 type Handler interface {
-	Handle(tx *Transaction) error
+	Handle(ctx context.Context, tx *Transaction) error
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(tx *Transaction) error
+type PluginHandler func(ctx context.Context, tx *Transaction) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(tx *Transaction) error {
-	return h(tx)
+func (h PluginHandler) Handle(ctx context.Context, tx *Transaction) error {
+	return h(ctx, tx)
 }
 
 type tablePollResult struct {
@@ -359,7 +359,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(&tx)
+				handlerErr = p.handler.Handle(ctx, &tx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {

@@ -177,8 +177,8 @@ func main() {
 
 	// Create poller with dynamic plugin support
 	poller := core.NewPoller(cfg, db, store, offsetStore, dlqStore)
-	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
-		return pluginManager.Handle(tx)
+	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction) error {
+		return pluginManager.Handle(ctx, tx)
 	}))
 
 	// Set config reload channel for hot reload
