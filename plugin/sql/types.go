@@ -286,9 +286,12 @@ func normalizeIfExpression(expr string) string {
 
 	// Step 5: Replace table.field with table_field (only the dot, not the whole pattern)
 	// Match . surrounded by word characters and replace with _
+	// Also normalize to lowercase for case-insensitivity
 	tableFieldRegex := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)`)
-	// This regex captures table and field separately - we need to replace only the dot
-	result = tableFieldRegex.ReplaceAllString(result, "$1_$2")
+	result = tableFieldRegex.ReplaceAllStringFunc(result, func(match string) string {
+		parts := strings.Split(match, ".")
+		return strings.ToLower(parts[0]) + "_" + strings.ToLower(parts[1])
+	})
 
 	return result
 }
