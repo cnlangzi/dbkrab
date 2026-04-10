@@ -332,6 +332,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	var validResults []tablePollResult
 	for _, r := range results {
 		if r.err == nil && len(r.changes) > 0 {
+			//nolint:sa4010 // append result must be used to accumulate changes
 			allChanges = append(allChanges, r.changes...)
 			validResults = append(validResults, r)
 		}
