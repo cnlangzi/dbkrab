@@ -2,8 +2,11 @@ package sql
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Knetic/govaluate"
 )
 
 // Operation represents the CDC operation type
@@ -90,11 +93,14 @@ type Sink struct {
 type SinkConfig struct {
 	Name        string `yaml:"name"`          // Sink name
 	On          string `yaml:"on"`            // Table filter (required for multi-table)
+	If          string `yaml:"if"`            // SQL-style condition expression (govaluate)
 	SQL         string `yaml:"sql"`           // Inline SQL template
 	SQLFile     string `yaml:"sql_file"`      // External SQL file path
 	Output      string `yaml:"output"`        // Target table name
 	PrimaryKey  string `yaml:"primary_key"`   // Primary key column
 	OnConflict  string `yaml:"on_conflict"`   // Conflict strategy: overwrite | skip | error (default: skip)
+
+	compiledIf *govaluate.EvaluableExpression `yaml:"-"` // Precompiled expression (internal use)
 }
 
 // GetOnConflict returns the OnConflictStrategy for this job
@@ -163,6 +169,7 @@ func (s *Skill) FilterByOperation(opType Operation) []SinkConfig {
 //   - 'when' field is required for all sinks
 //   - Only [insert, update] or [delete] are valid 'when' values
 //   - No mixing of insert/update with delete in the same sink
+//   - 'if' expressions (if present) are valid govaluate expressions
 func (s *Skill) ValidateSinks() error {
 	for i, sink := range s.Sinks {
 		if len(sink.When) == 0 {
@@ -200,6 +207,17 @@ func (s *Skill) ValidateSinks() error {
 		if hasUpdate && !hasInsert {
 			return fmt.Errorf("sink[%d].when: update requires insert (use [insert, update] for shared SQL)", i)
 		}
+
+		// Validate and precompile 'if' expression
+		if s.Sinks[i].If != "" {
+			// Normalize SQL-style expression to govaluate format
+			normalizedIf := normalizeIfExpression(s.Sinks[i].If)
+			expr, err := govaluate.NewEvaluableExpression(normalizedIf)
+			if err != nil {
+				return fmt.Errorf("sink[%d].if: invalid expression '%s': %w", i, s.Sinks[i].If, err)
+			}
+			s.Sinks[i].compiledIf = expr
+		}
 	}
 	return nil
 }
@@ -217,6 +235,125 @@ func FilterSinks(sinks []SinkConfig, tableName string) []SinkConfig {
 		}
 	}
 	return filtered
+}
+
+// normalizeIfExpression converts SQL-style expressions to govaluate-compatible format.
+// It replaces table.field names with table_field format and converts SQL operators to govaluate syntax.
+// Note: govaluate uses == for equality (not =) and !== for inequality (not !=).
+// Note: govaluate uses &&/|| (not AND/OR).
+func normalizeIfExpression(expr string) string {
+	result := expr
+
+	// Step 1: Protect existing operators
+	result = strings.Replace(result, "==", "\x00EQ\x00", -1)
+	result = strings.Replace(result, "!=", "\x00NE\x00", -1)
+	result = strings.Replace(result, ">=", "\x00GE\x00", -1)
+	result = strings.Replace(result, "<=", "\x00LE\x00", -1)
+	result = strings.Replace(result, "&&", "\x00AND\x00", -1)
+	result = strings.Replace(result, "||", "\x00OR\x00", -1)
+
+	// Step 2: Replace single = with == (only outside of string literals)
+	var sb strings.Builder
+	inString := false
+	for i := 0; i < len(result); i++ {
+		c := result[i]
+		if c == '\'' {
+			inString = !inString
+			sb.WriteByte(c)
+			continue
+		}
+		if !inString && c == '=' && (i+1 >= len(result) || result[i+1] != '=') {
+			sb.WriteString("==")
+			continue
+		}
+		sb.WriteByte(c)
+	}
+	result = sb.String()
+
+	// Step 3: Replace AND/OR with &&/|| using regex for proper word boundaries
+	andRegex := regexp.MustCompile(`\bAND\b`)
+	orRegex := regexp.MustCompile(`\bOR\b`)
+	result = andRegex.ReplaceAllString(result, "&&")
+	result = orRegex.ReplaceAllString(result, "||")
+
+	// Step 4: Restore protected operators
+	result = strings.Replace(result, "\x00EQ\x00", "==", -1)
+	result = strings.Replace(result, "\x00NE\x00", "!=", -1)
+	result = strings.Replace(result, "\x00GE\x00", ">=", -1)
+	result = strings.Replace(result, "\x00LE\x00", "<=", -1)
+	result = strings.Replace(result, "\x00AND\x00", "&&", -1)
+	result = strings.Replace(result, "\x00OR\x00", "||", -1)
+
+	// Step 5: Replace table.field with table_field (only the dot, not the whole pattern)
+	// Match . surrounded by word characters and replace with _
+	// Also normalize to lowercase for case-insensitivity
+	tableFieldRegex := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)`)
+	result = tableFieldRegex.ReplaceAllStringFunc(result, func(match string) string {
+		parts := strings.Split(match, ".")
+		return strings.ToLower(parts[0]) + "_" + strings.ToLower(parts[1])
+	})
+
+	return result
+}
+
+
+// EvalIf evaluates the 'if' expression for a sink against CDC data.
+// It returns true if:
+//   - The sink has no 'if' expression (always true)
+//   - The expression evaluates to true
+//
+// It returns false if the expression evaluates to false or an error occurs.
+//
+// Table and field names in expressions are treated case-insensitively:
+//   "orders.status = 'vip'" and "ORDERS.STATUS = 'vip'" both map to the same fields.
+// Literal values in expressions remain case-sensitive.
+func (s *SinkConfig) EvalIf(cdcParams CDCParameters) bool {
+	if s.compiledIf == nil {
+		return true // No 'if' condition means always trigger
+	}
+
+	// Build parameters map with lowercase table.field keys for case-insensitivity
+	params := make(map[string]interface{})
+
+	// Add CDC metadata
+	params["cdc_lsn"] = cdcParams.CDCLSN
+	params["cdc_tx_id"] = cdcParams.CDCTxID
+	params["cdc_table"] = cdcParams.CDCTable
+	params["cdc_operation"] = cdcParams.CDCOperation
+
+	// Add data fields with table prefix
+	for k, v := range cdcParams.Fields {
+		params[strings.ToLower(k)] = v
+	}
+
+	// Also add direct field names (without table prefix) for convenience
+	// These are lowercased for case-insensitive matching
+	for k, v := range cdcParams.Fields {
+		// Extract field name without table prefix
+		parts := strings.SplitN(k, "_", 2)
+		if len(parts) == 2 {
+			fieldName := strings.ToLower(parts[1])
+			params[fieldName] = v
+			// Also add table.field format (lowercase)
+			params[strings.ToLower(k)] = v
+		}
+	}
+
+	// Evaluate the expression
+	result, err := s.compiledIf.Evaluate(params)
+	if err != nil {
+		return false
+	}
+
+	// If result is nil (missing parameter), return false
+	if result == nil {
+		return false
+	}
+
+	if boolResult, ok := result.(bool); ok {
+		return boolResult
+	}
+	return false
 }
 
 // DataSetToMap converts DataSet to slice of maps for easier processing
