@@ -1,0 +1,10 @@
+version: 2
+
+run:
+  tests: false
+
+issues:
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA4010" # append result not used
