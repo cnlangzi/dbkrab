@@ -81,13 +81,21 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		if len(sinkConfigs) > 0 {
 			sinkParams := e.cdcParamsToMap(cdcParams)
 
-			// Filter sinks by table and execute
+			// Filter sinks by table and evaluate 'if' conditions
 			for _, sinkCfg := range sinkConfigs {
 				if sinkCfg.On != "" && strings.ToLower(sinkCfg.On) != strings.ToLower(change.Table) {
 					slog.Debug("Engine.Handle: sink table mismatch",
 						"sink", sinkCfg.Name,
 						"sink.On", sinkCfg.On,
 						"change.Table", change.Table)
+					continue
+				}
+
+				// Evaluate 'if' condition if present
+				if !sinkCfg.EvalIf(cdcParams) {
+					slog.Debug("Engine.Handle: sink 'if' condition evaluated to false",
+						"sink", sinkCfg.Name,
+						"if", sinkCfg.If)
 					continue
 				}
 
