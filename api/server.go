@@ -1214,39 +1214,19 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	// Use sinker manager to execute query
-	columns, results, err := s.sinkerManager.Query(sinkCfg.Name, query)
+	columns, queryResults, err := s.sinkerManager.Query(sinkCfg.Name, query)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("query execution failed: %v", err),
 		})
 	}
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return c.View(map[string]any{
-				"success": false,
-				"error":   fmt.Sprintf("failed to scan row: %v", err),
-			})
-		}
-
-		rowMap := make(map[string]any)
-		for i, col := range columns {
-			rowMap[col] = values[i]
-		}
-		results = append(results, rowMap)
-	}
 
 	return c.View(map[string]any{
 		"success": true,
 		"columns": columns,
-		"rows":    results,
-		"count":   len(results),
+		"rows":    queryResults,
+		"count":   len(queryResults),
 	})
 }
 
