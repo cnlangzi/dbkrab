@@ -328,15 +328,16 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Collect all changes from successful polls
-	//nolint:staticcheck // SA4010 false positive - allChanges is used after the loop
-	allChanges := []Change{}
-	validResults := []tablePollResult{}
+	// Collect all changes from successful polls
+	var allChanges []Change
+	var validResults []tablePollResult
 	for _, r := range results {
 		if r.err == nil && len(r.changes) > 0 {
 			allChanges = append(allChanges, r.changes...)
 			validResults = append(validResults, r)
 		}
 	}
+	// nolint:staticcheck // SA4010 false positive - allChanges and validResults are used after the loop
 
 	// Always use processDirect - no transaction buffer needed
 	// All changes from the same poll cycle arrive together, simplifying cross-table handling
