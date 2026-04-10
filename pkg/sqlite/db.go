@@ -173,12 +173,12 @@ func RunMigrations(db *sql.DB, migrationsFS fs.FS, moduleName string) error {
 	for rows.Next() {
 		var version string
 		if err := rows.Scan(&version); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		applied[version] = true
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Run pending migrations
 	for _, file := range migrationFiles {

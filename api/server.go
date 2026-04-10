@@ -720,7 +720,7 @@ func formatLSN(lsn []byte) string {
 	var sb strings.Builder
 	sb.WriteString("0x")
 	for _, b := range lsn {
-		sb.WriteString(fmt.Sprintf("%02X", b))
+		fmt.Fprintf(&sb, "%02X", b)
 	}
 	return sb.String()
 }
@@ -765,28 +765,34 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	var sb strings.Builder
 	
 	// Determine health status classes
-	healthBgClass := "bg-success/20"
-	healthTextClass := "text-success"
-	healthTitle := "System Healthy"
-	if m.HealthStatus == "warning" {
+	var healthBgClass, healthTextClass, healthTitle string
+	switch m.HealthStatus {
+	case "warning":
 		healthBgClass = "bg-warning/20"
 		healthTextClass = "text-warning"
 		healthTitle = "System Warning"
-	} else if m.HealthStatus == "error" {
+	case "error":
 		healthBgClass = "bg-error/20"
 		healthTextClass = "text-error"
 		healthTitle = "System Error"
+	default:
+		healthBgClass = "bg-success/20"
+		healthTextClass = "text-success"
+		healthTitle = "System Healthy"
 	}
 	
 	// Determine CDC status classes
-	cdcTextClass := "text-success"
-	cdcStatusText := "Active"
-	if m.CDCStatus == "inactive" {
+	var cdcTextClass, cdcStatusText string
+	switch m.CDCStatus {
+	case "inactive":
 		cdcTextClass = "text-warning"
 		cdcStatusText = "Inactive"
-	} else if m.CDCStatus == "error" {
+	case "error":
 		cdcTextClass = "text-error"
 		cdcStatusText = "Error"
+	default:
+		cdcTextClass = "text-success"
+		cdcStatusText = "Active"
 	}
 	
 	sb.WriteString(`<div class="space-y-6">`)
