@@ -1,4 +1,4 @@
-package sqlite
+package sinker
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
-	"github.com/cnlangzi/dbkrab/internal/sinker"
 )
 
 var (
@@ -37,7 +36,7 @@ var (
 // BatchConfig holds batch sink configuration options.
 type BatchConfig struct {
 	// Sinker is the underlying SQLite sinker to wrap
-	Sinker sinker.Sinker
+	Sinker Sinker
 
 	// BatchSize is the number of CDC transactions per flush.
 	// Must be > 0. Default: 10
@@ -72,7 +71,7 @@ func (c *BatchConfig) Validate() error {
 	return nil
 }
 
-// BatchSQLiteSink wraps a sinker.Sinker with batching functionality.
+// BatchSQLiteSink wraps a Sinker with batching functionality.
 // It buffers Sink operations and flushes them based on size and time thresholds,
 // while preserving CDC transaction atomicity.
 type BatchSQLiteSink struct {

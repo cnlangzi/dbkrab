@@ -194,4 +194,4 @@ err = batchSink.Write(ops)
 
 | File | Description |
 |------|-------------|
-| `pkg/sqlite/batch.go` | BatchSQLiteSink implementation |
+| `internal/sinker/batch.go` | BatchSQLiteSink implementation |
