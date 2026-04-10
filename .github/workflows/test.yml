@@ -52,8 +52,10 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Download dependencies
+        run: go mod tidy
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11.4
-          args: --timeout=5m --disable=staticcheck
+          args: --timeout=5m
