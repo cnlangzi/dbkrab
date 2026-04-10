@@ -201,7 +201,7 @@ func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
 
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := bw.DB.Begin()
+		tx, err := bw.Begin()
 		if err != nil {
 			return nil, err
 		}

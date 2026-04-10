@@ -73,7 +73,7 @@ func New(ctx context.Context, config Config) (*DB, error) {
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
 		if err := runMigrations(d.Writer.DB, config.MigrationPath); err != nil {
-			_ = d.Writer.DB.Close()
+			_ = d.Writer.Close()
 			return nil, err
 		}
 	}
