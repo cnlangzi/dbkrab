@@ -18,16 +18,16 @@ type Change struct {
 	Table         string
 	TransactionID string
 	LSN           []byte
-	Operation     int // 1=DELETE, 2=INSERT, 3=UPDATE(before), 4=UPDATE(after)
+	Operation     int       // 1=DELETE, 2=INSERT, 3=UPDATE(before), 4=UPDATE(after)
 	CommitTime    time.Time // Transaction commit time from LSN
 	Data          map[string]interface{}
 }
 
 // Querier handles CDC queries against MSSQL
 type Querier struct {
-	db        *sql.DB
-	timezone  *time.Location // SQL Server timezone for CDC timestamp conversion
-	factory   *ScannerFactory
+	db       *sql.DB
+	timezone *time.Location // SQL Server timezone for CDC timestamp conversion
+	factory  *ScannerFactory
 }
 
 // NewQuerier creates a new CDC querier
@@ -38,9 +38,9 @@ func NewQuerier(db *sql.DB, timezone *time.Location) *Querier {
 		timezone = time.Local
 	}
 	return &Querier{
-		db:        db,
-		timezone:  timezone,
-		factory:   NewScannerFactory(timezone),
+		db:       db,
+		timezone: timezone,
+		factory:  NewScannerFactory(timezone),
 	}
 }
 
