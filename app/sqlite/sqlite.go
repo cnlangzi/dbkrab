@@ -18,12 +18,18 @@ import (
 
 // Store implements core.Store for SQLite
 type Store struct {
-	db   *sql.DB
-	path string
+	db       *sql.DB
+	path     string
+	timezone *time.Location // Timezone for API time formatting (from mssql.timezone config)
 }
 
 // NewStore creates a new SQLite store with WAL mode and optimized settings
 func NewStore(path string) (*Store, error) {
+	return NewStoreWithTimezone(path, nil)
+}
+
+// NewStoreWithTimezone creates a new SQLite store with optional timezone for API formatting
+func NewStoreWithTimezone(path string, timezone *time.Location) (*Store, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
@@ -59,7 +65,7 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
-	store := &Store{db: db, path: path}
+	store := &Store{db: db, path: path, timezone: timezone}
 	// Initialize poller state
 	if err := store.initPollerState(); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
@@ -142,7 +148,7 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	}
 
 	if lastPollTime.Valid {
-		state["last_poll_time"] = lastPollTime.String
+		state["last_poll_time"] = s.formatTimeInTimezone(lastPollTime.String)
 	} else {
 		state["last_poll_time"] = nil
 	}
@@ -154,7 +160,7 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	}
 
 	if updatedAt.Valid {
-		state["updated_at"] = updatedAt.String
+		state["updated_at"] = s.formatTimeInTimezone(updatedAt.String)
 	} else {
 		state["updated_at"] = nil
 	}
@@ -408,6 +414,44 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 	return s.GetChangesWithFilter(limit, "", "", "")
 }
 
+// formatTimeInTimezone converts a time value to the configured timezone string
+// If timezone is nil or time.Local, returns as-is (UTC)
+// Otherwise, converts to the configured timezone and formats as local time
+func (s *Store) formatTimeInTimezone(t interface{}) interface{} {
+	if t == nil {
+		return nil
+	}
+
+	// Parse the time value
+	var parsedTime time.Time
+	var err error
+
+	switch v := t.(type) {
+	case time.Time:
+		parsedTime = v
+	case string:
+		// Try RFC3339Nano first, then other formats
+		parsedTime, err = time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			parsedTime, err = time.Parse("2006-01-02 15:04:05.999999999-07:00", v)
+			if err != nil {
+				return t // Return as-is if cannot parse
+			}
+		}
+	default:
+		return t
+	}
+
+	// If no timezone configured or UTC, return formatted UTC string
+	if s.timezone == nil || s.timezone == time.UTC {
+		return parsedTime.Format("2006-01-02T15:04:05.999Z")
+	}
+
+	// Convert to configured timezone and format
+	localTime := parsedTime.In(s.timezone)
+	return localTime.Format("2006-01-02 15:04:05")
+}
+
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
 	query := `SELECT id, transaction_id, table_name, operation, data, changed_at, pulled_at FROM transactions WHERE 1=1`
@@ -463,8 +507,8 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			"table_name":     resultTableName,
 			"operation":      resultOperation,
 			"data":           data,
-			"changed_at":     cdcTime,
-			"pulled_at":      pulledAt,
+			"changed_at":     s.formatTimeInTimezone(cdcTime),
+			"pulled_at":      s.formatTimeInTimezone(pulledAt),
 		})
 	}
 

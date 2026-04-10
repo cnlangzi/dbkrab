@@ -100,7 +100,9 @@ func main() {
 	var store *app.Store
 	switch cfg.App.Type {
 	case "sqlite":
-		store, err = app.NewStore(cfg.App.Path)
+		// Parse timezone from MSSQL config for API time formatting
+		apiTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
+		store, err = app.NewStoreWithTimezone(cfg.App.Path, apiTimezone)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
@@ -110,7 +112,7 @@ func main() {
 				slog.Warn("store.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite store initialized", "path", cfg.App.Path)
+		slog.Info("SQLite store initialized", "path", cfg.App.Path, "timezone", apiTimezone.String())
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)

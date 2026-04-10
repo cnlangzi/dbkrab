@@ -51,9 +51,18 @@ type Server struct {
 	configWatcher *config.Watcher
 	sinksRoot   *os.Root // Secure root for sinks directory access
 	skillsPath  string // Path to SQL skills directory from config
+	timezone    *time.Location // Timezone for time formatting (from mssql.timezone config)
 }
 
 // NewServer creates a new API server
+// formatTime formats a time.Time to the configured timezone string
+func (s *Server) formatTime(t time.Time) string {
+	if s.timezone == nil || s.timezone == time.UTC {
+		return t.Format("2006-01-02T15:04:05.999Z")
+	}
+	return t.In(s.timezone).Format("2006-01-02 15:04:05")
+}
+
 func NewServer(manager *plugin.Manager, port int) *Server {
 	return &Server{
 		manager: manager,
@@ -78,6 +87,9 @@ func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdca
 		skillsPath = "./skills/sql"
 	}
 	
+	// Parse timezone from MSSQL config for time formatting
+	tz := config.ParseTimezone(cfg.MSSQL.Timezone)
+	
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,
@@ -88,6 +100,7 @@ func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdca
 		config:        cfg,
 		configWatcher: watcher,
 		skillsPath:    skillsPath,
+		timezone:      tz,
 	}
 }
 
@@ -685,7 +698,7 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 			"lag_duration_secs": int64(gapInfo.LagDuration.Seconds()),
 			"status":            status,
 			"status_color":      statusColor,
-			"checked_at":        gapInfo.CheckedAt,
+			"checked_at":        s.formatTime(gapInfo.CheckedAt),
 		})
 	}
 
@@ -927,14 +940,9 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			metrics.CDCStatus = "active"
 			metrics.CDCMessage = "CDC polling active"
 			
-			// Get last sync time (stored as string in DB)
+			// Get last sync time (already formatted by store)
 			if lastPollStr, ok := state["last_poll_time"].(string); ok && lastPollStr != "" {
-				// Parse the timestamp string and format for display
-				if lastPoll, err := time.Parse("2006-01-02 15:04:05.999999999", lastPollStr); err == nil {
-					metrics.LastSyncTime = lastPoll.Format("2006-01-02 15:04:05")
-				} else {
-					metrics.LastSyncTime = lastPollStr
-				}
+				metrics.LastSyncTime = lastPollStr
 			}
 			
 			// Count tracked tables
@@ -1082,7 +1090,7 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 				sink["exists"] = true
 				sink["size"] = info.Size()
 				sink["sizeHuman"] = formatFileSize(info.Size())
-				sink["modTime"] = info.ModTime().Format(time.RFC3339)
+				sink["modTime"] = s.formatTime(info.ModTime())
 			} else {
 				sink["exists"] = false
 				sink["sizeHuman"] = "N/A"
