@@ -1,5 +1,22 @@
-version: "2"
 linters:
-  disable:
-    - staticcheck
+  defaults: none
+  disable-all: true
+  enable:
     - errcheck
+    - staticcheck
+    - govet
+    - gofmt
+    - misspell
+  settings:
+    errcheck:
+      checks:
+        - all
+        - '-*.Close'
+    staticcheck:
+      tests: false
+    govet:
+      tests: false
+    gofmt:
+      tests: false
+    misspell:
+      tests: false
