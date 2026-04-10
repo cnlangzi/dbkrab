@@ -1,9 +1,11 @@
-version: "1"
+# https://golangci-lint.run/usage/configuration/
+version: 2
 
 run:
   tests: false
 
 linters:
+  default: none
   enable:
     - errcheck
     - staticcheck
