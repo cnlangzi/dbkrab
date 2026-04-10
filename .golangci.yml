@@ -1,15 +1,14 @@
-version: 2
-
 run:
   timeout: 5m
 
+linters-settings:
+  govet:
+    check-shadowing: false
+
 linters:
-  default: none
+  disable-all: true
   enable:
     - gofmt
     - govet
     - ineffassign
     - staticcheck
-
-issues:
-  exclude-use-default: false
