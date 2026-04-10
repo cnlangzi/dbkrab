@@ -162,7 +162,9 @@ func (bw *BatchWriter) handleExec(cmd Command) {
 	// Execute immediately
 	result, err := bw.globalTx.Exec(cmd.Query, cmd.Args...)
 	if err != nil {
-		_ = bw.globalTx.Rollback()
+		if rbErr := bw.globalTx.Rollback(); rbErr != nil {
+			slog.Error("BatchWriter.handleExec: rollback failed", "error", rbErr)
+		}
 		bw.globalTx = nil
 		bw.pendingCount = 0
 		cmd.ResultCh <- Result{LastResult: result, LastError: err}
@@ -211,13 +213,19 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	// After all executed, decide Commit or Rollback
 	if commitErr != nil {
 		// Immediate rollback - don't wait for user to call Rollback
-		bw.globalTx.Exec("ROLLBACK TO " + savepointName)
+		if rollbackErr := bw.globalTx.Exec("ROLLBACK TO " + savepointName); rollbackErr != nil {
+			slog.Error("BatchWriter.handleBatchCommit: rollback failed", "error", rollbackErr)
+		}
 		cmd.ResultCh <- Result{LastError: commitErr, Results: results}
 		return
 	}
 
 	// Success - release savepoint
-	bw.globalTx.Exec("RELEASE SAVEPOINT " + savepointName)
+	if releaseErr := bw.globalTx.Exec("RELEASE SAVEPOINT " + savepointName); releaseErr != nil {
+		slog.Error("BatchWriter.handleBatchCommit: release savepoint failed", "error", releaseErr)
+		cmd.ResultCh <- Result{LastError: releaseErr, Results: results}
+		return
+	}
 
 	// Move to pending for potential size-based flush
 	bw.pendingStmts = append(bw.pendingStmts, cmd.Buffer...)
@@ -246,7 +254,9 @@ func (bw *BatchWriter) doFlush() {
 
 	if err := bw.globalTx.Commit(); err != nil {
 		slog.Error("BatchWriter.doFlush: commit failed", "error", err)
-		_ = bw.globalTx.Rollback()
+		if rbErr := bw.globalTx.Rollback(); rbErr != nil {
+			slog.Error("BatchWriter.doFlush: rollback failed", "error", rbErr)
+		}
 		bw.globalTx = nil
 		bw.pendingStmts = bw.pendingStmts[:0]
 		bw.pendingCount = 0
