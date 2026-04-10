@@ -58,7 +58,6 @@ func TestStore_Write(t *testing.T) {
 func TestStore_WriteOps(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -87,7 +86,6 @@ func TestStore_WriteOps(t *testing.T) {
 func TestStore_GetChanges(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -118,7 +116,6 @@ func TestStore_GetChanges(t *testing.T) {
 func TestStore_GetChangesWithFilter(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -163,7 +160,6 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 func TestStore_UpdatePollerState(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -181,7 +177,6 @@ func TestStore_UpdatePollerState(t *testing.T) {
 func TestStore_GetPollerState(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -205,7 +200,6 @@ func TestStore_GetPollerState(t *testing.T) {
 func TestStore_WriteOps_Update(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -253,7 +247,6 @@ func TestStore_WriteOps_Update(t *testing.T) {
 func TestStore_WriteOps_Delete(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
-	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
