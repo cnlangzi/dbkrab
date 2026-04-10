@@ -286,7 +286,7 @@ func renderSkillsFilesHTML(files []SkillFileInfo) string {
 				</div>
 				<span class="px-2 py-1 rounded text-xs font-medium %s flex-shrink-0 ml-2">%s</span>
 			</div>
-		</div>`, icon, file.Name, sizeInfo, typeClass, typeLabel))
+		</div>`, icon, file.Name, sizeInfo, typeClass, typeLabel)
 	}
 
 	return html.String()
