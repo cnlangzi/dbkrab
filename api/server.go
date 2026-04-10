@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -15,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
-	"github.com/cnlangzi/dbkrab/app/sqlite"
 	"github.com/yaitoo/xun"
 )
 
@@ -39,18 +38,19 @@ func getDashboardFS() fs.FS {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager     *plugin.Manager
-	dlq         *dlq.DLQ
-	cdcAdmin    *cdcadmin.Admin
-	store       *app.Store
-	port        int
-	app         *xun.App
-	mux         *http.ServeMux
-	configPath  string
-	config      *config.Config
+	manager       *plugin.Manager
+	dlq           *dlq.DLQ
+	cdcAdmin      *cdcadmin.Admin
+	store         store.Store
+	sinkerManager *sinker.Manager
+	port          int
+	app           *xun.App
+	mux           *http.ServeMux
+	configPath    string
+	config        *config.Config
 	configWatcher *config.Watcher
-	sinksRoot   *os.Root // Secure root for sinks directory access
-	skillsPath  string // Path to SQL skills directory from config
+	sinksRoot     *os.Root // Secure root for sinks directory access
+	skillsPath    string   // Path to SQL skills directory from config
 }
 
 // NewServer creates a new API server
@@ -71,18 +71,19 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *app.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store store.Store, sinkerMgr *sinker.Manager, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
 	if skillsPath == "" {
 		skillsPath = "./skills/sql"
 	}
-	
+
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,
 		cdcAdmin:      cdcAdmin,
 		store:         store,
+		sinkerManager: sinkerMgr,
 		port:          port,
 		configPath:    configPath,
 		config:        cfg,
@@ -1126,7 +1127,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 	}
 
 	// Find sink by ID
-	sink, err := s.getSinkById(id)
+	sinkCfg, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1134,44 +1135,13 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		})
 	}
 
-	// Check if database file exists
-	if _, err := os.Stat(sink.Path); err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
-		})
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to open database: %v", err),
-		})
-	}
-	defer func() { _ = db.Close() }()
-
-	// Query tables from sqlite_master
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	// Use sinker manager to query tables
+	tables, err := s.sinkerManager.QueryTables(sinkCfg.Name)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("failed to query tables: %v", err),
 		})
-	}
-	defer func() { _ = rows.Close() }()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			continue
-		}
-		// Skip internal SQLite tables
-		if !strings.HasPrefix(tableName, "sqlite_") {
-			tables = append(tables, tableName)
-		}
 	}
 
 	// Ensure we return empty array, not null
@@ -1197,7 +1167,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	// Find sink by ID
-	sink, err := s.getSinkById(id)
+	sinkCfg, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1243,50 +1213,14 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 
-	// Check if database file exists
-	if _, err := os.Stat(sink.Path); err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
-		})
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to open database: %v", err),
-		})
-	}
-	defer func() { _ = db.Close() }()
-
-	// Execute query with limit
-	limitQuery := query
-	if !strings.Contains(strings.ToUpper(query), "LIMIT") {
-		limitQuery = fmt.Sprintf("%s LIMIT 1000", query)
-	}
-
-	rows, err := db.Query(limitQuery)
+	// Use sinker manager to execute query
+	columns, results, err := s.sinkerManager.Query(sinkCfg.Name, query)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("query execution failed: %v", err),
 		})
 	}
-	defer func() { _ = rows.Close() }()
-
-	// Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to get columns: %v", err),
-		})
-	}
-
-	// Fetch results
-	results := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
