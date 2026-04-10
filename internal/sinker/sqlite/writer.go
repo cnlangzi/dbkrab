@@ -15,7 +15,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
-	"github.com/cnlangzi/dbkrab/pkg/sqlite"
+	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -246,7 +246,7 @@ func (s *Sinker) RunMigrations() error {
 
 	// Use embedded FS migrations
 	if s.migrationFS != nil {
-		return sqlite.RunMigrations(s.db, s.migrationFS, "dbkrab")
+		return sqliteutil.RunMigrations(s.db, s.migrationFS, "dbkrab")
 	}
 
 	// File-based migrations
