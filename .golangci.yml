@@ -1,9 +1,0 @@
-version: 2
-
-run:
-  tests: false
-
-linters-settings:
-  staticcheck:
-    checks:
-      - "-SA4010"
