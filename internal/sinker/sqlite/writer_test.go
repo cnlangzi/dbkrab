@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
