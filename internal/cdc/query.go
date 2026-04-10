@@ -172,7 +172,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 						op = int64(v)
 					default:
 						// Try to parse from other numeric types
-						fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &op)
+						if n, err := fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &op); err != nil || n == 0 { op = 0 }
 					}
 				}
 			}

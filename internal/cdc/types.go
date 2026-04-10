@@ -5,12 +5,9 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
-	"regexp"
 	"time"
 )
 
-// numericPattern matches numeric strings like "123", "999.99", "700.0000", "-123.45", "1.23e10"
-var numericPattern = regexp.MustCompile(`^-?\d+(\.\d+)?([eE][+-]?\d+)?$`)
 
 // Nullable represents a value that may be NULL.
 // It implements sql.Scanner and driver.Valuer.
@@ -404,6 +401,7 @@ type Scanner interface {
 // The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
 // but Go driver incorrectly treats it as UTC.
 // We reinterpret it using the configured timezone and convert to UTC for storage.
+//nolint:unused
 func convertCommitTime(driverTime time.Time, timezone *time.Location) time.Time {
 	if timezone == nil || timezone == time.Local {
 		// No timezone configured - use driver's value as-is
