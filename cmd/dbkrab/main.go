@@ -150,7 +150,7 @@ func main() {
 	slog.Info("dead letter queue initialized")
 
 	// Create sinker manager
-	sinkerMgr := sinker.NewManager(nil)
+	sinkerMgr := sinker.NewManager()
 	sinkerMgr.Configure(cfg.Sinks.ToMap())
 	defer func() {
 		if err := sinkerMgr.Close(); err != nil {

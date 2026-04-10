@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"strings"
 	"sync"
@@ -17,18 +16,16 @@ import (
 
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
 type Manager struct {
-	sinkers       map[string]Sinker // keyed by database name
-	dbConfigs     map[string]config.DatabaseConfig
-	migrationsFS  fs.FS
-	mu            sync.RWMutex
+	sinkers   map[string]Sinker // keyed by database name
+	dbConfigs map[string]config.DatabaseConfig
+	mu        sync.RWMutex
 }
 
 // NewManager creates a new Sinker manager
-func NewManager(migrationsFS fs.FS) *Manager {
+func NewManager() *Manager {
 	return &Manager{
-		sinkers:      make(map[string]Sinker),
-		dbConfigs:    make(map[string]config.DatabaseConfig),
-		migrationsFS: migrationsFS,
+		sinkers:   make(map[string]Sinker),
+		dbConfigs: make(map[string]config.DatabaseConfig),
 	}
 }
 
@@ -87,14 +84,8 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	// NewSinker handles migrations internally
-	s, err := sinkSqlite.NewSinker(
-		name,
-		"sqlite",
-		path,
-		m.migrationsFS,
-		dbConfig.MigrationPath,
-	)
+	// Use github.com/yaitoo/sqle/migrate for migrations separately
+	s, err := sinkSqlite.NewSinker(name, "sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite sinker: %w", err)
 	}
