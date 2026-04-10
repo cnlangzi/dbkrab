@@ -130,8 +130,8 @@ func TestQueryRowContext(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// Create and insert data
-	_ = db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
-	_ = db.Writer.Exec("INSERT INTO test (name) VALUES (?)", "row")
+	_, _ = db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
+	_, _ = db.Writer.Exec("INSERT INTO test (name) VALUES (?)", "row")
 
 	// Query single row
 	ctx := context.Background()
