@@ -13,9 +13,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
@@ -56,9 +53,6 @@ type BatchConfig struct {
 
 	// DLQ is the dead letter queue for failed operations
 	DLQ *dlq.DLQ
-
-	// EnableMetrics enables Prometheus metrics collection. Default: true
-	EnableMetrics bool
 }
 
 // Validate validates the batch configuration.
@@ -78,67 +72,11 @@ func (c *BatchConfig) Validate() error {
 	return nil
 }
 
-// batchMetrics holds Prometheus metrics for the batch sink.
-type batchMetrics struct {
-	bufferedTx       *prometheus.GaugeVec
-	flushCount       *prometheus.CounterVec
-	flushDuration    *prometheus.HistogramVec
-	lastFlushSuccess *prometheus.GaugeVec
-	dlqEnqueueCount  *prometheus.CounterVec
-}
-
-// newBatchMetrics creates new batch metrics with optional metrics collection.
-func newBatchMetrics(enable bool) *batchMetrics {
-	if !enable {
-		return nil
-	}
-
-	return &batchMetrics{
-		bufferedTx: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "sqlite_batch_sink_buffer_tx_count",
-				Help: "Current number of buffered CDC transactions",
-			},
-			[]string{"database"},
-		),
-		flushCount: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "sqlite_batch_sink_flush_count",
-				Help: "Total number of flush operations",
-			},
-			[]string{"database"},
-		),
-		flushDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    "sqlite_batch_sink_last_flush_duration_seconds",
-				Help:    "Duration of last flush operation in seconds",
-				Buckets: prometheus.DefBuckets,
-			},
-			[]string{"database"},
-		),
-		lastFlushSuccess: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "sqlite_batch_sink_last_flush_success",
-				Help: "Timestamp of last successful flush (unix seconds)",
-			},
-			[]string{"database"},
-		),
-		dlqEnqueueCount: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "sqlite_batch_sink_dlq_enqueue_count",
-				Help: "Total number of entries enqueued to DLQ",
-			},
-			[]string{"database"},
-		),
-	}
-}
-
 // BatchSQLiteSink wraps a sinker.Sinker with batching functionality.
 // It buffers Sink operations and flushes them based on size and time thresholds,
 // while preserving CDC transaction atomicity.
 type BatchSQLiteSink struct {
 	config   BatchConfig
-	metrics  *batchMetrics
 	database string
 
 	// mu protects buffer and state
@@ -174,14 +112,8 @@ func NewBatchSQLiteSink(config BatchConfig) (*BatchSQLiteSink, error) {
 		return nil, err
 	}
 
-	enableMetrics := true
-	if config.EnableMetrics == false {
-		enableMetrics = false
-	}
-
 	s := &BatchSQLiteSink{
 		config:    config,
-		metrics:  newBatchMetrics(enableMetrics),
 		database: config.Sinker.DatabaseName(),
 		buffer:   make([]core.Sink, 0, config.BatchSize),
 		txBuffer: make(map[string]*core.Transaction),
@@ -286,8 +218,6 @@ func (s *BatchSQLiteSink) WriteCtx(ctx context.Context, ops []core.Sink) error {
 			s.mu.Lock()
 		}
 	}
-
-	s.updateMetrics()
 
 	// Reset the flush timer on each write
 	s.resetFlushTimer()
@@ -441,9 +371,6 @@ func (s *BatchSQLiteSink) FlushCtx(ctx context.Context) error {
 		"transactions", txCount,
 		"duration_ms", int(duration*1000))
 
-	// Update metrics
-	s.recordFlushSuccess(txCount, duration)
-
 	return nil
 }
 
@@ -558,8 +485,6 @@ func (s *BatchSQLiteSink) sendToDLQ(ops []core.Sink, originalErr error) error {
 
 			if err := s.config.DLQ.Write(entry); err != nil {
 				dlqErrs = append(dlqErrs, err)
-			} else {
-				s.recordDLQEntry()
 			}
 		}
 	}
@@ -683,46 +608,6 @@ func (s *BatchSQLiteSink) BufferSize() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.pendingTxCount
-}
-
-// updateMetrics updates Prometheus metrics.
-func (s *BatchSQLiteSink) updateMetrics() {
-	if s.metrics == nil {
-		return
-	}
-
-	s.metrics.bufferedTx.WithLabelValues(s.database).Set(
-		float64(s.pendingTxCount),
-	)
-}
-
-// recordFlushSuccess records successful flush metrics.
-func (s *BatchSQLiteSink) recordFlushSuccess(txCount int, duration float64) {
-	if s.metrics == nil {
-		return
-	}
-
-	s.metrics.flushCount.WithLabelValues(s.database).Inc()
-	s.metrics.flushDuration.WithLabelValues(s.database).Observe(duration)
-	s.metrics.lastFlushSuccess.WithLabelValues(s.database).Set(float64(time.Now().Unix()))
-}
-
-// recordFlushError records flush error metrics.
-func (s *BatchSQLiteSink) recordFlushError(err error) {
-	if s.metrics == nil {
-		return
-	}
-
-	slog.Error("BatchSQLiteSink: flush error recorded", "error", err)
-}
-
-// recordDLQEntry records DLQ entry metrics.
-func (s *BatchSQLiteSink) recordDLQEntry() {
-	if s.metrics == nil {
-		return
-	}
-
-	s.metrics.dlqEnqueueCount.WithLabelValues(s.database).Inc()
 }
 
 // DatabaseName returns the database name.
