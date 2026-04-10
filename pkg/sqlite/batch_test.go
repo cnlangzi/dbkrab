@@ -14,9 +14,9 @@ import (
 
 func newTestDB(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite3", ":memory:?_journal_mode=WAL&_synchronous=OFF")
-	require.NoError(t, t, err)
+	require.NoError(t, err)
 	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-	require.NoError(t, t, err)
+	require.NoError(t, err)
 	return db
 }
 
