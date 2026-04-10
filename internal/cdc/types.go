@@ -76,7 +76,6 @@ func (i *Int64) Scan(src interface{}) error {
 		i.val, i.valid = 0, false
 		return fmt.Errorf("Int64.Scan: unsupported type %T", src)
 	}
-	return nil
 }
 
 // Value implements driver.Valuer for Int64.
@@ -120,7 +119,6 @@ func (f *Float64) Scan(src interface{}) error {
 		f.val, f.valid = 0, false
 		return fmt.Errorf("Float64.Scan: unsupported type %T", src)
 	}
-	return nil
 }
 
 // Value implements driver.Valuer for Float64.
