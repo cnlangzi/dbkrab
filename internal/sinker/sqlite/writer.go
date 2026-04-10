@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"sync"
@@ -16,15 +17,18 @@ import (
 
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
-	name     string
-	db       *sql.DB
-	dbType   string
-	mu       sync.Mutex
-	closed   bool
+	name          string
+	db            *sql.DB
+	dbType        string
+	migrationFS   fs.FS
+	migrationsDir string
+	mu            sync.Mutex
+	closed        bool
 }
 
 // NewSinker creates a new SQLite sinker.
-func NewSinker(name, dbType, file string) (*Sinker, error) {
+// migrationsFS and migrationsDir are used for auto-running migrations.
+func NewSinker(name, dbType, file string, migrationsFS fs.FS, migrationsDir string) (*Sinker, error) {
 	db, err := sql.Open("sqlite3", file+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -32,11 +36,23 @@ func NewSinker(name, dbType, file string) (*Sinker, error) {
 
 	db.SetMaxOpenConns(1)
 
-	return &Sinker{
-		name:   name,
-		db:     db,
-		dbType: dbType,
-	}, nil
+	s := &Sinker{
+		name:          name,
+		db:            db,
+		dbType:        dbType,
+		migrationFS:   migrationsFS,
+		migrationsDir: migrationsDir,
+	}
+
+	// Run migrations on startup if configured
+	if s.migrationFS != nil && s.migrationsDir != "" {
+		if err := RunMigrationsFS(db, s.migrationFS, s.migrationsDir); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("run migrations: %w", err)
+		}
+	}
+
+	return s, nil
 }
 
 // DatabaseName returns the database name.

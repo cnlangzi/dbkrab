@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"sync"
@@ -16,16 +17,18 @@ import (
 
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
 type Manager struct {
-	sinkers   map[string]Sinker // keyed by database name
-	dbConfigs map[string]config.DatabaseConfig
-	mu        sync.RWMutex
+	sinkers       map[string]Sinker // keyed by database name
+	dbConfigs     map[string]config.DatabaseConfig
+	migrationsFS  fs.FS
+	mu            sync.RWMutex
 }
 
 // NewManager creates a new Sinker manager
-func NewManager() *Manager {
+func NewManager(migrationsFS fs.FS) *Manager {
 	return &Manager{
-		sinkers:   make(map[string]Sinker),
-		dbConfigs: make(map[string]config.DatabaseConfig),
+		sinkers:      make(map[string]Sinker),
+		dbConfigs:    make(map[string]config.DatabaseConfig),
+		migrationsFS: migrationsFS,
 	}
 }
 
@@ -84,19 +87,16 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	s, err := sinkSqlite.NewSinker(sinkSqlite.Config{
-		Name:          name,
-		File:          path,
-		ModuleName:    "dbkrab",
-		MigrationsDir: dbConfig.MigrationPath,
-	})
+	// NewSinker handles migrations internally
+	s, err := sinkSqlite.NewSinker(
+		name,
+		"sqlite",
+		path,
+		m.migrationsFS,
+		dbConfig.MigrationPath,
+	)
 	if err != nil {
-		return nil, err
-	}
-
-	// Run initial migrations
-	if err := s.RunMigrations(); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
+		return nil, fmt.Errorf("create sqlite sinker: %w", err)
 	}
 
 	return s, nil

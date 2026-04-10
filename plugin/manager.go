@@ -25,7 +25,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		plugins:   make(map[string]Plugin),
-		swManager: sinker.NewManager(),
+		swManager: sinker.NewManager(nil),
 	}
 }
 
