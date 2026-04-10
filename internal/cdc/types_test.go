@@ -209,8 +209,8 @@ func TestFloat64ScanValue(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:    "float32",
-			src:     float32(78.9),
+			name: "float32",
+			src:  float32(78.9),
 			// float32(78.9) converts to float64(78.9000015258789) due to binary FP representation
 			wantVal: float64(float32(78.9)),
 			wantNil: false,
