@@ -7,7 +7,7 @@
 // The test package exercises:
 //   - Transaction grouping from []core.Change
 //   - Handler.Handle() via plugin.Manager
-//   - sinkwriter.Manager routing
+//   - sinker.Manager routing
 //   - Store and offset interactions (in-memory/test doubles)
 package flow
 
