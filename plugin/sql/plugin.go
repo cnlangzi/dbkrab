@@ -250,9 +250,9 @@ func (p *Plugin) checkChanges() {
 	}
 
 	// Check for files that no longer exist
+	// Use full path as key (currentFiles keys are full paths, not just filenames)
 	for filePath := range p.watchPending {
-		relName := filepath.Base(filePath)
-		if !currentFiles[relName] && relName != "" {
+		if filePath != "" && !currentFiles[filePath] {
 			// File was deleted
 			cur := p.watchPending[filePath]
 			cur.debounceAt = now.Add(500 * time.Millisecond)
