@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"embed"
 	"testing"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
