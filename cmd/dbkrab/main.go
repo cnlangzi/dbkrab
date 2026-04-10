@@ -27,7 +27,7 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
-//go:embed all:data
+//go:embed data
 var dataFS embed.FS
 
 var (
