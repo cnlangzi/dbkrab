@@ -35,7 +35,7 @@ func TestSinker_Write(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	ops := []core.Sink{
 		{
@@ -66,7 +66,7 @@ func TestSinker_Write_Update(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	// Insert first
 	ops := []core.Sink{
@@ -116,7 +116,7 @@ func TestSinker_Write_Delete(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	// Insert first
 	ops := []core.Sink{
@@ -165,7 +165,7 @@ func TestSinker_Write_Empty(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	// Empty ops should not error
 	err = sinker.Write([]core.Sink{})
@@ -181,7 +181,7 @@ func TestSinker_Write_SkipOnConflict(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	ops := []core.Sink{
 		{
@@ -210,7 +210,7 @@ func TestSinker_InMemory(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	ops := []core.Sink{
 		{
@@ -241,7 +241,7 @@ func TestSinker_RunMigrations_NoMigrations(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	// No migrations configured, should be nil
 	err = sinker.RunMigrations()
@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS test_table (
 		MigrationsDir: migrationsDir,
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	err = sinker.RunMigrations()
 	assert.NoError(t, err)
@@ -284,7 +284,7 @@ func TestSinker_DatabaseName(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	assert.Equal(t, "mydb", sinker.DatabaseName())
 }
@@ -298,7 +298,7 @@ func TestSinker_DatabaseType(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	assert.Equal(t, "sqlite", sinker.DatabaseType())
 }
@@ -312,7 +312,7 @@ func TestSinker_MultipleTables(t *testing.T) {
 		ModuleName: "test",
 	})
 	require.NoError(t, err)
-	defer sinker.Close()
+	defer func() { _ = sinker.Close() }()
 
 	ops := []core.Sink{
 		{

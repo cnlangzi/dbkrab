@@ -20,6 +20,7 @@ func newTestDB(t *testing.T) *sqlite.DB {
 func TestNewStore(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
@@ -32,10 +33,11 @@ func TestNewStore(t *testing.T) {
 func TestStore_Write(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tx := &core.Transaction{
 		ID: "tx-001",
@@ -59,10 +61,11 @@ func TestStore_Write(t *testing.T) {
 func TestStore_WriteOps(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ops := []core.Sink{
 		{
@@ -87,10 +90,11 @@ func TestStore_WriteOps(t *testing.T) {
 func TestStore_GetChanges(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Write a transaction first
 	tx := &core.Transaction{
@@ -117,10 +121,11 @@ func TestStore_GetChanges(t *testing.T) {
 func TestStore_GetChangesWithFilter(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Write transactions
 	tx1 := &core.Transaction{
@@ -161,10 +166,11 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 func TestStore_UpdatePollerState(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	err = store.UpdatePollerState("lsn-123", 5)
 	assert.NoError(t, err)
@@ -178,10 +184,11 @@ func TestStore_UpdatePollerState(t *testing.T) {
 func TestStore_GetPollerState(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Initial state
 	state, err := store.GetPollerState()
@@ -201,10 +208,11 @@ func TestStore_GetPollerState(t *testing.T) {
 func TestStore_WriteOps_Update(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Insert data first
 	ops := []core.Sink{
@@ -248,10 +256,11 @@ func TestStore_WriteOps_Update(t *testing.T) {
 func TestStore_WriteOps_Delete(t *testing.T) {
 	db := newTestDB(t)
 	defer func() { _ = db.Close() }()
+	defer func() { _ = store.Close() }()
 
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Insert data first
 	ops := []core.Sink{
