@@ -2,12 +2,3 @@ version: 2
 
 run:
   tests: false
-
-linters:
-  disable-all: true
-  enable:
-    - errcheck
-    - staticcheck
-    - govet
-    - gofmt
-    - misspell
