@@ -3,10 +3,11 @@ package sqlite
 import (
 	"context"
 	"testing"
+	"testing/fstest"
 )
 
 func TestNewInMemory(t *testing.T) {
-	db, err := NewInMemory(context.Background())
+	db, err := NewInMemory(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestNewInMemory(t *testing.T) {
 func TestNewFile(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	db, err := NewFile(context.Background(), tmpFile)
+	db, err := NewFile(context.Background(), tmpFile, "test", nil)
 	if err != nil {
 		t.Fatalf("NewFile failed: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestNewFile(t *testing.T) {
 }
 
 func TestExecContext(t *testing.T) {
-	db, err := NewInMemory(context.Background())
+	db, err := NewInMemory(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestExecContext(t *testing.T) {
 }
 
 func TestQueryContext(t *testing.T) {
-	db, err := NewInMemory(context.Background())
+	db, err := NewInMemory(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestQueryContext(t *testing.T) {
 }
 
 func TestQueryRowContext(t *testing.T) {
-	db, err := NewInMemory(context.Background())
+	db, err := NewInMemory(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
@@ -142,5 +143,37 @@ func TestQueryRowContext(t *testing.T) {
 
 	if name != "row" {
 		t.Errorf("expected 'row', got '%s'", name)
+	}
+}
+
+// TestMigration tests that migrations are executed on startup
+func TestMigration(t *testing.T) {
+	// Create a simple in-memory fs with migration file
+	migrations := fstest.MapFS{
+		"001_create_test.sql": &fstest.MapFile{
+			Data: []byte(`
+CREATE TABLE IF NOT EXISTS migration_test (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`),
+		},
+	}
+
+	db, err := NewInMemory(context.Background(), "test", migrations)
+	if err != nil {
+		t.Fatalf("NewInMemory with migrations failed: %v", err)
+	}
+	defer db.Close()
+
+	// Verify table was created via migration
+	row := db.Reader.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_test'")
+	var tableName string
+	if err := row.Scan(&tableName); err != nil {
+		t.Fatalf("Migration table not found: %v", err)
+	}
+
+	if tableName != "migration_test" {
+		t.Errorf("expected 'migration_test', got '%s'", tableName)
 	}
 }

@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"net/url"
 	"os"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -18,8 +22,8 @@ var ErrUnreachable = errors.New("sqlite: is unreachable")
 // DB wraps SQLite database with read/write separation.
 // Writer is used for writes, Reader for reads.
 type DB struct {
-	Writer *sql.DB
-	Reader *sql.DB
+	Writer *sqle.DB
+	Reader *sqle.DB
 	ctx    context.Context
 }
 
@@ -27,6 +31,12 @@ type DB struct {
 type Config struct {
 	// File is the path to the SQLite file. Use ":memory:" for in-memory database.
 	File string
+
+	// ModuleName is used for migration discovery.
+	ModuleName string
+
+	// FS for migration files (optional).
+	FS fs.FS
 
 	// InMemory indicates if this is an in-memory database.
 	InMemory bool
@@ -39,7 +49,7 @@ type Config struct {
 	MaxIdleConnsReader int
 }
 
-// New creates a new SQLite DB with read/write separation.
+// New creates a new SQLite DB with read/write separation and migration support.
 func New(ctx context.Context, config Config) (*DB, error) {
 	if config.File == "" {
 		config.File = ":memory:"
@@ -57,6 +67,20 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
+	// Run migrations if FS is provided
+	if config.FS != nil {
+		m := migrate.New(d.Writer)
+		if err := m.Discover(config.FS, migrate.WithSuffix("sqlite"), migrate.WithModule(config.ModuleName)); err != nil {
+			return nil, err
+		}
+		if err := m.Init(ctx); err != nil {
+			return nil, err
+		}
+		if err := m.Migrate(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	d.Reader, err = setupReader(config.File, inmemory, config.MaxOpenConnsReader, config.MaxIdleConnsReader)
 	if err != nil {
 		return nil, err
@@ -66,15 +90,17 @@ func New(ctx context.Context, config Config) (*DB, error) {
 }
 
 // NewInMemory creates an in-memory SQLite DB with shared cache for read/write separation.
-func NewInMemory(ctx context.Context) (*DB, error) {
+func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
 	return New(ctx, Config{
-		File:     ":memory:",
-		InMemory: true,
+		File:        ":memory:",
+		InMemory:    true,
+		ModuleName: moduleName,
+		FS:          migrations,
 	})
 }
 
 // NewFile creates a SQLite DB with read/write separation from a file.
-func NewFile(ctx context.Context, file string) (*DB, error) {
+func NewFile(ctx context.Context, file string, moduleName string, migrations fs.FS) (*DB, error) {
 	// Ensure file exists
 	_, err := os.Stat(file)
 	if err != nil {
@@ -89,12 +115,14 @@ func NewFile(ctx context.Context, file string) (*DB, error) {
 	}
 
 	return New(ctx, Config{
-		File:     file,
-		InMemory: false,
+		File:        file,
+		InMemory:    false,
+		ModuleName:  moduleName,
+		FS:          migrations,
 	})
 }
 
-func setupWriter(file string, inmemory bool, maxOpenConns int) (*sql.DB, error) {
+func setupWriter(file string, inmemory bool, maxOpenConns int) (*sqle.DB, error) {
 	dsn := buildWriterDSN(file, inmemory)
 
 	d, err := sql.Open("sqlite3", dsn)
@@ -112,10 +140,10 @@ func setupWriter(file string, inmemory bool, maxOpenConns int) (*sql.DB, error) 
 		return nil, err
 	}
 
-	return d, nil
+	return sqle.Open(d), nil
 }
 
-func setupReader(file string, inmemory bool, maxOpenConns, maxIdleConns int) (*sql.DB, error) {
+func setupReader(file string, inmemory bool, maxOpenConns, maxIdleConns int) (*sqle.DB, error) {
 	dsn := buildReaderDSN(file, inmemory)
 
 	d, err := sql.Open("sqlite3", dsn)
@@ -139,7 +167,7 @@ func setupReader(file string, inmemory bool, maxOpenConns, maxIdleConns int) (*s
 		return nil, err
 	}
 
-	return d, nil
+	return sqle.Open(d), nil
 }
 
 func buildWriterDSN(file string, inmemory bool) string {
@@ -222,31 +250,31 @@ func (db *DB) Close() error {
 }
 
 // Exec executes a write operation on Writer.
-func (db *DB) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (db *DB) Exec(query string, args ...interface{}) (sqle.Result, error) {
 	return db.Writer.Exec(query, args...)
 }
 
 // ExecContext executes a write operation on Writer with context.
-func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sqle.Result, error) {
 	return db.Writer.ExecContext(ctx, query, args...)
 }
 
 // Query executes a read operation on Reader.
-func (db *DB) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (db *DB) Query(query string, args ...interface{}) (sqle.Rows, error) {
 	return db.Reader.Query(query, args...)
 }
 
 // QueryContext executes a read operation on Reader with context.
-func (db *DB) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+func (db *DB) QueryContext(ctx context.Context, query string, args ...interface{}) (sqle.Rows, error) {
 	return db.Reader.QueryContext(ctx, query, args...)
 }
 
 // QueryRow executes a read operation on Reader and returns a single row.
-func (db *DB) QueryRow(query string, args ...interface{}) *sql.Row {
+func (db *DB) QueryRow(query string, args ...interface{}) sqle.Row {
 	return db.Reader.QueryRow(query, args...)
 }
 
 // QueryRowContext executes a read operation on Reader with context and returns a single row.
-func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) sqle.Row {
 	return db.Reader.QueryRowContext(ctx, query, args...)
 }
