@@ -209,14 +209,14 @@ func (s *Skill) ValidateSinks() error {
 		}
 
 		// Validate and precompile 'if' expression
-		if sink.If != "" {
+		if s.Sinks[i].If != "" {
 			// Normalize SQL-style expression to govaluate format
-			normalizedIf := normalizeIfExpression(sink.If)
+			normalizedIf := normalizeIfExpression(s.Sinks[i].If)
 			expr, err := govaluate.NewEvaluableExpression(normalizedIf)
 			if err != nil {
-				return fmt.Errorf("sink[%d].if: invalid expression '%s': %w", i, sink.If, err)
+				return fmt.Errorf("sink[%d].if: invalid expression '%s': %w", i, s.Sinks[i].If, err)
 			}
-			sink.compiledIf = expr
+			s.Sinks[i].compiledIf = expr
 		}
 	}
 	return nil
