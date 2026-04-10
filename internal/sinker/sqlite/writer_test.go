@@ -161,7 +161,7 @@ func TestSinker_Write_Empty(t *testing.T) {
 	defer func() { _ = sinker.Close() }()
 
 	// Empty ops should not error
-	err = sinker.Write([]core.Sink{})
+	err = sinker.Write(context.Background(), []core.Sink{})
 	assert.NoError(t, err)
 }
 
