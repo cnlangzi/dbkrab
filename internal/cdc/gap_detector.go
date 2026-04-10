@@ -10,16 +10,16 @@ import (
 
 // GapInfo contains information about CDC gap detection
 type GapInfo struct {
-	Table            string      // Original table name (schema.table format)
-	CaptureInstance  string      // CDC capture instance name
-	CurrentLSN       []byte
-	MinLSN           []byte
-	MaxLSN           []byte
-	HasGap           bool          // true if current_lsn < min_lsn (data loss)
-	LagBytes         int64         // max_lsn - current_lsn in bytes
-	LagDuration      time.Duration // estimated time lag based on LSN timestamps
-	MissingLSNRange  LSNRange      // range of missing LSNs (if HasGap)
-	CheckedAt        time.Time
+	Table           string // Original table name (schema.table format)
+	CaptureInstance string // CDC capture instance name
+	CurrentLSN      []byte
+	MinLSN          []byte
+	MaxLSN          []byte
+	HasGap          bool          // true if current_lsn < min_lsn (data loss)
+	LagBytes        int64         // max_lsn - current_lsn in bytes
+	LagDuration     time.Duration // estimated time lag based on LSN timestamps
+	MissingLSNRange LSNRange      // range of missing LSNs (if HasGap)
+	CheckedAt       time.Time
 }
 
 // LSNRange represents a range of LSN values
