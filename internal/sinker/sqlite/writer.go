@@ -16,6 +16,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/yaitoo/sqle"
 	"github.com/yaitoo/sqle/migrate"
 
@@ -160,23 +161,29 @@ func (s *Sinker) Write(ops []core.Sink) error {
 			"op_type", op.OpType.String(),
 			"rows", len(op.DataSet.Rows))
 
+		config := sqliteutil.TableConfig{
+			Output:     op.Config.Output,
+			PrimaryKey: op.Config.PrimaryKey,
+			OnConflict: op.Config.OnConflict,
+		}
+
 		switch op.OpType {
 		case core.OpInsert:
-			if err := s.insertInTx(tx, op.Config, op.DataSet); err != nil {
+			if err := s.insertInTx(tx, config, op.DataSet); err != nil {
 				slog.Error("SQLiteSinker.Write: insert failed",
 					"output", op.Config.Output,
 					"error", err)
 				return fmt.Errorf("insert %s: %w", op.Config.Output, err)
 			}
 		case core.OpUpdateAfter:
-			if err := s.updateInTx(tx, op.Config, op.DataSet); err != nil {
+			if err := sqliteutil.UpdateInTx(tx, config, op.DataSet.Columns, op.DataSet.Rows); err != nil {
 				slog.Error("SQLiteSinker.Write: update failed",
 					"output", op.Config.Output,
 					"error", err)
 				return fmt.Errorf("update %s: %w", op.Config.Output, err)
 			}
 		case core.OpDelete:
-			if err := s.deleteInTx(tx, op.Config, op.DataSet); err != nil {
+			if err := sqliteutil.DeleteInTx(tx, config, op.DataSet.Columns, op.DataSet.Rows); err != nil {
 				slog.Error("SQLiteSinker.Write: delete failed",
 					"output", op.Config.Output,
 					"error", err)
@@ -198,14 +205,15 @@ func (s *Sinker) Write(ops []core.Sink) error {
 	return nil
 }
 
-// insertInTx inserts DataSet into table
-func (s *Sinker) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
+// insertInTx inserts DataSet into table with OnConflict handling.
+// This function has special handling for OnConflict strategy that's different from store.
+func (s *Sinker) insertInTx(tx *sql.Tx, config sqliteutil.TableConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
 
-	// Ensure table exists
-	if err := s.ensureTable(tx, config.Output, ds.Columns); err != nil {
+	// Use shared EnsureTable
+	if err := sqliteutil.EnsureTable(tx, config.Output, ds.Columns); err != nil {
 		return err
 	}
 
@@ -216,13 +224,13 @@ func (s *Sinker) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet
 		switch config.OnConflict {
 		case "overwrite":
 			// INSERT OR REPLACE
-			sqlStr = s.buildInsertSQL(config.Output, ds.Columns, row, true)
+			sqlStr = sqliteutil.BuildInsertSQL(config.Output, ds.Columns, true)
 		case "skip":
 			// INSERT OR IGNORE
-			sqlStr = s.buildInsertSQL(config.Output, ds.Columns, row, false)
+			sqlStr = sqliteutil.BuildInsertSQL(config.Output, ds.Columns, false)
 		default:
 			// Default to standard INSERT
-			sqlStr = s.buildStandardInsertSQL(config.Output, ds.Columns, row)
+			sqlStr = sqliteutil.BuildStandardInsertSQL(config.Output, ds.Columns)
 		}
 
 		_, err := tx.Exec(sqlStr, row...)
@@ -232,151 +240,6 @@ func (s *Sinker) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet
 	}
 
 	return nil
-}
-
-// buildInsertSQL builds INSERT SQL with OR REPLACE or OR IGNORE
-func (s *Sinker) buildInsertSQL(table string, columns []string, row []interface{}, replace bool) string {
-	escapedCols := make([]string, len(columns))
-	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s]", col)
-	}
-	placeholders := make([]string, len(columns))
-	for i := range columns {
-		placeholders[i] = "?"
-	}
-
-	verb := "INSERT OR IGNORE"
-	if replace {
-		verb = "INSERT OR REPLACE"
-	}
-
-	return fmt.Sprintf("%s INTO %s (%s) VALUES (%s)",
-		verb,
-		table,
-		strings.Join(escapedCols, ", "),
-		strings.Join(placeholders, ", "))
-}
-
-// buildStandardInsertSQL builds standard INSERT SQL
-func (s *Sinker) buildStandardInsertSQL(table string, columns []string, row []interface{}) string {
-	escapedCols := make([]string, len(columns))
-	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s]", col)
-	}
-	placeholders := make([]string, len(columns))
-	for i := range columns {
-		placeholders[i] = "?"
-	}
-
-	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		table,
-		strings.Join(escapedCols, ", "),
-		strings.Join(placeholders, ", "))
-}
-
-// updateInTx updates records in table
-func (s *Sinker) updateInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
-	if ds == nil || len(ds.Rows) == 0 {
-		return nil
-	}
-
-	// Find PK index
-	pkIndex := -1
-	for i, col := range ds.Columns {
-		if col == config.PrimaryKey {
-			pkIndex = i
-			break
-		}
-	}
-
-	if pkIndex == -1 {
-		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
-	}
-
-	for _, row := range ds.Rows {
-		// Build UPDATE SQL
-		var setClauses []string
-		var values []any
-		for i, col := range ds.Columns {
-			if col == config.PrimaryKey {
-				continue
-			}
-			setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
-			values = append(values, row[i])
-		}
-
-		pkValue := row[pkIndex]
-		sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
-			config.Output,
-			strings.Join(setClauses, ", "),
-			config.PrimaryKey)
-		values = append(values, pkValue)
-
-		_, err := tx.Exec(sqlStr, values...)
-		if err != nil {
-			return fmt.Errorf("execute: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// deleteInTx deletes records from table
-func (s *Sinker) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
-	if ds == nil || len(ds.Rows) == 0 {
-		return nil
-	}
-
-	// Find PK index
-	pkIndex := -1
-	for i, col := range ds.Columns {
-		if col == config.PrimaryKey {
-			pkIndex = i
-			break
-		}
-	}
-
-	if pkIndex == -1 {
-		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
-	}
-
-	pkValues := make([]any, len(ds.Rows))
-	for i, row := range ds.Rows {
-		pkValues[i] = row[pkIndex]
-	}
-
-	// Build IN clause
-	placeholders := make([]string, len(ds.Rows))
-	for i := range ds.Rows {
-		placeholders[i] = "?"
-	}
-
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE [%s] IN (%s)",
-		config.Output,
-		config.PrimaryKey,
-		strings.Join(placeholders, ", "))
-
-	_, err := tx.Exec(sqlStr, pkValues...)
-	if err != nil {
-		return fmt.Errorf("execute: %w", err)
-	}
-
-	return nil
-}
-
-// ensureTable ensures the table exists with the given columns
-func (s *Sinker) ensureTable(tx *sql.Tx, table string, columns []string) error {
-	escapedCols := make([]string, len(columns))
-	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
-	}
-
-	sqlStr := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)",
-		table,
-		strings.Join(escapedCols, ", "))
-
-	_, err := tx.Exec(sqlStr)
-	return err
 }
 
 // RunMigrations runs any pending migrations using sqle/migrate
