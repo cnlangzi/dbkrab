@@ -83,7 +83,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 			// Filter sinks by table and evaluate 'if' conditions
 			for _, sinkCfg := range sinkConfigs {
-				if sinkCfg.On != "" && strings.ToLower(sinkCfg.On) != strings.ToLower(change.Table) {
+				if sinkCfg.On != "" && !strings.EqualFold(sinkCfg.On, change.Table) {
 					slog.Debug("Engine.Handle: sink table mismatch",
 						"sink", sinkCfg.Name,
 						"sink.On", sinkCfg.On,

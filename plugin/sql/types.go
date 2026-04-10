@@ -245,12 +245,12 @@ func normalizeIfExpression(expr string) string {
 	result := expr
 
 	// Step 1: Protect existing operators
-	result = strings.Replace(result, "==", "\x00EQ\x00", -1)
-	result = strings.Replace(result, "!=", "\x00NE\x00", -1)
-	result = strings.Replace(result, ">=", "\x00GE\x00", -1)
-	result = strings.Replace(result, "<=", "\x00LE\x00", -1)
-	result = strings.Replace(result, "&&", "\x00AND\x00", -1)
-	result = strings.Replace(result, "||", "\x00OR\x00", -1)
+	result = strings.ReplaceAll(result, "==", "\x00EQ\x00")
+	result = strings.ReplaceAll(result, "!=", "\x00NE\x00")
+	result = strings.ReplaceAll(result, ">=", "\x00GE\x00")
+	result = strings.ReplaceAll(result, "<=", "\x00LE\x00")
+	result = strings.ReplaceAll(result, "&&", "\x00AND\x00")
+	result = strings.ReplaceAll(result, "||", "\x00OR\x00")
 
 	// Step 2: Replace single = with == (only outside of string literals)
 	var sb strings.Builder

@@ -355,11 +355,7 @@ func (tb *TransactionBuffer) buildTransaction(pending *pendingTransaction) *Tran
 func (tb *TransactionBuffer) cleanupLoop() {
 	// Reserved for future use - e.g., periodic cleanup of stale transactions
 	// No-op now since timeout fallback was removed
-	for {
-		select {
-		case <-tb.stopCh:
-			return
-		}
+	for range tb.stopCh {
 	}
 }
 
