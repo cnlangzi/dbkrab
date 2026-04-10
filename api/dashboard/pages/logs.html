@@ -1,17 +1,5 @@
 <!--layout:dashboard-->
 {{ define "content" }}
-<script>
-// 时间格式化函数（必须在 loadLogs 之前定义）
-function formatLocalTime(timeStr) {
-    if (!timeStr) return '-';
-    try {
-        const date = new Date(timeStr);
-        return date.toLocaleString();
-    } catch {
-        return timeStr;
-    }
-}
-</script>
 <div class="space-y-4 sm:space-y-6">
     <!-- Page Header -->
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -212,8 +200,8 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${log.changed_at || '-'}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${log.pulled_at || '-'}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -257,8 +245,8 @@ function renderMobileCard(log) {
                         <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
                     </div>
                     <div class="text-xs text-textMuted mt-1">
-                        <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(log.changed_at)}</div>
-                        <div><span class="text-textMuted">Pulled:</span> ${formatLocalTime(log.pulled_at)}</div>
+                        <div><span class="text-textMuted">Changed:</span> ${log.changed_at || '-'}</div>
+                        <div><span class="text-textMuted">Pulled:</span> ${log.pulled_at || '-'}</div>
                     </div>
                     <details class="group mt-2">
                         <summary class="cursor-pointer text-primary hover:text-primaryHover text-xs list-none flex items-center gap-1">
@@ -310,7 +298,7 @@ function loadPollerStatus() {
         .then(data => {
             if (data.success && data.state) {
                 const state = data.state;
-                document.getElementById('last-poll-time').textContent = formatLocalTime(state.last_poll_time);
+                document.getElementById('last-poll-time').textContent = state.last_poll_time || '-';
                 document.getElementById('last-lsn').textContent = state.last_lsn || '-';
                 document.getElementById('total-changes').textContent = state.total_changes || 0;
             }
