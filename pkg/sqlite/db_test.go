@@ -56,7 +56,7 @@ func TestNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tableName string
 	found := false
@@ -105,7 +105,7 @@ func TestQueryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryContext failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
 		t.Fatal("expected at least one row")
