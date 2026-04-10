@@ -1,3 +1,5 @@
+version: "2"
+
 linters:
   defaults: none
   disable-all: true
