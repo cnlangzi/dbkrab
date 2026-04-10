@@ -277,12 +277,12 @@ func normalizeIfExpression(expr string) string {
 	result = orRegex.ReplaceAllString(result, "||")
 
 	// Step 4: Restore protected operators
-	result = strings.Replace(result, "\x00EQ\x00", "==", -1)
-	result = strings.Replace(result, "\x00NE\x00", "!=", -1)
-	result = strings.Replace(result, "\x00GE\x00", ">=", -1)
-	result = strings.Replace(result, "\x00LE\x00", "<=", -1)
-	result = strings.Replace(result, "\x00AND\x00", "&&", -1)
-	result = strings.Replace(result, "\x00OR\x00", "||", -1)
+	result = strings.ReplaceAll(result, "\x00EQ\x00", "==")
+	result = strings.ReplaceAll(result, "\x00NE\x00", "!=")
+	result = strings.ReplaceAll(result, "\x00GE\x00", ">=")
+	result = strings.ReplaceAll(result, "\x00LE\x00", "<=")
+	result = strings.ReplaceAll(result, "\x00AND\x00", "&&")
+	result = strings.ReplaceAll(result, "\x00OR\x00", "||")
 
 	// Step 5: Replace table.field with table_field (only the dot, not the whole pattern)
 	// Match . surrounded by word characters and replace with _

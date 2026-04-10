@@ -328,8 +328,8 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Collect all changes from successful polls
-	allChanges := make([]Change, 0, len(results)*10)
-	validResults := make([]tablePollResult, 0, len(results))
+	var allChanges []Change
+	var validResults []tablePollResult
 	for _, r := range results {
 		if r.err == nil && len(r.changes) > 0 {
 			allChanges = append(allChanges, r.changes...)
