@@ -11,6 +11,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
+	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
 

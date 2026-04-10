@@ -30,8 +30,7 @@ func TestNewSinker(t *testing.T) {
 func TestSinker_Write(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -41,7 +40,6 @@ func TestSinker_Write(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -61,8 +59,7 @@ func TestSinker_Write(t *testing.T) {
 func TestSinker_Write_Update(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -73,7 +70,6 @@ func TestSinker_Write_Update(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -92,7 +88,6 @@ func TestSinker_Write_Update(t *testing.T) {
 	ops = []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -111,8 +106,7 @@ func TestSinker_Write_Update(t *testing.T) {
 func TestSinker_Write_Delete(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -123,7 +117,6 @@ func TestSinker_Write_Delete(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -142,7 +135,6 @@ func TestSinker_Write_Delete(t *testing.T) {
 	ops = []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 			},
@@ -160,8 +152,7 @@ func TestSinker_Write_Delete(t *testing.T) {
 func TestSinker_Write_Empty(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -176,8 +167,7 @@ func TestSinker_Write_Empty(t *testing.T) {
 func TestSinker_Write_SkipOnConflict(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -187,7 +177,6 @@ func TestSinker_Write_SkipOnConflict(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "skip",
@@ -205,8 +194,7 @@ func TestSinker_Write_SkipOnConflict(t *testing.T) {
 }
 
 func TestSinker_InMemory(t *testing.T) {
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       ":memory:",
 		ModuleName: "test",
 	})
@@ -216,7 +204,6 @@ func TestSinker_InMemory(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -236,8 +223,7 @@ func TestSinker_InMemory(t *testing.T) {
 func TestSinker_RunMigrations_NoMigrations(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -263,7 +249,7 @@ CREATE TABLE IF NOT EXISTS test_table (
 	err := os.WriteFile(migrationsDir+"/001_create_test.sql", []byte(migrationSQL), 0644)
 	require.NoError(t, err)
 
-	sinker, err := NewSinker(Config{
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		Name:          "test",
 		File:          tmpFile,
 		ModuleName:    "test",
@@ -279,7 +265,7 @@ CREATE TABLE IF NOT EXISTS test_table (
 func TestSinker_DatabaseName(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		Name:       "mydb",
 		File:       tmpFile,
 		ModuleName: "test",
@@ -293,8 +279,7 @@ func TestSinker_DatabaseName(t *testing.T) {
 func TestSinker_DatabaseType(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -307,8 +292,7 @@ func TestSinker_DatabaseType(t *testing.T) {
 func TestSinker_MultipleTables(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
@@ -318,7 +302,6 @@ func TestSinker_MultipleTables(t *testing.T) {
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "users",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -331,7 +314,6 @@ func TestSinker_MultipleTables(t *testing.T) {
 		},
 		{
 			Config: core.SinkConfig{
-				Name:       "test",
 				Output:     "orders",
 				PrimaryKey: "id",
 				OnConflict: "overwrite",
@@ -351,8 +333,7 @@ func TestSinker_MultipleTables(t *testing.T) {
 func TestSinker_Close(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker(Config{
-		Name:       "test",
+	sinker, err := NewSinker("test", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
