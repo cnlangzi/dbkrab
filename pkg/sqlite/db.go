@@ -19,9 +19,9 @@ import (
 var ErrUnreachable = errors.New("sqlite: is unreachable")
 
 // DB wraps SQLite database with read/write separation.
-// Writer is used for writes, Reader for reads.
+// Writer uses BatchWriter for buffered batch writes, Reader for reads.
 type DB struct {
-	Writer *sql.DB
+	Writer *BatchWriter
 	Reader *sql.DB
 	ctx    context.Context
 }
@@ -60,16 +60,20 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		ctx: ctx,
 	}
 
-	var err error
-	d.Writer, err = setupWriter(config.File, inmemory, config.MaxOpenConnsWriter)
+	writerDB, err := setupWriter(config.File, inmemory, config.MaxOpenConnsWriter)
 	if err != nil {
 		return nil, err
 	}
+	d.Writer = NewBatchWriter(writerDB, BatchConfig{
+		BatchSize:     100,
+		FlushInterval: 100 * time.Millisecond,
+		TxTimeout:     30 * time.Second,
+	})
 
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
-		if err := runMigrations(d.Writer, config.MigrationPath); err != nil {
-			_ = d.Writer.Close()
+		if err := runMigrations(d.Writer.DB, config.MigrationPath); err != nil {
+			_ = d.Writer.DB.Close()
 			return nil, err
 		}
 	}
@@ -99,7 +103,7 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 	}
 
 	return &DB{
-		Writer: db,
+		Writer: NewBatchWriter(db, BatchConfig{BatchSize: 100, FlushInterval: 100 * time.Millisecond, TxTimeout: 30 * time.Second}),
 		Reader: db, // Use same connection for in-memory DB
 		ctx:    ctx,
 	}, nil
@@ -353,8 +357,8 @@ func InsertInTx(tx Execer, table string, columns []string, rows [][]interface{})
 	}
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		quoteIdent(table),
-		quoteIdentList(columns),
+		QuoteIdent(table),
+		QuoteIdentList(columns),
 		strings.Join(placeholders, ","))
 
 	for _, row := range rows {
@@ -374,10 +378,10 @@ func UpdateInTx(tx Execer, table string, columns []string, rows [][]interface{})
 
 	setClause := make([]string, len(columns))
 	for i, col := range columns {
-		setClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+		setClause[i] = fmt.Sprintf("%s = ?", QuoteIdent(col))
 	}
 
-	query := fmt.Sprintf("UPDATE %s SET %s", quoteIdent(table), strings.Join(setClause, ","))
+	query := fmt.Sprintf("UPDATE %s SET %s", QuoteIdent(table), strings.Join(setClause, ","))
 
 	for _, row := range rows {
 		if _, err := tx.Exec(query, row...); err != nil {
@@ -400,11 +404,11 @@ func DeleteInTx(tx Execer, table string, columns []string, rows [][]interface{})
 
 	whereClause := make([]string, len(columns))
 	for i, col := range columns {
-		whereClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+		whereClause[i] = fmt.Sprintf("%s = ?", QuoteIdent(col))
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s",
-		quoteIdent(table),
+		QuoteIdent(table),
 		strings.Join(whereClause, " AND "))
 
 	for _, row := range rows {
@@ -416,7 +420,7 @@ func DeleteInTx(tx Execer, table string, columns []string, rows [][]interface{})
 	return nil
 }
 
-func quoteIdent(s string) string {
+func QuoteIdent(s string) string {
 	var buf strings.Builder
 	buf.Grow(len(s) + 2)
 	buf.WriteByte('`')
@@ -430,10 +434,10 @@ func quoteIdent(s string) string {
 	return buf.String()
 }
 
-func quoteIdentList(columns []string) string {
+func QuoteIdentList(columns []string) string {
 	quoted := make([]string, len(columns))
 	for i, col := range columns {
-		quoted[i] = quoteIdent(col)
+		quoted[i] = QuoteIdent(col)
 	}
 	return strings.Join(quoted, ",")
 }

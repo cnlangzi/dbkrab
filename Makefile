@@ -13,7 +13,8 @@ BINARY_NAME := dbkrab
 BUILD_DIR := bin
 CMD_DIR := cmd/dbkrab
 GO := go
-GOFLAGS := -v
+# -p 1 limits parallelism to single process (useful for limited memory environments)
+GOFLAGS := -v -p 1
 
 # Version info
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
