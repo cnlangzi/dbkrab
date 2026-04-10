@@ -215,7 +215,7 @@ func (s *Server) registerPageRoutes() {
 	
 	// Register skills pages explicitly
 	s.app.Get("/skills", s.handleSkillsPage)
-	s.app.Get("/skills/new", s.handleSkillsNewPage)
+	s.app.Get("/skills-new", s.handleSkillsNewPage)
 	s.app.Get("/skills/edit/{id}", s.handleSkillsEditPage)
 	
 	// Register sinks pages explicitly
