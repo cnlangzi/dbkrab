@@ -11,6 +11,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.9.8
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/stretchr/testify v1.11.1
+	github.com/yaitoo/sqle v0.0.0
 	github.com/yaitoo/xun v1.1.6
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.29.10
