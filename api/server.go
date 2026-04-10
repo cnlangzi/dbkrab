@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -15,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
-	"github.com/cnlangzi/dbkrab/app/sqlite"
 	"github.com/yaitoo/xun"
 )
 
@@ -39,18 +38,19 @@ func getDashboardFS() fs.FS {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager     *plugin.Manager
-	dlq         *dlq.DLQ
-	cdcAdmin    *cdcadmin.Admin
-	store       *app.Store
-	port        int
-	app         *xun.App
-	mux         *http.ServeMux
-	configPath  string
-	config      *config.Config
+	manager       *plugin.Manager
+	dlq           *dlq.DLQ
+	cdcAdmin      *cdcadmin.Admin
+	store         store.Store
+	sinkerManager *sinker.Manager
+	port          int
+	app           *xun.App
+	mux           *http.ServeMux
+	configPath    string
+	config        *config.Config
 	configWatcher *config.Watcher
-	sinksRoot   *os.Root // Secure root for sinks directory access
-	skillsPath  string // Path to SQL skills directory from config
+	sinksRoot     *os.Root // Secure root for sinks directory access
+	skillsPath    string   // Path to SQL skills directory from config
 }
 
 // NewServer creates a new API server
@@ -71,18 +71,19 @@ func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Ser
 }
 
 // NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store *app.Store, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store store.Store, sinkerMgr *sinker.Manager, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
 	if skillsPath == "" {
 		skillsPath = "./skills/sql"
 	}
-	
+
 	return &Server{
 		manager:       manager,
 		dlq:           dlqStore,
 		cdcAdmin:      cdcAdmin,
 		store:         store,
+		sinkerManager: sinkerMgr,
 		port:          port,
 		configPath:    configPath,
 		config:        cfg,
@@ -719,7 +720,7 @@ func formatLSN(lsn []byte) string {
 	var sb strings.Builder
 	sb.WriteString("0x")
 	for _, b := range lsn {
-		sb.WriteString(fmt.Sprintf("%02X", b))
+		fmt.Fprintf(&sb, "%02X", b)
 	}
 	return sb.String()
 }
@@ -764,28 +765,34 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	var sb strings.Builder
 	
 	// Determine health status classes
-	healthBgClass := "bg-success/20"
-	healthTextClass := "text-success"
-	healthTitle := "System Healthy"
-	if m.HealthStatus == "warning" {
+	var healthBgClass, healthTextClass, healthTitle string
+	switch m.HealthStatus {
+	case "warning":
 		healthBgClass = "bg-warning/20"
 		healthTextClass = "text-warning"
 		healthTitle = "System Warning"
-	} else if m.HealthStatus == "error" {
+	case "error":
 		healthBgClass = "bg-error/20"
 		healthTextClass = "text-error"
 		healthTitle = "System Error"
+	default:
+		healthBgClass = "bg-success/20"
+		healthTextClass = "text-success"
+		healthTitle = "System Healthy"
 	}
 	
 	// Determine CDC status classes
-	cdcTextClass := "text-success"
-	cdcStatusText := "Active"
-	if m.CDCStatus == "inactive" {
+	var cdcTextClass, cdcStatusText string
+	switch m.CDCStatus {
+	case "inactive":
 		cdcTextClass = "text-warning"
 		cdcStatusText = "Inactive"
-	} else if m.CDCStatus == "error" {
+	case "error":
 		cdcTextClass = "text-error"
 		cdcStatusText = "Error"
+	default:
+		cdcTextClass = "text-success"
+		cdcStatusText = "Active"
 	}
 	
 	sb.WriteString(`<div class="space-y-6">`)
@@ -794,11 +801,12 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<div class="flex items-center gap-4">`)
 	sb.WriteString(`<div class="flex items-center justify-center w-12 h-12 rounded-full ` + healthBgClass + `">`)
-	if m.HealthStatus == "healthy" {
+	switch m.HealthStatus {
+	case "healthy":
 		sb.WriteString(`<svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`)
-	} else if m.HealthStatus == "warning" {
+	case "warning":
 		sb.WriteString(`<svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`)
-	} else {
+	default:
 		sb.WriteString(`<svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`)
 	}
 	sb.WriteString(`</div><div>`)
@@ -811,9 +819,9 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">CDC Sync Status</h3>`)
 	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">`)
 	sb.WriteString(`<div><p class="text-textMuted text-sm">Status</p><p class="text-lg font-semibold ` + cdcTextClass + `">` + cdcStatusText + `</p></div>`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes)))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime))
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Tables Tracked</p><p class="text-lg font-semibold text-text">%d</p></div>`, m.TablesTracked)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Lag</p><p class="text-lg font-semibold text-text">%s</p></div>`, formatBytes(m.CDCLagBytes))
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Last Sync</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastSyncTime, m.LastSyncTime)
 	sb.WriteString(`</div>`)
 	if m.CDCMessage != "" {
 		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)
@@ -824,8 +832,8 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">GAP Monitoring</h3>`)
 	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-success/10 border border-success/20"><p class="text-textMuted text-sm">Healthy Tables</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.GAPHealthyTables))
-	sb.WriteString(fmt.Sprintf(`<div class="p-4 rounded-lg bg-error/10 border border-error/20"><p class="text-textMuted text-sm">Issues</p><p class="text-2xl font-bold text-error">%d</p></div>`, m.GAPIssueTables))
+	fmt.Fprintf(&sb, `<div class="p-4 rounded-lg bg-success/10 border border-success/20"><p class="text-textMuted text-sm">Healthy Tables</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.GAPHealthyTables)
+	fmt.Fprintf(&sb, `<div class="p-4 rounded-lg bg-error/10 border border-error/20"><p class="text-textMuted text-sm">Issues</p><p class="text-2xl font-bold text-error">%d</p></div>`, m.GAPIssueTables)
 	sb.WriteString(`<div class="p-4 rounded-lg bg-surfaceHover border border-border">`)
 	sb.WriteString(`<p class="text-textMuted text-sm">Max Lag</p>`)
 	sb.WriteString(`<p class="text-lg font-semibold text-text">` + formatBytes(m.GAPMaxLagBytes) + `</p>`)
@@ -839,25 +847,25 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-error/20 hover:border-error/40 transition-all">`)
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Pending</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-error/20 flex items-center justify-center"><svg class="w-4 h-4 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-error">%d</p></div>`, m.DLQPending))
+	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-error">%d</p></div>`, m.DLQPending)
 	
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-success/20 hover:border-success/40 transition-all">`)
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Resolved</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center"><svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-success">%d</p></div>`, m.DLQResolved))
+	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-success">%d</p></div>`, m.DLQResolved)
 	
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Ignored</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-surfaceHover flex items-center justify-center"><svg class="w-4 h-4 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg></div></div>`)
-	sb.WriteString(fmt.Sprintf(`<p class="text-3xl font-bold text-textMuted">%d</p></div>`, m.DLQIgnored))
+	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-textMuted">%d</p></div>`, m.DLQIgnored)
 	sb.WriteString(`</div>`)
 	
 	// Plugin Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">Plugins</h3>`)
 	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">`)
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">Active</p><p class="text-2xl font-bold text-primary">%d</p></div>`, m.PluginsActive))
-	sb.WriteString(fmt.Sprintf(`<div><p class="text-textMuted text-sm">SQL Plugins</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.PluginsSQL))
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Active</p><p class="text-2xl font-bold text-primary">%d</p></div>`, m.PluginsActive)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">SQL Plugins</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.PluginsSQL)
 	sb.WriteString(`</div></div>`)
 	
 	sb.WriteString(`</div>`)
@@ -1126,7 +1134,7 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 	}
 
 	// Find sink by ID
-	sink, err := s.getSinkById(id)
+	sinkCfg, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1134,44 +1142,13 @@ func (s *Server) handleSinkTables(c *xun.Context) error {
 		})
 	}
 
-	// Check if database file exists
-	if _, err := os.Stat(sink.Path); err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
-		})
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to open database: %v", err),
-		})
-	}
-	defer func() { _ = db.Close() }()
-
-	// Query tables from sqlite_master
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	// Use sinker manager to query tables
+	tables, err := s.sinkerManager.QueryTables(sinkCfg.Name)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("failed to query tables: %v", err),
 		})
-	}
-	defer func() { _ = rows.Close() }()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			continue
-		}
-		// Skip internal SQLite tables
-		if !strings.HasPrefix(tableName, "sqlite_") {
-			tables = append(tables, tableName)
-		}
 	}
 
 	// Ensure we return empty array, not null
@@ -1197,7 +1174,7 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	// Find sink by ID
-	sink, err := s.getSinkById(id)
+	sinkCfg, err := s.getSinkById(id)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1243,76 +1220,20 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 
-	// Check if database file exists
-	if _, err := os.Stat(sink.Path); err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("sink database not found: %s", sink.Path),
-		})
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite", sink.Path+"?mode=ro")
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to open database: %v", err),
-		})
-	}
-	defer func() { _ = db.Close() }()
-
-	// Execute query with limit
-	limitQuery := query
-	if !strings.Contains(strings.ToUpper(query), "LIMIT") {
-		limitQuery = fmt.Sprintf("%s LIMIT 1000", query)
-	}
-
-	rows, err := db.Query(limitQuery)
+	// Use sinker manager to execute query
+	columns, queryResults, err := s.sinkerManager.Query(sinkCfg.Name, query)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("query execution failed: %v", err),
 		})
 	}
-	defer func() { _ = rows.Close() }()
-
-	// Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("failed to get columns: %v", err),
-		})
-	}
-
-	// Fetch results
-	results := []map[string]any{}
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return c.View(map[string]any{
-				"success": false,
-				"error":   fmt.Sprintf("failed to scan row: %v", err),
-			})
-		}
-
-		rowMap := make(map[string]any)
-		for i, col := range columns {
-			rowMap[col] = values[i]
-		}
-		results = append(results, rowMap)
-	}
 
 	return c.View(map[string]any{
 		"success": true,
 		"columns": columns,
-		"rows":    results,
-		"count":   len(results),
+		"rows":    queryResults,
+		"count":   len(queryResults),
 	})
 }
 

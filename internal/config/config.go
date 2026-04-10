@@ -389,8 +389,8 @@ func ParseTimezone(tzStr string) *time.Location {
 		}
 
 		// Parse offset as hours
-		var hours int
-		var sign int = 1
+		var hours = 0
+		var sign = 1
 		if strings.HasPrefix(offsetStr, "+") {
 			offsetStr = strings.TrimPrefix(offsetStr, "+")
 		} else if strings.HasPrefix(offsetStr, "-") {

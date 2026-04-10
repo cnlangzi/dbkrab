@@ -9,15 +9,15 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/plugin/sql"
-	"github.com/cnlangzi/dbkrab/sinkwriter"
 )
 
 // Manager manages SQL plugins.
 type Manager struct {
 	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
 	sqlPlugin *sql.Plugin       // direct reference to SQLPlugin for fast access
-	swManager *sinkwriter.Manager // Routes sinks to appropriate writers
+	swManager *sinker.Manager   // Routes sinks to appropriate writers
 	mu        sync.RWMutex
 }
 
@@ -25,7 +25,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		plugins:   make(map[string]Plugin),
-		swManager: sinkwriter.NewManager(),
+		swManager: sinker.NewManager(),
 	}
 }
 
