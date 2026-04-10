@@ -11,7 +11,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
-	"github.com/yaitoo/sqle/migrate"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -85,17 +84,15 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	s, err := sinkSqlite.NewSinker(name, "sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("create sqlite sinker: %w", err)
+	cfg := pkgSqlite.Config{
+		File:          path,
+		ModuleName:    "dbkrab",
+		MigrationPath: dbConfig.MigrationPath,
 	}
 
-	// Run migrations if configured
-	if dbConfig.MigrationPath != "" {
-		if err := migrate.Run(s.DB(), nil, dbConfig.MigrationPath); err != nil {
-			s.Close()
-			return nil, fmt.Errorf("run migrations: %w", err)
-		}
+	s, err := sinkSqlite.NewSinker(name, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create sqlite sinker: %w", err)
 	}
 
 	return s, nil

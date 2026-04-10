@@ -36,8 +36,8 @@ type Config struct {
 	// ModuleName is used for migration discovery.
 	ModuleName string
 
-	// FS for migration files (optional).
-	FS fs.FS
+	// MigrationPath is the directory path for migration files (used with os.DirFS).
+	MigrationPath string
 
 	// InMemory indicates if this is an in-memory database.
 	InMemory bool
@@ -68,9 +68,9 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Run migrations if FS is provided
-	if config.FS != nil {
-		if err := RunMigrations(d.Writer, config.FS, config.ModuleName); err != nil {
+	// Run migrations if MigrationPath is provided
+	if config.MigrationPath != "" {
+		if err := RunMigrations(d.Writer, os.DirFS(config.MigrationPath), config.ModuleName); err != nil {
 			return nil, err
 		}
 	}

@@ -10,32 +10,27 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
-
-	_ "github.com/mattn/go-sqlite3"
+	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 )
 
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
 	name  string
-	db    *sql.DB
-	dbType string
+	db    *pkgSqlite.DB
 	mu    sync.Mutex
 	closed bool
 }
 
 // NewSinker creates a new SQLite sinker.
-func NewSinker(name, dbType, file string) (*Sinker, error) {
-	db, err := sql.Open("sqlite3", file+"?_journal_mode=WAL&_busy_timeout=5000")
+func NewSinker(name string, cfg pkgSqlite.Config) (*Sinker, error) {
+	db, err := pkgSqlite.New(context.Background(), cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
+		return nil, fmt.Errorf("create sqlite db: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
-
 	return &Sinker{
-		name:   name,
-		db:     db,
-		dbType: dbType,
+		name: name,
+		db:   db,
 	}, nil
 }
 
@@ -46,12 +41,7 @@ func (s *Sinker) DatabaseName() string {
 
 // DatabaseType returns the database type.
 func (s *Sinker) DatabaseType() string {
-	return s.dbType
-}
-
-// DB returns the underlying database connection for migrations.
-func (s *Sinker) DB() *sql.DB {
-	return s.db
+	return "sqlite"
 }
 
 // Write writes a batch of sink operations to the database.
@@ -64,7 +54,7 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 		"database", s.name,
 		"operations", len(ops))
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.Writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -84,7 +74,7 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 }
 
 func (s *Sinker) writeOp(ctx context.Context, tx *sql.Tx, op core.Sink) error {
-	config := sqliteutil.TableConfig{
+	config := core.TableConfig{
 		Output:     op.Config.Output,
 		PrimaryKey: op.Config.PrimaryKey,
 		OnConflict: op.Config.OnConflict,
