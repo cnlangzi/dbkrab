@@ -107,65 +107,65 @@
                 </button>
             </div>
 
-            <nav class="flex-1 py-4 overflow-y-auto">
-                <a href="/" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "overview"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+            <nav class="flex-1 py-4 overflow-y-auto" id="sidebar-nav">
+                <a href="/" data-tab="overview"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Overview Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
                     </svg>
                     <span>Overview</span>
                 </a>
-                <a href="/skills" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "skills"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/skills" data-tab="skills"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Skills Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
                     </svg>
                     <span>Skills</span>
                 </a>
-                <a href="/tables" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "tables"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/tables" data-tab="tables"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Tables Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                     </svg>
                     <span>CDC Tables</span>
                 </a>
-                <a href="/logs" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "logs"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/logs" data-tab="logs"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Logs Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
                     <span>CDC Logs</span>
                 </a>
-                <a href="/gap" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "gap"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/gap" data-tab="gap"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- GAP Monitor Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                     </svg>
                     <span>GAP Monitor</span>
                 </a>
-                <a href="/dlq" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "dlq"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/dlq" data-tab="dlq"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- DLQ Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
                     </svg>
                     <span>Dead Letter Queue</span>
                 </a>
-                <a href="/plugins" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "plugins"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/plugins" data-tab="plugins"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Plugins Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                     </svg>
                     <span>Plugins</span>
                 </a>
-                <a href="/sinks" 
-                   class="flex items-center gap-3 px-4 py-3 {{with .Data}}{{if eq .activeTab "sinks"}}bg-primary text-white{{else}}text-textMuted hover:bg-surface hover:text-text{{end}}{{end}} transition-colors">
+                <a href="/sinks" data-tab="sinks"
+                   class="flex items-center gap-3 px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors sidebar-link">
                     <!-- Sinks Icon -->
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
@@ -205,6 +205,39 @@
                 overlay.classList.add('opacity-0', 'pointer-events-none');
             }
         }
+        
+        // Highlight active sidebar tab based on current path
+        function highlightActiveTab() {
+            const path = window.location.pathname;
+            const nav = document.getElementById('sidebar-nav');
+            const links = nav.querySelectorAll('.sidebar-link');
+            
+            links.forEach(link => {
+                link.classList.remove('bg-primary', 'text-white');
+                link.classList.add('text-textMuted', 'hover:bg-surface', 'hover:text-text');
+                
+                const href = link.getAttribute('href');
+                // Match exact path or path that starts with href (for nested pages)
+                if (path === href || (href !== '/' && path.startsWith(href))) {
+                    link.classList.remove('text-textMuted', 'hover:bg-surface', 'hover:text-text');
+                    link.classList.add('bg-primary', 'text-white');
+                }
+            });
+            
+            // Special case: overview for root path
+            if (path === '/' || path === '') {
+                const overviewLink = nav.querySelector('[data-tab="overview"]');
+                if (overviewLink) {
+                    overviewLink.classList.remove('text-textMuted', 'hover:bg-surface', 'hover:text-text');
+                    overviewLink.classList.add('bg-primary', 'text-white');
+                }
+            }
+        }
+        
+        // Run on page load
+        document.addEventListener('DOMContentLoaded', highlightActiveTab);
+        // Also run after HTMX swaps
+        document.body.addEventListener('htmx:afterSwap', highlightActiveTab);
     </script>
 </body>
 </html>
