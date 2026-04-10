@@ -24,12 +24,29 @@ type Store struct {
 func NewStore(db *sqlite.DB) (*Store, error) {
 	s := &Store{db: db}
 
-	// Initialize poller state
+	// Run migrations using embedded migration files
+	if err := s.runMigrations(); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {
 		return nil, fmt.Errorf("init poller state: %w", err)
 	}
 
 	return s, nil
+}
+
+// runMigrations discovers and runs pending migrations
+func (s *Store) runMigrations() error {
+	migrator := migrate.New(s.db.Writer)
+	if err := migrator.Discover(migrationsFS, migrate.WithSuffix("sql"), migrate.WithModule("dbkrab")); err != nil {
+		return err
+	}
+	if err := migrator.Init(context.Background()); err != nil {
+		return err
+	}
+	return migrator.Migrate(context.Background())
 }
 
 // initPollerState initializes the poller state row
