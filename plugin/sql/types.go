@@ -293,9 +293,6 @@ func normalizeIfExpression(expr string) string {
 	return result
 }
 
-func isWordChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
-}
 
 // EvalIf evaluates the 'if' expression for a sink against CDC data.
 // It returns true if:
