@@ -84,13 +84,25 @@ func New(ctx context.Context, config Config) (*DB, error) {
 }
 
 // NewInMemory creates an in-memory SQLite DB with shared cache for read/write separation.
+// Note: For in-memory DBs, we use a single connection to avoid transaction isolation issues.
 func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
-	return New(ctx, Config{
-		File:        ":memory:",
-		InMemory:    true,
-		ModuleName:  moduleName,
-		FS:          migrations,
-	})
+	db, err := setupWriter(":memory:", true, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run migrations if provided
+	if migrations != nil {
+		if err := RunMigrations(db, migrations, moduleName); err != nil {
+			return nil, err
+		}
+	}
+
+	return &DB{
+		Writer: db,
+		Reader: db, // Use same connection for in-memory DB
+		ctx:    ctx,
+	}, nil
 }
 
 // NewFile creates a SQLite DB with read/write separation from a file.
