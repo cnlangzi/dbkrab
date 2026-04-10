@@ -25,14 +25,8 @@ type Store struct {
 }
 
 // NewStore creates a new SQLite store with WAL mode and optimized settings.
-// Migrations are always run from the embedded migration files.
 func NewStore(db *sqlite.DB) (*Store, error) {
 	s := &Store{db: db}
-
-	// Run migrations from embedded FS
-	if err := sqlite.RunMigrations(db.Writer, migrationsFS, "dbkrab"); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
 
 	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {
