@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -26,9 +25,6 @@ import (
 	"github.com/cnlangzi/dbkrab/plugin"
 	_ "github.com/denisenkom/go-mssqldb"
 )
-
-//go:embed data
-var dataFS embed.FS
 
 var (
 	configPath = flag.String("config", "config.yml", "Path to config file")
@@ -113,7 +109,6 @@ func main() {
 		appDB, err = sqlite.New(ctx, sqlite.Config{
 			File:       cfg.App.Path,
 			ModuleName: "dbkrab",
-			FS:         dataFS,
 		})
 		if err != nil {
 			slog.Error("failed to create SQLite DB", "error", err)
