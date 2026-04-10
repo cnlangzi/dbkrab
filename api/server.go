@@ -54,8 +54,10 @@ type Server struct {
 	timezone    *time.Location // Timezone for time formatting (from mssql.timezone config)
 }
 
-// NewServer creates a new API server
-// formatTime formats a time.Time to the configured timezone string
+// formatTime formats a time.Time to the configured timezone string.
+// If timezone is nil or UTC, formats as UTC: "2006-01-02T15:04:05.999Z".
+// Otherwise, converts to the configured timezone and formats as local time: "2006-01-02 15:04:05".
+// Note: time.Local is NOT treated specially; only nil and time.UTC use UTC format.
 func (s *Server) formatTime(t time.Time) string {
 	if s.timezone == nil || s.timezone == time.UTC {
 		return t.Format("2006-01-02T15:04:05.999Z")
