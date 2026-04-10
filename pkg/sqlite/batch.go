@@ -117,7 +117,7 @@ type BatchWriter struct {
 	*sql.DB // embedded: BatchWriter is-a sql.DB for Query/QueryRow etc
 
 	cfg BatchConfig
-	mu  sync.Mutex
+	mu  sync.Mutex  // Mutex allows Unlock from different goroutine (BeginTx locks, Commit unlocks)
 
 	// Global transaction state
 	globalTx     *sql.Tx // lazy created
@@ -143,7 +143,13 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 
 // onTimer is called when the flush timer fires.
 func (bw *BatchWriter) onTimer() {
-	bw.mu.Lock()
+	// Use TryLock to avoid blocking if lock is held by Commit
+	// (would cause deadlock with short FlushInterval)
+	if !bw.mu.TryLock() {
+		// Lock is held, skip this trigger and reset timer
+		bw.timer.Reset(bw.cfg.FlushInterval)
+		return
+	}
 	defer bw.mu.Unlock()
 
 	// If there are pending statements, flush them

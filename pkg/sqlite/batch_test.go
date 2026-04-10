@@ -13,7 +13,7 @@ import (
 )
 
 func newTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:?_journal_mode=WAL&_synchronous=OFF")
+	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
 	require.NoError(t, err)
 	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestBatchWriter_TimeBasedBlockedByActiveBatchTx(t *testing.T) {
 
 	bw := NewBatchWriter(db, BatchConfig{
 		BatchSize:     2,
-		FlushInterval: 20 * time.Millisecond,
+		FlushInterval: 100 * time.Millisecond,
 		TxTimeout:     30 * time.Second,
 	})
 	defer bw.Close()
