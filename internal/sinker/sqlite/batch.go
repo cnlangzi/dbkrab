@@ -509,7 +509,7 @@ func (s *BatchSQLiteSink) flushLoop() {
 		case <-s.stopCh:
 			// Stop signal received - flush remaining and exit
 			slog.Debug("BatchSQLiteSink.flushLoop: stop signal received")
-			s.Flush() // Best effort, ignore error
+			_ = s.Flush() // Best effort, ignore error
 			close(s.shutdownCh)
 			return
 

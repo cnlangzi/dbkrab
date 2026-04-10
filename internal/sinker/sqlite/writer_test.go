@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestSinker_Write(t *testing.T) {
 		},
 	}
 
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 
@@ -81,7 +82,7 @@ func TestSinker_Write_Update(t *testing.T) {
 			OpType: core.OpInsert,
 		},
 	}
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	require.NoError(t, err)
 
 	// Update
@@ -99,7 +100,7 @@ func TestSinker_Write_Update(t *testing.T) {
 			OpType: core.OpUpdateAfter,
 		},
 	}
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 
@@ -128,7 +129,7 @@ func TestSinker_Write_Delete(t *testing.T) {
 			OpType: core.OpInsert,
 		},
 	}
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	require.NoError(t, err)
 
 	// Delete
@@ -145,7 +146,7 @@ func TestSinker_Write_Delete(t *testing.T) {
 			OpType: core.OpDelete,
 		},
 	}
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 
@@ -189,7 +190,7 @@ func TestSinker_Write_SkipOnConflict(t *testing.T) {
 		},
 	}
 
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 
@@ -216,7 +217,7 @@ func TestSinker_InMemory(t *testing.T) {
 		},
 	}
 
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 
@@ -326,7 +327,7 @@ func TestSinker_MultipleTables(t *testing.T) {
 		},
 	}
 
-	err = sinker.Write(ops)
+	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
 

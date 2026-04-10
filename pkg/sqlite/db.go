@@ -71,7 +71,7 @@ func New(ctx context.Context, config Config) (*DB, error) {
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
 		if err := runMigrations(d.Writer, config.MigrationPath); err != nil {
-			d.Writer.Close()
+			_ = d.Writer.Close()
 			return nil, err
 		}
 	}
@@ -95,7 +95,7 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 	// Run migrations if provided
 	if migrations != nil {
 		if err := runMigrationsFS(db, migrations); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 	}
