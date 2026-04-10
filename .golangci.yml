@@ -1,6 +1,9 @@
 run:
   timeout: 5m
-  modules-download-mode: readonly
+
+linters-settings:
+  govet:
+    check-shadowing: false
 
 linters:
   disable-all: true
@@ -9,9 +12,6 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-
-linter-options:
-  tests: true
 
 issues:
   exclude-use-default: false
