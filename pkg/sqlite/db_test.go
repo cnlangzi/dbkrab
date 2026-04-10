@@ -39,7 +39,7 @@ func TestNewInMemory(t *testing.T) {
 func TestNewFile(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	db, err := NewFile(context.Background(), tmpFile, "test", nil)
+	db, err := NewFile(context.Background(), tmpFile, "test", "")
 	if err != nil {
 		t.Fatalf("NewFile failed: %v", err)
 	}

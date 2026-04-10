@@ -33,12 +33,11 @@ func NewSQLiteSink(skill *Skill, pool *Pool) *SQLiteSink {
 }
 
 // Write writes transformed DataSets to the sink database
-func (s *SQLiteSink) Write(ops []core.Sink) error {
+func (s *SQLiteSink) Write(ctx context.Context, ops []core.Sink) error {
 	if len(ops) == 0 {
 		return nil
 	}
 
-	ctx := context.Background()
 	tx, err := s.pool.Write().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
