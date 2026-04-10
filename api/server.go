@@ -213,12 +213,6 @@ func (s *Server) registerAPIRoutes() {
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
 	
-	// Register skills pages explicitly
-	s.app.Get("/skills", s.handleSkillsPage)
-	s.app.Get("/skills-new", s.handleSkillsNewPage)
-	s.app.Get("/skills/edit/{id}", s.handleSkillsEditPage)
-	
-	// Register sinks pages explicitly
 	s.app.Get("/sinks", s.handleSinksPage)
 }
 
