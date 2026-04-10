@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,13 +10,9 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 )
-
-//go:embed migrations/001_initial/001_transactions.sql
-var migrationsFS embed.FS
 
 // Store implements store.Store for SQLite
 type Store struct {
@@ -25,7 +20,7 @@ type Store struct {
 }
 
 // NewStore creates a new SQLite store with WAL mode and optimized settings.
-// Creates tables directly if they don't exist (called after sqlite.New which may not run migrations).
+// Creates tables directly if they don't exist.
 func NewStore(db *sqlite.DB) (*Store, error) {
 	s := &Store{db: db}
 
