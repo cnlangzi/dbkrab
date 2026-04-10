@@ -14,8 +14,8 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 )
 
-// Sinker is the interface for the underlying SQLite sinker.
-type Sinker interface {
+// SinkWriter is the interface for the underlying SQLite sinker.
+type SinkWriter interface {
 	DatabaseName() string
 	DatabaseType() string
 	Write(ctx context.Context, ops []core.Sink) error
@@ -43,8 +43,8 @@ var (
 
 // BatchConfig holds batch sink configuration options.
 type BatchConfig struct {
-	// Sinker is the underlying SQLite sinker to wrap
-	Sinker Sinker
+	// SinkWriter is the underlying SQLite sinker to wrap
+	SinkWriter SinkWriter
 
 	// BatchSize is the number of CDC transactions per flush.
 	// Must be > 0. Default: 10
@@ -64,7 +64,7 @@ type BatchConfig struct {
 
 // Validate validates the batch configuration.
 func (c *BatchConfig) Validate() error {
-	if c.Sinker == nil {
+	if c.SinkWriter == nil {
 		return ErrSinkerRequired
 	}
 	if c.BatchSize <= 0 {
@@ -121,7 +121,7 @@ func NewBatchSQLiteSink(config BatchConfig) (*BatchSQLiteSink, error) {
 
 	s := &BatchSQLiteSink{
 		config:   config,
-		database: config.Sinker.DatabaseName(),
+		database: config.SinkWriter.DatabaseName(),
 		buffer:   make([]core.Sink, 0, config.BatchSize),
 		txBuffer: make(map[string]*core.Transaction),
 		// pendingTxCount starts at 0
@@ -338,7 +338,7 @@ func (s *BatchSQLiteSink) FlushCtx(ctx context.Context) error {
 	defer cancel()
 
 	// Attempt to write to the underlying sink with timeout context
-	err := s.config.Sinker.Write(flushCtx, ops)
+	err := s.config.SinkWriter.Write(flushCtx, ops)
 	if err != nil {
 		slog.Error("BatchSQLiteSink.Flush: write failed",
 			"database", s.database,
@@ -565,8 +565,8 @@ func (s *BatchSQLiteSink) Shutdown(ctx context.Context) error {
 	}
 
 	// Close the underlying sink
-	if s.config.Sinker != nil {
-		return s.config.Sinker.Close()
+	if s.config.SinkWriter != nil {
+		return s.config.SinkWriter.Close()
 	}
 
 	return nil
@@ -603,8 +603,8 @@ func (s *BatchSQLiteSink) Close() error {
 	<-s.shutdownCh
 
 	// Close the underlying sink
-	if s.config.Sinker != nil {
-		return s.config.Sinker.Close()
+	if s.config.SinkWriter != nil {
+		return s.config.SinkWriter.Close()
 	}
 
 	return nil
