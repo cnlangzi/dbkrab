@@ -221,53 +221,11 @@ func TestSinker_InMemory(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestSinker_RunMigrations_NoMigrations(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
-
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
-	require.NoError(t, err)
-	defer func() { _ = sinker.Close() }()
-
-	// No migrations configured, should be nil
-	err = sinker.RunMigrations()
-	assert.NoError(t, err)
-}
-
-func TestSinker_RunMigrations_WithDir(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
-	migrationsDir := t.TempDir()
-
-	// Create migration file
-	migrationSQL := `
-CREATE TABLE IF NOT EXISTS test_table (
-    id INTEGER PRIMARY KEY,
-    name TEXT
-);
-`
-	err := os.WriteFile(migrationsDir+"/001_create_test.sql", []byte(migrationSQL), 0644)
-	require.NoError(t, err)
-
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		Name:          "test",
-		File:          tmpFile,
-		ModuleName:    "test",
-		MigrationsDir: migrationsDir,
-	})
-	require.NoError(t, err)
-	defer func() { _ = sinker.Close() }()
-
-	err = sinker.RunMigrations()
-	assert.NoError(t, err)
-}
 
 func TestSinker_DatabaseName(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		Name:       "mydb",
+	sinker, err := NewSinker("mydb", pkgSqlite.Config{
 		File:       tmpFile,
 		ModuleName: "test",
 	})
