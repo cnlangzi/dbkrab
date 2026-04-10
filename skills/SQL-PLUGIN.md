@@ -125,11 +125,127 @@ sinks:
 | `name` | Yes | Sink identifier |
 | `when` | Yes | Operation filter: `[insert, update]` or `[delete]` |
 | `on` | No | Table filter (for multi-table CDC) |
+| `if` | No | SQL-style condition expression for conditional sink triggering |
 | `sql` | Yes* | SQL template (*or sql_file) |
 | `sql_file` | Yes* | External SQL file (*or sql) |
 | `output` | Yes | Target table name |
 | `primary_key` | Yes | Primary key column |
 | `on_conflict` | No | Conflict strategy: skip\|overwrite\|error (default: skip) |
+
+---
+
+## Conditional Sink Triggering (`if` field)
+
+The optional `if` field allows sinks to be triggered conditionally based on CDC payload values. It uses SQL/WHERE-like syntax that is evaluated at runtime against each CDC event.
+
+### Syntax Rules
+
+| Feature | Syntax | Example |
+|---------|--------|---------|
+| Equality | `=` | `status = 'vip'` |
+| Inequality | `!=` | `status != 'cancelled'` |
+| Greater than | `>` | `amount > 100` |
+| Less than | `<` | `amount < 100` |
+| Greater or equal | `>=` | `amount >= 100` |
+| Less or equal | `<=` | `amount <= 100` |
+| Logical AND | `AND` | `status = 'vip' AND amount > 100` |
+| Logical OR | `OR` | `status = 'vip' OR status = 'gold'` |
+| IN operator | `IN` | `status IN ('vip', 'gold', 'silver')` |
+| Negation | `!=` or NOT | `status != 'cancelled'` |
+| Parentheses | `(...)` | `(status = 'vip' OR status = 'gold') AND amount > 100` |
+
+### Case Sensitivity
+
+- **Table and field names**: Case-insensitive. `orders.status`, `ORDERS.STATUS`, and `Orders.Status` all map to the same field.
+- **Literal values**: Case-sensitive. `status = 'vip'` only matches `vip`, not `VIP` or `Vip`.
+
+### Field References
+
+Fields can be referenced in two ways:
+
+1. **Direct field name** (without table prefix):
+   ```yaml
+   if: "status = 'vip' AND amount > 100"
+   ```
+   This references fields from the CDC record being processed.
+
+2. **Table.field format** (for disambiguation in complex expressions):
+   ```yaml
+   if: "orders.status = 'vip' AND orders.amount > orders.min_amount"
+   ```
+   This is converted internally to `orders_status` and `orders_amount`.
+
+### CDC Metadata
+
+You can also reference CDC metadata in expressions:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `cdc_operation` | Operation type (1=delete, 2=insert, 4=update) | `cdc_operation = 2` |
+| `cdc_table` | Source table name | `cdc_table = 'orders'` |
+| `cdc_tx_id` | Transaction ID | `cdc_tx_id = 'tx-123'` |
+
+### Examples
+
+#### Simple condition with literal value
+
+```yaml
+sinks:
+  - name: sync_vip
+    when: [insert, update]
+    if: "status = 'vip'"
+    sql: |
+      SELECT @orders_order_id as order_id, @orders_amount as amount
+      FROM orders WHERE order_id = @orders_order_id;
+    output: vip_orders
+    primary_key: order_id
+```
+
+#### Field-to-field comparison
+
+```yaml
+sinks:
+  - name: sync_high_amount
+    when: [insert, update]
+    if: "orders.amount > orders.min_amount"
+    sql: |
+      SELECT @orders_order_id as order_id, @orders_amount as amount
+      FROM orders WHERE order_id = @orders_order_id;
+    output: high_amount_orders
+    primary_key: order_id
+```
+
+#### Complex expression with AND/OR
+
+```yaml
+sinks:
+  - name: sync_premium
+    when: [insert, update]
+    if: "(status = 'vip' OR status = 'gold') AND amount > 100"
+    sql: |
+      SELECT @orders_order_id as order_id, @orders_amount as amount
+      FROM orders WHERE order_id = @orders_order_id;
+    output: premium_orders
+    primary_key: order_id
+```
+
+#### IN operator
+
+```yaml
+sinks:
+  - name: sync_preferred
+    when: [insert, update]
+    if: "status IN ('vip', 'gold', 'silver')"
+    sql: |
+      SELECT @orders_order_id as order_id, @orders_status as status
+      FROM orders WHERE order_id = @orders_order_id;
+    output: preferred_orders
+    primary_key: order_id
+```
+
+### Backward Compatibility
+
+Omitting the `if` field maintains backward compatibility - the sink will trigger for all matched events (as before).
 
 ---
 
