@@ -61,10 +61,10 @@ func (c *BatchConfig) Validate() error {
 		return ErrSinkerRequired
 	}
 	if c.BatchSize <= 0 {
-		c.BatchSize = 10
+		c.BatchSize = 1000
 	}
 	if c.BatchIntervalMs <= 0 {
-		c.BatchIntervalMs = 100
+		c.BatchIntervalMs = 500
 	}
 	if c.BatchTxTimeoutMs <= 0 {
 		c.BatchTxTimeoutMs = 30000

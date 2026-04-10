@@ -83,8 +83,8 @@ Timer-driven flushes must not interrupt mid-append operations. The state machine
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `BatchSize` | int | 10 | CDC transactions per flush |
-| `BatchIntervalMs` | int | 100 | Time threshold to flush (ms) |
+| `BatchSize` | int | 1000 | CDC transactions per flush |
+| `BatchIntervalMs` | int | 500 | Time threshold to flush (ms) |
 | `BatchTxTimeoutMs` | int | 30000 | Single flush execution timeout (ms) |
 | `DLQ` | *dlq.DLQ | nil | Dead letter queue for failures |
 
