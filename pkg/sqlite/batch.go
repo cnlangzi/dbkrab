@@ -213,7 +213,7 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	// After all executed, decide Commit or Rollback
 	if commitErr != nil {
 		// Immediate rollback - don't wait for user to call Rollback
-		if rollbackErr := bw.globalTx.Exec("ROLLBACK TO " + savepointName); rollbackErr != nil {
+		if _, rollbackErr := bw.globalTx.Exec("ROLLBACK TO " + savepointName); rollbackErr != nil {
 			slog.Error("BatchWriter.handleBatchCommit: rollback failed", "error", rollbackErr)
 		}
 		cmd.ResultCh <- Result{LastError: commitErr, Results: results}
@@ -221,7 +221,7 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	}
 
 	// Success - release savepoint
-	if releaseErr := bw.globalTx.Exec("RELEASE SAVEPOINT " + savepointName); releaseErr != nil {
+	if _, releaseErr := bw.globalTx.Exec("RELEASE SAVEPOINT " + savepointName); releaseErr != nil {
 		slog.Error("BatchWriter.handleBatchCommit: release savepoint failed", "error", releaseErr)
 		cmd.ResultCh <- Result{LastError: releaseErr, Results: results}
 		return
