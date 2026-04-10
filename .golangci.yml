@@ -1,7 +1,5 @@
 run:
   tests: false
-  skip-dirs:
-    - "**/testdata/**"
 
 linters:
   enable:
@@ -10,5 +8,3 @@ linters:
     - govet
     - gofmt
     - misspell
-  errcheck:
-    check-blank: true
