@@ -422,6 +422,7 @@ func splitStatements(content string) []string {
 func (s *Sinker) Close() error {
 	if s.stopCh != nil {
 		close(s.stopCh)
+		s.stopCh = nil
 	}
 	if s.db != nil {
 		return s.db.Close()

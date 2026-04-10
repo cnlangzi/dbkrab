@@ -10,8 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//go:embed migrations/*.sql migrations/**/*.sql
+var testMigrations embed.FS
+
 func newTestDB(t *testing.T) *sqlite.DB {
-	db, err := sqlite.NewInMemory(context.Background(), "test", nil)
+	db, err := sqlite.NewInMemory(context.Background(), "test", testMigrations)
 	require.NoError(t, err)
 	return db
 }
