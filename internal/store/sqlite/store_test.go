@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed migrations/*.sql migrations/**/*.sql
+//go:embed migrations/001_initial/001_transactions.sql
 var testMigrations embed.FS
 
 func newTestDB(t *testing.T) *sqlite.DB {
