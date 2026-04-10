@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,15 +16,23 @@ import (
 	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 )
 
+//go:embed migrations/001_initial/001_transactions.sql
+var migrationsFS embed.FS
+
 // Store implements store.Store for SQLite
 type Store struct {
 	db *sqlite.DB
 }
 
 // NewStore creates a new SQLite store with WAL mode and optimized settings.
-// Note: Migrations are already run by sqlite.New() when the DB is created.
+// Migrations are always run from the embedded migration files.
 func NewStore(db *sqlite.DB) (*Store, error) {
 	s := &Store{db: db}
+
+	// Run migrations from embedded FS
+	if err := sqlite.RunMigrations(db.Writer, migrationsFS, "dbkrab"); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
 
 	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {
