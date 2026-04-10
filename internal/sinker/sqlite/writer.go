@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 
@@ -430,6 +429,3 @@ func (s *Sinker) Close() error {
 	}
 	return nil
 }
-
-// Ensure the Sinker implements the sinker.Sinker interface
-var _ sinker.Sinker = (*Sinker)(nil)
