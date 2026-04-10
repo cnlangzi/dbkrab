@@ -15,7 +15,7 @@ func newTestDB(t *testing.T) *sqlite.DB {
 	require.NoError(t, err)
 	
 	// Manually create tables for testing
-	_, err = db.Writer.Exec(`
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS transactions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			transaction_id TEXT NOT NULL,
@@ -28,7 +28,7 @@ func newTestDB(t *testing.T) *sqlite.DB {
 	`)
 	require.NoError(t, err)
 	
-	_, err = db.Writer.Exec(`
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS poller_state (
 			id INTEGER PRIMARY KEY,
 			last_poll_time TIMESTAMP,
