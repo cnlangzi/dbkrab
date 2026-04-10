@@ -13,47 +13,47 @@ func TestConvertCommitTime(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
+		name       string
 		driverTime time.Time
-		timezone  *time.Location
-		wantUTC   string // Expected UTC time in RFC3339 format
+		timezone   *time.Location
+		wantUTC    string // Expected UTC time in RFC3339 format
 	}{
 		{
-			name:      "UTC+8 timezone - Beijing noon becomes UTC 04:00",
+			name: "UTC+8 timezone - Beijing noon becomes UTC 04:00",
 			// Driver returns 12:26 incorrectly marked as UTC, but it's actually Beijing time
 			driverTime: time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			timezone:  shanghai,
-			wantUTC:   "2026-04-09T04:26:00Z", // 12:26 Beijing = 04:26 UTC
+			timezone:   shanghai,
+			wantUTC:    "2026-04-09T04:26:00Z", // 12:26 Beijing = 04:26 UTC
 		},
 		{
-			name:      "UTC+8 timezone - Beijing morning becomes previous day UTC evening",
+			name:       "UTC+8 timezone - Beijing morning becomes previous day UTC evening",
 			driverTime: time.Date(2026, 4, 9, 2, 0, 0, 0, time.UTC),
-			timezone:  shanghai,
-			wantUTC:   "2026-04-08T18:00:00Z", // 02:00 Beijing = 18:00 UTC (prev day)
+			timezone:   shanghai,
+			wantUTC:    "2026-04-08T18:00:00Z", // 02:00 Beijing = 18:00 UTC (prev day)
 		},
 		{
-			name:      "No timezone configured - use driver value as-is",
+			name:       "No timezone configured - use driver value as-is",
 			driverTime: time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			timezone:  nil,
-			wantUTC:   "2026-04-09T12:26:00Z", // No conversion
+			timezone:   nil,
+			wantUTC:    "2026-04-09T12:26:00Z", // No conversion
 		},
 		{
-			name:      "Local timezone - use driver value as-is",
+			name:       "Local timezone - use driver value as-is",
 			driverTime: time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			timezone:  time.Local,
-			wantUTC:   "2026-04-09T12:26:00Z", // No conversion
+			timezone:   time.Local,
+			wantUTC:    "2026-04-09T12:26:00Z", // No conversion
 		},
 		{
-			name:      "UTC timezone - identity conversion",
+			name:       "UTC timezone - identity conversion",
 			driverTime: time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			timezone:  time.UTC,
-			wantUTC:   "2026-04-09T12:26:00Z",
+			timezone:   time.UTC,
+			wantUTC:    "2026-04-09T12:26:00Z",
 		},
 		{
-			name:      "Preserves nanoseconds",
+			name:       "Preserves nanoseconds",
 			driverTime: time.Date(2026, 4, 9, 12, 26, 30, 123456789, time.UTC),
-			timezone:  shanghai,
-			wantUTC:   "2026-04-09T04:26:30.123456789Z",
+			timezone:   shanghai,
+			wantUTC:    "2026-04-09T04:26:30.123456789Z",
 		},
 	}
 
@@ -106,7 +106,7 @@ func TestConvertCommitTimeChangedBeforePulled(t *testing.T) {
 
 	// Verify the gap is approximately 2 hours (record created at 12:26 Beijing, pulled at 14:32 Beijing)
 	gap := pulledAt.Sub(changedAt)
-	expectedGap := 2 * time.Hour + 6 * time.Minute
+	expectedGap := 2*time.Hour + 6*time.Minute
 	if gap != expectedGap {
 		t.Errorf("gap between changed and pulled = %v, want %v", gap, expectedGap)
 	}
