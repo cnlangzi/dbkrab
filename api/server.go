@@ -213,7 +213,7 @@ func (s *Server) registerAPIRoutes() {
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
 	
-	s.app.Get("/sinks", s.handleSinksPage)
+	// Sinks page auto-registered by xun: pages/sinks.html → GET /sinks
 }
 
 // handlePlugins handles GET /api/plugins
@@ -1228,14 +1228,6 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		"columns": columns,
 		"rows":    queryResults,
 		"count":   len(queryResults),
-	})
-}
-
-// handleSinksPage handles GET /sinks
-func (s *Server) handleSinksPage(c *xun.Context) error {
-	return c.View(map[string]any{
-		"activeTab": "sinks",
-		"title":     "Sinks",
 	})
 }
 

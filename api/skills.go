@@ -82,43 +82,6 @@ type ValidateSkillResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// handleSkillsPage handles GET /skills (the skills management page)
-func (s *Server) handleSkillsPage(c *xun.Context) error {
-	return c.View(map[string]any{
-		"title":     "Skills",
-		"activeTab": "skills",
-	})
-}
-
-// handleSkillsNewPage handles GET /skills/new
-func (s *Server) handleSkillsNewPage(c *xun.Context) error {
-	return c.View(map[string]any{
-		"title":     "New Skill",
-		"activeTab": "skills",
-	})
-}
-
-// handleSkillsEditPage handles GET /skills/edit/{id}
-func (s *Server) handleSkillsEditPage(c *xun.Context) error {
-	// Use Go 1.22+ native PathValue for route params
-	id := c.Request.PathValue("id")
-	
-	if id == "" {
-		return c.View(map[string]any{
-			"title":     "Edit Skill",
-			"activeTab": "skills",
-			"Id":        "",
-			"Error":     "Skill ID required",
-		})
-	}
-	
-	return c.View(map[string]any{
-		"title":     "Edit: " + id,
-		"activeTab": "skills",
-		"Id":        id,
-	})
-}
-
 // handleSkillsList handles GET /api/skills/list
 func (s *Server) handleSkillsList(c *xun.Context) error {
 	if s.manager == nil {
