@@ -215,9 +215,9 @@ func FormatMSSQLGUID(b []byte) string {
 	// MSSQL GUID byte order: 3-2-1-0, 5-4, 7-6, 8-9-10-11-12-13-14-15
 	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
 		b[3], b[2], b[1], b[0], // First 4 bytes (LE)
-		b[5], b[4],             // Next 2 bytes (LE)
-		b[7], b[6],             // Next 2 bytes (LE)
-		b[8], b[9],             // Start of last group - keep as-is (BE)
+		b[5], b[4], // Next 2 bytes (LE)
+		b[7], b[6], // Next 2 bytes (LE)
+		b[8], b[9], // Start of last group - keep as-is (BE)
 		b[10], b[11], b[12], b[13], b[14], b[15],
 	)
 }
