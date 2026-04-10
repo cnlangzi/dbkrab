@@ -109,7 +109,7 @@ func (w *SQLiteWriter) watchMigrations(migrationsDir string) {
 			}
 			debounceTimer = time.AfterFunc(debounceDuration, func() {
 				if err := w.RunMigrations(); err != nil {
-					// migrations error, log it
+					slog.Debug("migration error", "error", err)
 				}
 			})
 		case err := <-watcher.Errors:

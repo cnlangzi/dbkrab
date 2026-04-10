@@ -18,8 +18,11 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/logging"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/sinker"
+	internal_store "github.com/cnlangzi/dbkrab/internal/store"
+	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
+	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 	"github.com/cnlangzi/dbkrab/plugin"
-	"github.com/cnlangzi/dbkrab/app/sqlite"
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
@@ -96,11 +99,28 @@ func main() {
 	}
 	slog.Info("offset store initialized", "type", cfg.CDC.Offset.Type)
 
-	// Create store
-	var store *app.Store
+	// Create store using pkg/sqlite and internal/store/sqlite
+	ctx := context.Background()
+	var appDB *sqlite.DB
+	var store internal_store.Store
+
 	switch cfg.App.Type {
 	case "sqlite":
-		store, err = app.NewStore(cfg.App.Path)
+		appDB, err = sqlite.New(ctx, sqlite.Config{
+			File:       cfg.App.Path,
+			ModuleName: "dbkrab",
+		})
+		if err != nil {
+			slog.Error("failed to create SQLite DB", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := appDB.Close(); err != nil {
+				slog.Warn("appDB.Close error", "error", err)
+			}
+		}()
+
+		store, err = storeSQLite.NewStore(appDB)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
@@ -129,6 +149,16 @@ func main() {
 	}()
 	slog.Info("dead letter queue initialized")
 
+	// Create sinker manager
+	sinkerMgr := sinker.NewManager()
+	sinkerMgr.Configure(cfg.Sinks.ToMap())
+	defer func() {
+		if err := sinkerMgr.Close(); err != nil {
+			slog.Warn("sinkerMgr.Close error", "error", err)
+		}
+	}()
+	slog.Info("sinker manager initialized")
+
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
 
@@ -141,7 +171,7 @@ func main() {
 	defer func() {
 		if err := configWatcher.Stop(); err != nil {
 			slog.Warn("error stopping config watcher", "error", err)
-			}
+		}
 	}()
 	slog.Info("config watcher initialized", "path", *configPath)
 
@@ -150,7 +180,7 @@ func main() {
 	poller.SetHandler(core.PluginHandler(func(tx *core.Transaction) error {
 		return pluginManager.Handle(tx)
 	}))
-	
+
 	// Set config reload channel for hot reload
 	poller.SetReloadChan(configWatcher.ReloadChan())
 
@@ -184,7 +214,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, store, apiPort, *configPath, cfg, configWatcher)
+	apiServer := api.NewServerWithCDC(pluginManager, dlqStore, cdcAdmin, store, sinkerMgr, apiPort, *configPath, cfg, configWatcher)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {

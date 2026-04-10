@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cnlangzi/dbkrab/plugin/sql"
 	"github.com/yaitoo/xun"
@@ -273,7 +274,7 @@ func renderSkillsFilesHTML(files []SkillFileInfo) string {
 			sizeInfo = fmt.Sprintf("<p class=\"text-xs text-textMuted\">%d bytes</p>", file.Size)
 		}
 
-		html.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&html, `
 		<div class="p-4 hover:bg-surfaceHover transition-colors">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3 min-w-0 flex-1">
@@ -285,7 +286,7 @@ func renderSkillsFilesHTML(files []SkillFileInfo) string {
 				</div>
 				<span class="px-2 py-1 rounded text-xs font-medium %s flex-shrink-0 ml-2">%s</span>
 			</div>
-		</div>`, icon, file.Name, sizeInfo, typeClass, typeLabel))
+		</div>`, icon, file.Name, sizeInfo, typeClass, typeLabel)
 	}
 
 	return html.String()
@@ -853,13 +854,13 @@ func isValidSkillName(name string) bool {
 	}
 
 	// Must start with a letter
-	if !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) {
+	if !unicode.IsLetter(rune(name[0])) {
 		return false
 	}
 
 	// Only allow letters, numbers, underscores, and hyphens
 	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+		if !unicode.IsLetter(c) && !unicode.IsDigit(c) && c != '_' && c != '-' {
 			return false
 		}
 	}
