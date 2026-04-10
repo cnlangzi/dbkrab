@@ -6,6 +6,130 @@ import (
 	"time"
 )
 
+func TestNullableScanValue(t *testing.T) {
+	t.Run("int64_nil_src", func(t *testing.T) {
+		var n Nullable[int64]
+
+		if err := n.Scan(nil); err != nil {
+			t.Fatalf("Scan(nil) error = %v, want nil", err)
+		}
+
+		if n.valid {
+			t.Fatalf("n.valid = true after Scan(nil), want false")
+		}
+
+		v, err := n.Value()
+		if err != nil {
+			t.Fatalf("Value() error = %v, want nil", err)
+		}
+		if v != nil {
+			t.Fatalf("Value() = %v, want nil when not valid", v)
+		}
+	})
+
+	t.Run("int64_exact_type", func(t *testing.T) {
+		var n Nullable[int64]
+
+		const want int64 = 123
+		if err := n.Scan(want); err != nil {
+			t.Fatalf("Scan(int64) error = %v, want nil", err)
+		}
+
+		if !n.valid {
+			t.Fatalf("n.valid = false after Scan(int64), want true")
+		}
+		if n.val != want {
+			t.Fatalf("n.val = %v, want %v", n.val, want)
+		}
+
+		v, err := n.Value()
+		if err != nil {
+			t.Fatalf("Value() error = %v, want nil", err)
+		}
+		if v != want {
+			t.Fatalf("Value() = %v, want %v", v, want)
+		}
+	})
+
+	t.Run("int64_mismatched_type_returns_error", func(t *testing.T) {
+		var n Nullable[int64]
+
+		// database/sql may return int32 for some drivers; should return error, not panic
+		if err := n.Scan(int32(123)); err == nil {
+			t.Fatalf("Scan(int32) error = nil, want error for mismatched type")
+		}
+	})
+
+	t.Run("string_nil_src", func(t *testing.T) {
+		var n Nullable[string]
+
+		if err := n.Scan(nil); err != nil {
+			t.Fatalf("Scan(nil) error = %v, want nil", err)
+		}
+
+		if n.valid {
+			t.Fatalf("n.valid = true after Scan(nil), want false")
+		}
+
+		v, err := n.Value()
+		if err != nil {
+			t.Fatalf("Value() error = %v, want nil", err)
+		}
+		if v != nil {
+			t.Fatalf("Value() = %v, want nil when not valid", v)
+		}
+	})
+
+	t.Run("string_exact_type", func(t *testing.T) {
+		var n Nullable[string]
+
+		const want = "hello"
+		if err := n.Scan(want); err != nil {
+			t.Fatalf("Scan(string) error = %v, want nil", err)
+		}
+
+		if !n.valid {
+			t.Fatalf("n.valid = false after Scan(string), want true")
+		}
+		if n.val != want {
+			t.Fatalf("n.val = %q, want %q", n.val, want)
+		}
+
+		v, err := n.Value()
+		if err != nil {
+			t.Fatalf("Value() error = %v, want nil", err)
+		}
+		if v != want {
+			t.Fatalf("Value() = %v, want %v", v, want)
+		}
+	})
+
+	t.Run("string_mismatched_type_returns_error", func(t *testing.T) {
+		var n Nullable[string]
+
+		// database/sql commonly returns []byte for textual columns; should return error
+		if err := n.Scan([]byte("hello")); err == nil {
+			t.Fatalf("Scan([]byte) error = nil, want error for mismatched type")
+		}
+	})
+
+	t.Run("zero_value_never_scanned", func(t *testing.T) {
+		var n Nullable[int64] // never populated via Scan
+
+		if n.valid {
+			t.Fatalf("zero-value Nullable.valid = true, want false")
+		}
+
+		v, err := n.Value()
+		if err != nil {
+			t.Fatalf("Value() on zero-value Nullable error = %v, want nil", err)
+		}
+		if v != nil {
+			t.Fatalf("Value() on zero-value Nullable = %v, want nil when not valid", v)
+		}
+	})
+}
+
 func TestInt64ScanValue(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -506,6 +630,31 @@ func TestScannerFactoryCreateDest(t *testing.T) {
 	scanner = factory.createScanner("DECIMAL")
 	if _, ok := scanner.(*NumericString); !ok {
 		t.Errorf("createScanner(DECIMAL) should return *NumericString")
+	}
+
+	// Ensure VARBINARY uses *Bytes scanner and round-trips []byte values.
+	varbinaryScanner := factory.createScanner("VARBINARY")
+	bytesScanner, ok := varbinaryScanner.(*Bytes)
+	if !ok {
+		t.Fatalf("createScanner(VARBINARY) should return *Bytes, got %T", varbinaryScanner)
+	}
+
+	original := []byte{0x01, 0x02, 0x03}
+	if err := bytesScanner.Scan(original); err != nil {
+		t.Fatalf("Bytes.Scan() error = %v", err)
+	}
+
+	gotVal, err := bytesScanner.Value()
+	if err != nil {
+		t.Fatalf("Bytes.Value() error = %v", err)
+	}
+
+	gotBytes, ok := gotVal.([]byte)
+	if !ok {
+		t.Fatalf("Bytes.Value() type = %T, want []byte", gotVal)
+	}
+	if string(gotBytes) != string(original) {
+		t.Errorf("Bytes.Value() = %v, want %v", gotBytes, original)
 	}
 
 	scanner = factory.createScanner("UNKNOWN_TYPE")
