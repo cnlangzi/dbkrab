@@ -12,8 +12,15 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
-	"github.com/cnlangzi/dbkrab/internal/sinker"
 )
+
+// Sinker is the interface for the underlying SQLite sinker.
+type Sinker interface {
+	DatabaseName() string
+	DatabaseType() string
+	Write(ctx context.Context, ops []core.Sink) error
+	Close() error
+}
 
 var (
 	// ErrSinkerRequired is returned when no sinker is provided
@@ -37,7 +44,7 @@ var (
 // BatchConfig holds batch sink configuration options.
 type BatchConfig struct {
 	// Sinker is the underlying SQLite sinker to wrap
-	Sinker sinker.Sinker
+	Sinker Sinker
 
 	// BatchSize is the number of CDC transactions per flush.
 	// Must be > 0. Default: 10
