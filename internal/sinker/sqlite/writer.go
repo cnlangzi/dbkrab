@@ -131,7 +131,7 @@ func (s *Sinker) DatabaseType() string {
 }
 
 // Write writes a batch of sink operations to the database
-func (s *Sinker) Write(ops []core.Sink) error {
+func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 	if len(ops) == 0 {
 		slog.Debug("SQLiteSinker.Write: no operations to write")
 		return nil
@@ -142,7 +142,6 @@ func (s *Sinker) Write(ops []core.Sink) error {
 		"operations", len(ops),
 		"path", s.path)
 
-	ctx := context.Background()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		slog.Error("SQLiteSinker.Write: failed to begin transaction",

@@ -1,6 +1,8 @@
 package sinker
 
 import (
+	"context"
+
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
@@ -13,8 +15,8 @@ type Sinker interface {
 	// DatabaseType returns the type of database (sqlite, duckdb, mssql, etc.)
 	DatabaseType() string
 
-	// Write writes a batch of sink operations to the sink
-	Write(ops []core.Sink) error
+	// Write writes a batch of sink operations to the sink with context for timeout/cancellation
+	Write(ctx context.Context, ops []core.Sink) error
 
 	// RunMigrations runs any pending migrations
 	RunMigrations() error

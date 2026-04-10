@@ -1,6 +1,7 @@
 package sinker
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -101,8 +102,8 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig
 	return s, nil
 }
 
-// WriteRoutes sink operations to appropriate sinkers based on Database field
-func (m *Manager) Write(sinks []core.Sink) error {
+// Write routes sink operations to appropriate sinkers based on Database field
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil
@@ -140,7 +141,7 @@ func (m *Manager) Write(sinks []core.Sink) error {
 			return fmt.Errorf("get sinker for %s: %w", dbName, err)
 		}
 
-		if err := sinker.Write(dbSinks); err != nil {
+		if err := sinker.Write(ctx, dbSinks); err != nil {
 			slog.Error("SinkerManager.Write: write failed",
 				"database", dbName,
 				"error", err)
