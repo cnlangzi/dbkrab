@@ -18,9 +18,6 @@ type Sinker interface {
 	// Write writes a batch of sink operations to the sink with context for timeout/cancellation
 	Write(ctx context.Context, ops []core.Sink) error
 
-	// RunMigrations runs any pending migrations
-	RunMigrations() error
-
 	// Close closes the sinker and releases resources
 	Close() error
 }
