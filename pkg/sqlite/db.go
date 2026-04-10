@@ -8,12 +8,10 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/yaitoo/sqle"
-	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -130,34 +128,53 @@ func NewFile(ctx context.Context, file string, moduleName string, migrationPath 
 	})
 }
 
-// runMigrations uses sqle/migrate to run migrations from a directory path.
+// runMigrations runs SQL migration files from a directory path.
+// Files are executed in alphabetical order.
 func runMigrations(db *sql.DB, migrationPath string) error {
-	sqleDB := sqle.Open(db)
-	m := migrate.New(sqleDB)
-	if err := m.Discover(os.DirFS(migrationPath)); err != nil {
-		return fmt.Errorf("discover migrations: %w", err)
+	entries, err := os.ReadDir(migrationPath)
+	if err != nil {
+		return fmt.Errorf("read migration directory: %w", err)
 	}
-	if err := m.Init(context.Background()); err != nil {
-		return fmt.Errorf("init migrations: %w", err)
-	}
-	if err := m.Migrate(context.Background()); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+
+		filePath := filepath.Join(migrationPath, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
+		}
+
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
+		}
 	}
 	return nil
 }
 
-// runMigrationsFS uses sqle/migrate to run migrations from an fs.FS.
+// runMigrationsFS runs SQL migration files from an embedded FS.
+// Files are executed in alphabetical order by filename.
 func runMigrationsFS(db *sql.DB, migrations fs.FS) error {
-	sqleDB := sqle.Open(db)
-	m := migrate.New(sqleDB)
-	if err := m.Discover(migrations); err != nil {
-		return fmt.Errorf("discover migrations: %w", err)
+	entries, err := fs.ReadDir(migrations, ".")
+	if err != nil {
+		return fmt.Errorf("read migration directory: %w", err)
 	}
-	if err := m.Init(context.Background()); err != nil {
-		return fmt.Errorf("init migrations: %w", err)
-	}
-	if err := m.Migrate(context.Background()); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+
+		content, err := fs.ReadFile(migrations, entry.Name())
+		if err != nil {
+			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
+		}
+
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
+		}
 	}
 	return nil
 }
