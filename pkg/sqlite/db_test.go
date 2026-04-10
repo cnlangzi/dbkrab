@@ -11,7 +11,7 @@ func TestNewInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Test write
 	_, err = db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -43,7 +43,7 @@ func TestNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFile failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Test write
 	_, err = db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -79,7 +79,7 @@ func TestExecContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, "CREATE TABLE test (id INTEGER PRIMARY KEY)")
@@ -93,7 +93,7 @@ func TestQueryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create and insert data using Writer
 	db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -126,7 +126,7 @@ func TestQueryRowContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInMemory failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create and insert data
 	db.Writer.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS migration_test (
 	if err != nil {
 		t.Fatalf("NewInMemory with migrations failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify table was created via migration
 	row := db.Reader.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_test'")
