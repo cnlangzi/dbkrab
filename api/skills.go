@@ -53,9 +53,8 @@ type SkillInfo struct {
 
 // CreateSkillRequest represents a request to create a new skill
 type CreateSkillRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Tables      []string `json:"tables"`
+	Name    string `json:"name"`    // File name (without .yml suffix)
+	Content string `json:"content"` // YAML content
 }
 
 // CreateFolderRequest represents a request to create a new folder
@@ -411,7 +410,7 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	if req.Name == "" {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill name is required",
+			"error":   "File name is required",
 		})
 	}
 
@@ -419,37 +418,61 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	if !isValidSkillName(req.Name) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid skill name. Use only letters, numbers, underscores, and hyphens. Must start with a letter.",
+			"error":   "Invalid file name. Use only letters, numbers, underscores, and hyphens. Must start with a letter.",
 		})
 	}
 
-	// Check if skill already exists
+	// Validate YAML content
+	if req.Content == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "YAML content is required",
+		})
+	}
+
+	// Parse and validate YAML syntax
+	var skill sql.Skill
+	if err := yaml.Unmarshal([]byte(req.Content), &skill); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "YAML syntax error: " + err.Error(),
+		})
+	}
+
+	// Validate required fields
+	if skill.Name == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Field 'name' is required in YAML",
+		})
+	}
+
+	if len(skill.On) == 0 {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Field 'on' must contain at least one table",
+		})
+	}
+
+	// Validate sinks configuration
+	if err := skill.ValidateSinks(); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "Sinks configuration error: " + err.Error(),
+		})
+	}
+
+	// Check if skill file already exists
 	skillPath := filepath.Join("skills", req.Name+".yml")
 	if _, err := os.Stat(skillPath); err == nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Skill already exists",
-		})
-	}
-
-	// Create default skill content
-	skill := sql.Skill{
-		Name:        req.Name,
-		Description: req.Description,
-		On:          req.Tables,
-		Sinks:       []sql.Sink{},
-	}
-
-	data, err := yaml.Marshal(skill)
-	if err != nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "Failed to generate skill YAML: " + err.Error(),
+			"error":   "Skill file already exists: " + req.Name + ".yml",
 		})
 	}
 
 	// Write skill file
-	if err := os.WriteFile(skillPath, data, 0644); err != nil {
+	if err := os.WriteFile(skillPath, []byte(req.Content), 0644); err != nil {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Failed to create skill file: " + err.Error(),
@@ -458,7 +481,7 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 
 	// Skill will be auto-reloaded by the internal file watcher (StartWatch)
 	if s.manager != nil {
-		slog.Info("Skill created, file watcher will auto-reload", "skill", req.Name)
+		slog.Info("Skill created, file watcher will auto-reload", "skill", req.Name, "file", skillPath)
 	}
 
 	return c.View(map[string]any{
