@@ -1,4 +1,1 @@
-version: 2
-
-run:
-  tests: false
+# Empty config - use defaults
