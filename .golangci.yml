@@ -1,24 +1,14 @@
-version: "2"
+run:
+  tests: false
+  skip-dirs:
+    - "**/testdata/**"
 
 linters:
-  defaults: none
-  disable-all: true
   enable:
     - errcheck
     - staticcheck
     - govet
     - gofmt
     - misspell
-  settings:
-    errcheck:
-      checks:
-        - all
-        - '-*.Close'
-    staticcheck:
-      tests: false
-    govet:
-      tests: false
-    gofmt:
-      tests: false
-    misspell:
-      tests: false
+  errcheck:
+    check-blank: true
