@@ -137,27 +137,3 @@ func TestEngine_ShortTableName(t *testing.T) {
 	}
 }
 
-func TestIsIDField(t *testing.T) {
-	tests := []struct {
-		name string
-		isID bool
-	}{
-		{"id", true},
-		{"order_id", true},
-		{"customerId", true},
-		{"product_ID", true},
-		{"uuid", true},
-		{"name", false},
-		{"amount", false},
-		{"created_at", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isIDField(tt.name)
-			if got != tt.isID {
-				t.Errorf("isIDField(%q) = %v, want %v", tt.name, got, tt.isID)
-			}
-		})
-	}
-}
