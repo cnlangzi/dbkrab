@@ -385,29 +385,3 @@ func shortTableName(table string) string {
 	}
 	return table
 }
-
-// isIDField checks if a field name looks like an ID field
-// Handles: id, order_id, customerId, product_ID, uuid, key, etc.
-func isIDField(name string) bool {
-	idNames := []string{"id", "uuid", "key"}
-	// Check prefix (id, uuid, key)
-	for _, idName := range idNames {
-		if len(name) >= len(idName) && strings.ToLower(name[:len(idName)]) == idName {
-			return true
-		}
-	}
-	// Check suffix (_id, Id, ID, Id, UUID, Key)
-	for _, idName := range idNames {
-		if len(name) >= len(idName) {
-			// Try lowercase comparison for _id style
-			if strings.ToLower(name[len(name)-len(idName):]) == idName {
-				return true
-			}
-			// Try exact match for CamelCase (Id, ID)
-			if name[len(name)-len(idName):] == idName || name[len(name)-len(idName):] == strings.ToUpper(idName) {
-				return true
-			}
-		}
-	}
-	return false
-}
