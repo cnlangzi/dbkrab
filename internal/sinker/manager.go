@@ -9,6 +9,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -75,14 +76,14 @@ func (m *Manager) GetSinker(dbName string) (Sinker, error) {
 }
 
 // createSQLiteSinker creates a SQLite sinker for the given database config
-func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig) (*sqlite.Sinker, error) {
+func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig) (*sinkSqlite.Sinker, error) {
 	path := dbConfig.Path
 	if path == "" {
 		// Default path for SQLite
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	s, err := sqlite.NewSinker(sqlite.Config{
+	s, err := sinkSqlite.NewSinker(sinkSqlite.Config{
 		Name:          name,
 		File:          path,
 		ModuleName:    "dbkrab",

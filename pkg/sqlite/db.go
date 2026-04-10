@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"embed"
 	"errors"
 	"io/fs"
 	"net/url"
