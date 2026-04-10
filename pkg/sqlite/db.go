@@ -1,17 +1,15 @@
 package sqlite
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -36,8 +34,8 @@ type Config struct {
 	// ModuleName is used for migration discovery.
 	ModuleName string
 
-	// FS for migration files (optional).
-	FS fs.FS
+	// MigrationPath is the directory path for migration files (used with os.DirFS).
+	MigrationPath string
 
 	// InMemory indicates if this is an in-memory database.
 	InMemory bool
@@ -68,9 +66,10 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Run migrations if FS is provided
-	if config.FS != nil {
-		if err := RunMigrations(d.Writer, config.FS, config.ModuleName); err != nil {
+	// Run migrations if MigrationPath is provided
+	if config.MigrationPath != "" {
+		if err := runMigrations(d.Writer, config.MigrationPath); err != nil {
+			_ = d.Writer.Close()
 			return nil, err
 		}
 	}
@@ -93,7 +92,8 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 
 	// Run migrations if provided
 	if migrations != nil {
-		if err := RunMigrations(db, migrations, moduleName); err != nil {
+		if err := runMigrationsFS(db, migrations); err != nil {
+			_ = db.Close()
 			return nil, err
 		}
 	}
@@ -106,7 +106,7 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 }
 
 // NewFile creates a SQLite DB with read/write separation from a file.
-func NewFile(ctx context.Context, file string, moduleName string, migrations fs.FS) (*DB, error) {
+func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
 	// Ensure file exists
 	_, err := os.Stat(file)
 	if err != nil {
@@ -121,161 +121,62 @@ func NewFile(ctx context.Context, file string, moduleName string, migrations fs.
 	}
 
 	return New(ctx, Config{
-		File:        file,
-		InMemory:    false,
-		ModuleName:  moduleName,
-		FS:          migrations,
+		File:          file,
+		InMemory:      false,
+		ModuleName:    moduleName,
+		MigrationPath: migrationPath,
 	})
 }
 
-// RunMigrations discovers and runs pending migrations from embedded FS.
-// This is exported so other packages can use it.
-func RunMigrations(db *sql.DB, migrationsFS fs.FS, moduleName string) error {
-	// Create schema_migrations table if not exists
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			version TEXT PRIMARY KEY,
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
+// runMigrations runs SQL migration files from a directory path.
+// Files are executed in alphabetical order.
+func runMigrations(db *sql.DB, migrationPath string) error {
+	entries, err := os.ReadDir(migrationPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("read migration directory: %w", err)
 	}
 
-	// Discover migration files
-	var migrationFiles []string
-	err = fs.WalkDir(migrationsFS, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		if strings.HasSuffix(name, ".sql") && isMigrationFile(name) {
-			migrationFiles = append(migrationFiles, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	// Sort migrations
-	sort.Sort(byFilename(migrationFiles))
-
-	// Get applied migrations
-	applied := make(map[string]bool)
-	rows, err := db.Query("SELECT version FROM schema_migrations")
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var version string
-		if err := rows.Scan(&version); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		applied[version] = true
-	}
-	_ = rows.Close()
-
-	// Run pending migrations
-	for _, file := range migrationFiles {
-		version := extractVersion(file)
-		if applied[version] {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
 		}
 
-		content, err := fs.ReadFile(migrationsFS, file)
+		filePath := filepath.Join(migrationPath, entry.Name())
+		content, err := os.ReadFile(filePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
 		}
 
-		if err := execMigration(db, version, content); err != nil {
-			return err
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
 		}
 	}
-
 	return nil
 }
 
-// isMigrationFile checks if filename matches migration pattern (e.g., 001_description.sql)
-func isMigrationFile(name string) bool {
-	matched, _ := regexp.MatchString(`^\d+_.*\.sql$`, name)
-	return matched
-}
-
-type byFilename []string
-
-func (b byFilename) Len() int           { return len(b) }
-func (b byFilename) Less(i, j int) bool { return b[i] < b[j] }
-func (b byFilename) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
-
-func extractVersion(path string) string {
-	name := filepath.Base(path)
-	re := regexp.MustCompile(`^(\d+)`)
-	matches := re.FindStringSubmatch(name)
-	if len(matches) > 1 {
-		return matches[1]
-	}
-	return name
-}
-
-func execMigration(db *sql.DB, version string, content []byte) error {
-	tx, err := db.Begin()
+// runMigrationsFS runs SQL migration files from an embedded FS.
+// Files are executed in alphabetical order by filename.
+func runMigrationsFS(db *sql.DB, migrations fs.FS) error {
+	entries, err := fs.ReadDir(migrations, ".")
 	if err != nil {
-		return err
+		return fmt.Errorf("read migration directory: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
 
-	// Execute each statement
-	statements := splitStatements(string(content))
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
 		}
-		if _, err := tx.Exec(stmt); err != nil {
-			return err
+
+		content, err := fs.ReadFile(migrations, entry.Name())
+		if err != nil {
+			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
+		}
+
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
 		}
 	}
-
-	// Record migration
-	if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", version); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-func splitStatements(content string) []string {
-	var statements []string
-	var current bytes.Buffer
-
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--") {
-			continue
-		}
-		current.WriteString(line)
-		current.WriteString("\n")
-
-		if strings.HasSuffix(trimmed, ";") {
-			statements = append(statements, current.String())
-			current.Reset()
-		}
-	}
-
-	if current.Len() > 0 {
-		stmt := strings.TrimSpace(current.String())
-		if stmt != "" {
-			statements = append(statements, stmt)
-		}
-	}
-
-	return statements
+	return nil
 }
 
 func setupWriter(file string, inmemory bool, maxOpenConns int) (*sql.DB, error) {
@@ -433,4 +334,106 @@ func (db *DB) QueryRow(query string, args ...interface{}) *sql.Row {
 // QueryRowContext executes a read operation on Reader with context and returns a single row.
 func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
 	return db.Reader.QueryRowContext(ctx, query, args...)
+}
+
+// Execer is an interface for executing queries
+type Execer interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+// InsertInTx inserts rows into a table within a transaction.
+func InsertInTx(tx Execer, table string, columns []string, rows [][]interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(columns))
+	for i := range columns {
+		placeholders[i] = "?"
+	}
+
+	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		quoteIdent(table),
+		quoteIdentList(columns),
+		strings.Join(placeholders, ","))
+
+	for _, row := range rows {
+		if _, err := tx.Exec(query, row...); err != nil {
+			return fmt.Errorf("insert: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateInTx updates rows in a table within a transaction.
+func UpdateInTx(tx Execer, table string, columns []string, rows [][]interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	setClause := make([]string, len(columns))
+	for i, col := range columns {
+		setClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+	}
+
+	query := fmt.Sprintf("UPDATE %s SET %s", quoteIdent(table), strings.Join(setClause, ","))
+
+	for _, row := range rows {
+		if _, err := tx.Exec(query, row...); err != nil {
+			return fmt.Errorf("update: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// DeleteInTx deletes rows from a table within a transaction.
+func DeleteInTx(tx Execer, table string, columns []string, rows [][]interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	if len(columns) == 0 {
+		return errors.New("delete requires at least one column")
+	}
+
+	whereClause := make([]string, len(columns))
+	for i, col := range columns {
+		whereClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+	}
+
+	query := fmt.Sprintf("DELETE FROM %s WHERE %s",
+		quoteIdent(table),
+		strings.Join(whereClause, " AND "))
+
+	for _, row := range rows {
+		if _, err := tx.Exec(query, row...); err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func quoteIdent(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s) + 2)
+	buf.WriteByte('`')
+	for _, c := range s {
+		buf.WriteRune(c)
+		if c == '`' {
+			buf.WriteByte('`')
+		}
+	}
+	buf.WriteByte('`')
+	return buf.String()
+}
+
+func quoteIdentList(columns []string) string {
+	quoted := make([]string, len(columns))
+	for i, col := range columns {
+		quoted[i] = quoteIdent(col)
+	}
+	return strings.Join(quoted, ",")
 }

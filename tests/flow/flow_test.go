@@ -244,7 +244,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 		fn: func(tx *core.Transaction) error {
 			handlerCalled = true
 			// Call plugin manager to process
-			handlerErr = pluginMgr.Handle(tx)
+			handlerErr = pluginMgr.Handle(context.Background(), tx)
 			return handlerErr
 		},
 	}
@@ -315,7 +315,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(tx)
+			return pluginMgr.Handle(context.Background(), tx)
 		},
 	}
 
@@ -422,7 +422,7 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(tx)
+			return pluginMgr.Handle(context.Background(), tx)
 		},
 	}
 
@@ -567,7 +567,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 			if callCount == 1 {
 				return fmt.Errorf("transient handler error")
 			}
-			return pluginMgr.Handle(tx)
+			return pluginMgr.Handle(context.Background(), tx)
 		},
 	}
 
