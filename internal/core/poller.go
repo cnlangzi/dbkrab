@@ -328,6 +328,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Collect all changes from successful polls
+	//nolint:staticcheck // SA4010 false positive - allChanges is used after the loop
 	allChanges := []Change{}
 	validResults := []tablePollResult{}
 	for _, r := range results {
