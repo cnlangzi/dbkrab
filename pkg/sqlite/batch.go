@@ -121,7 +121,7 @@ func (btx *BatchTx) Rollback() error {
 	btx.done = true
 	btx.buf = nil
 	// Send empty commit to release the lock
-	doneCh := make(chan struct{})
+	doneCh := make(chan Result, 1)
 	btx.writer.cmdCh <- Command{Type: "BatchRollback", ResultCh: doneCh}
 	<-doneCh
 	return nil
@@ -245,7 +245,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	}
 
 	// Start fresh global transaction for BatchTx
-	tx, err := bw.DB.BeginTx(cmd.TxOptions)
+	tx, err := bw.DB.BeginTx(context.Background(), cmd.TxOptions)
 	if err != nil {
 		cmd.TxResultCh <- &TxResult{Error: err}
 		return
