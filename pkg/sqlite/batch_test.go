@@ -74,7 +74,7 @@ func TestBatchWriter_BeginTx_Commit(t *testing.T) {
 	defer bw.Close()
 
 	// BeginTx should create BatchTx
-	tx, err := bw.BeginTx(context.Background(), nil)
+	tx, err := bw.BeginBatchTx(context.Background(), nil)
 	require.NoError(t, err)
 	btx := tx
 
@@ -117,7 +117,7 @@ func TestBatchWriter_BeginTx_Rollback(t *testing.T) {
 	bw.Flush()
 
 	// BeginTx and add rows
-	tx, err := bw.BeginTx(context.Background(), nil)
+	tx, err := bw.BeginBatchTx(context.Background(), nil)
 	require.NoError(t, err)
 	btx := tx
 	_, err = btx.Exec("INSERT INTO users (id, name) VALUES (2, 'alice')")
@@ -178,7 +178,7 @@ func TestBatchWriter_TimeBasedBlockedByActiveBatchTx(t *testing.T) {
 	defer bw.Close()
 
 	// BeginTx - holds lock
-	tx, err := bw.BeginTx(context.Background(), nil)
+	tx, err := bw.BeginBatchTx(context.Background(), nil)
 	require.NoError(t, err)
 	btx := tx
 
@@ -290,7 +290,7 @@ func TestBatchWriter_DeferRollbackAfterCommit(t *testing.T) {
 	_, err := bw.Exec("INSERT INTO users (id, name) VALUES (1, 'existing')")
 	require.NoError(t, err)
 
-	tx, err := bw.BeginTx(context.Background(), nil)
+	tx, err := bw.BeginBatchTx(context.Background(), nil)
 	require.NoError(t, err)
 	btx := tx
 	_, err = btx.Exec("INSERT INTO users (id, name) VALUES (2, 'alice')")

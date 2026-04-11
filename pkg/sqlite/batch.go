@@ -355,7 +355,7 @@ func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
 // transaction. This ensures that BatchTx failures do not affect prior data.
 //
 // Returns a *BatchTx that satisfies the sql.Tx interface.
-func (bw *BatchWriter) BeginTx(ctx context.Context, opts *sql.TxOptions) (TxExec, error) {
+func (bw *BatchWriter) BeginBatchTx(ctx context.Context, opts *sql.TxOptions) (TxExec, error) {
 	resultCh := make(chan *TxResult, 1)
 	bw.cmdCh <- Command{
 		Type:       "BeginTx",
