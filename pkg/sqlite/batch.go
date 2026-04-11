@@ -75,7 +75,7 @@ type BatchWriter struct {
 	// Protected by channel ordering (not mutex):
 	globalTx     *sql.Tx
 	pendingStmts []stmt
-	pendingCount int
+	pendingCount uint64
 	lastFlush    time.Time
 	timer        *time.Timer
 	txCounter    int64
@@ -136,7 +136,7 @@ func (bw *BatchWriter) transactionLoop() {
 
 // BufferLen returns the number of pending statements.
 func (bw *BatchWriter) BufferLen() int {
-	return bw.pendingCount
+	return int(atomic.LoadUint64(&bw.pendingCount))
 }
 
 func (bw *BatchWriter) handleBeginTx(cmd Command) {
@@ -177,16 +177,16 @@ func (bw *BatchWriter) handleExec(cmd Command) {
 			slog.Error("BatchWriter.handleExec: rollback failed", "error", rbErr)
 		}
 		bw.globalTx = nil
-		bw.pendingCount = 0
+		atomic.StoreUint64(&bw.pendingCount, 0)
 		cmd.ResultCh <- Result{LastResult: result, LastError: err}
 		return
 	}
 
 	bw.pendingStmts = append(bw.pendingStmts, stmt{query: cmd.Query, args: cmd.Args})
-	bw.pendingCount++
+	atomic.AddUint64(&bw.pendingCount, 1)
 
 	// Check size threshold
-	if bw.pendingCount >= bw.cfg.BatchSize {
+	if atomic.LoadUint64(&bw.pendingCount) >= uint64(bw.cfg.BatchSize) {
 		bw.doFlush()
 	}
 
@@ -264,7 +264,7 @@ func (bw *BatchWriter) handleFlush(cmd Command) {
 }
 
 func (bw *BatchWriter) doFlush() {
-	if bw.globalTx == nil || bw.pendingCount == 0 {
+	if bw.globalTx == nil || atomic.LoadUint64(&bw.pendingCount) == 0 {
 		bw.lastFlush = time.Now()
 		return
 	}
@@ -276,7 +276,7 @@ func (bw *BatchWriter) doFlush() {
 		}
 		bw.globalTx = nil
 		bw.pendingStmts = bw.pendingStmts[:0]
-		bw.pendingCount = 0
+		atomic.StoreUint64(&bw.pendingCount, 0)
 		return
 	}
 
@@ -286,13 +286,13 @@ func (bw *BatchWriter) doFlush() {
 		slog.Error("BatchWriter.doFlush: begin failed", "error", err)
 		bw.globalTx = nil
 		bw.pendingStmts = bw.pendingStmts[:0]
-		bw.pendingCount = 0
+		atomic.StoreUint64(&bw.pendingCount, 0)
 		return
 	}
 	bw.globalTx = tx
 
 	bw.pendingStmts = bw.pendingStmts[:0]
-	bw.pendingCount = 0
+	atomic.StoreUint64(&bw.pendingCount, 0)
 	bw.lastFlush = time.Now()
 }
 
