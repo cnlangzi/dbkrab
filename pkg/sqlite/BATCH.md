@@ -27,105 +27,87 @@ BatchWriter solves this by:
 │  │ (reader) │  │  (lazy)     │  │  (time-based flush) │ │
 │  └───────────┘  └──────────────┘  └─────────────────────┘ │
 │         │              ↑                    ↑              │
-│         │              │                    │              │
 │         ▼              │                    │              │
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │           cmdCh (channel - commands)                 │  │
-│  │           transactionLoop (single goroutine)          │  │
+│  │                 sync.Mutex                          │  │
+│  │  Ensures exclusive access during BatchTx           │  │
 │  └─────────────────────────────────────────────────────┘  │
-│         │              │                    │              │
-│         ▼              ▼                    ▼              │
-│  ┌────────────┐  ┌────────────┐  ┌────────────────────┐  │
-│  │  Query/    │  │ globalTx   │  │  timer.OnTimer()   │  │
-│  │  QueryRow  │  │ operations │  │  → Flush command   │  │
-│  └────────────┘  └────────────┘  └────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-### Two Coordination Mechanisms
-
-1. **Channel (cmdCh)**: Serializes all commands to a single goroutine
-2. **No lock needed!**: SAVEPOINT is created at Commit time, not BeginTx time
 
 ---
 
 ## Two Write Patterns
 
-**1. Direct Exec (no transaction)**
+### 1. Direct Exec (batch mode)
 
 ```
-Exec() → cmdCh → transactionLoop → globalTx → immediate execution → pendingCount++
-         ↓
-         size threshold reached → Commit globalTx → reset
+Exec() → Lock → globalTx.Exec() → pendingCount++ → tryFlushLocked() → Unlock
+                                                                         ↑
+Timer fires → Lock → if pendingCount >= BatchSize → globalTx.Commit() ─┘
 ```
 
-**2. BeginTx + Commit/Rollback (explicit transaction)**
+### 2. BeginTx + Commit/Rollback (drop-in replacement)
 
 ```
-BeginTx() → savepointMu.Lock() → savepointMu held
-            → Create SAVEPOINT btx_N
-            → BatchTx created with savepointName
+BeginTx():
+  → Flush pending globalTx first (commit any uncommitted data)
+  → Start new globalTx
+  → Create BatchTx
+  → Lock is held until Commit/Rollback
     ↓
 Exec(BatchTx) → buffer to BatchTx.buf (NOT executed yet)
     ↓
-Commit(BatchTx) → Execute BatchTx.buf in globalTx
-                   → RELEASE SAVEPOINT btx_N
-                   → savepointMu.Unlock()
-                   → try size-based flush
+Commit(BatchTx):
+  → Execute BatchTx.buf in globalTx
+  → globalTx.Commit() (make data visible)
+  → Start new globalTx
+  → Unlock
     OR
-Rollback(BatchTx) → ROLLBACK TO SAVEPOINT btx_N (discard changes)
-                    → savepointMu.Unlock()
+Rollback(BatchTx):
+  → Discard BatchTx.buf (already discarded, never executed)
+  → Unlock
 ```
 
 ---
 
-## SAVEPOINT for Nested Transactions
+## Key Design: BeginTx Flushes Pending Data
 
-SQLite supports SAVEPOINT for nested transactions within the global transaction.
+**When BeginTx is called, any pending data is immediately committed.**
 
-### Why SAVEPOINT?
-
-Without SAVEPOINT, if BatchTx B fails and Rollback:
-- Would roll back ALL writes including BatchTx A and Direct Exec
-- Data loss!
-
-With SAVEPOINT:
-- Each BatchTx has its own savepoint
-- Failed BatchTx rolls back only to its savepoint
-- Other writes remain intact
-
-### SAVEPOINT Commands
-
-```sql
--- Create savepoint for BatchTx
-SAVEPOINT btx_1;
-
--- Execute BatchTx operations
-INSERT INTO ...;  -- BatchTx B's operations
-
--- If BatchTx B fails:
-ROLLBACK TO btx_1;  -- Discard only BatchTx B's changes
-
--- If BatchTx B succeeds:
-RELEASE SAVEPOINT btx_1;  -- Make changes permanent
-```
+This ensures:
+1. **No SAVEPOINT needed** - simpler design
+2. **BatchTx failures don't affect prior data** - pending data already committed
+3. **BatchTx isolation** - operates on fresh globalTx
+4. **Drop-in replacement** - BatchTx satisfies sql.Tx interface
 
 ---
 
-## Simplified Design: SAVEPOINT at Commit Time
+## Drop-in Replacement for *sql.Tx
 
-**Key Insight: No lock needed!**
+`BatchTx` implements the same interface as `*sql.Tx`:
 
-Previous design created SAVEPOINT at BeginTx time, requiring a lock to prevent conflicts.
+```go
+type TxExec interface {
+    Exec(query string, args ...any) (sql.Result, error)
+    Commit() error
+    Rollback() error
+}
+```
 
-Simplified design:
-- BeginTx: Returns empty BatchTx wrapper (no SAVEPOINT, no lock)
-- Commit: Creates SAVEPOINT, executes buffer atomically, releases/rollbacks
+Users can replace `*sql.Tx` with `*BatchTx`:
 
-**Why no lock needed?**
-- All operations happen inside Commit, which is atomic
-- SAVEPOINT created inside Commit is naturally isolated
-- Other BatchTx/Exec also go through Commit, so no conflict
+```go
+// Before
+tx, _ := db.BeginTx(ctx, nil)
+tx.Exec("INSERT ...")
+tx.Commit()
+
+// After (with BatchWriter)
+tx, _ := bw.BeginTx(ctx, nil)  // bw.BeginTx returns *BatchTx
+tx.Exec("INSERT ...")
+tx.Commit()
+```
 
 ---
 
@@ -136,14 +118,12 @@ First write (Direct or BeginTx)
     ↓
 globalTx = db.Begin()
     ↓
-[If BeginTx]: SAVEPOINT btx_N, set batchActive = true
+[If BeginTx]: Flush previous pending, start new globalTx
     ↓
-Accumulate writes (Direct Exec + BatchTx Commit)
+Accumulate writes (Direct Exec or BatchTx buffer)
     ↓
-size trigger (≥ BatchSize) AND batchActive = false → Flush
-time trigger → Flush (if batchActive = false)
-    ↓
-globalTx.Commit()
+size trigger (≥ BatchSize) → globalTx.Commit()
+time trigger → globalTx.Commit()
     ↓
 globalTx = nil (next write creates new one)
 ```
@@ -153,121 +133,41 @@ globalTx = nil (next write creates new one)
 ## Data Structures
 
 ```go
-type stmt struct {
-    query string
-    args  []any
+type BatchConfig struct {
+    BatchSize     int           // Default: 100
+    FlushInterval time.Duration // Default: 100ms
 }
 
-// Command sent to transaction goroutine via cmdCh
-type Command struct {
-	Type string // "Exec", "BeginTx", "BatchCommit", "Flush"
-
-	// For BeginTx
-	TxOptions  *sql.TxOptions
-	TxResultCh chan<- *BatchTxResult
-
-	// For Exec / BatchCommit
-	Query string
-	Args  []any
-	Buffer []stmt // For BatchCommit (entire buffer at once!)
-
-	// Response channel (each operation has its own)
-	ResultCh chan<- Result
-}
-
-type Result struct {
-	LastResult sql.Result
-	LastError  error
-	Results    []Result // For batch operations
-}
-
-type BatchTxResult struct {
-	Tx   *BatchTx
-	Error error
-}
-
-// BatchTx buffers statements and commits atomically via savepoint
 type BatchTx struct {
-	writer        *BatchWriter
-	savepointName string // e.g., "btx_1", "btx_2"
-	buf           []stmt
-	done          bool
+    writer *BatchWriter
+    buf    []stmt
+    done   bool
 }
 
-// BatchWriter provides transparent batch writing
 type BatchWriter struct {
-	*sql.DB
+    *sql.DB // embedded: passthrough Query/QueryRow
+    mu     sync.Mutex
 
-	cfg           BatchConfig
-	cmdCh         chan Command
-
-	// Protected by channel ordering (not mutex):
-	globalTx     *sql.Tx
-	pendingStmts []stmt
-	pendingCount int
-	lastFlush    time.Time
-	timer        *time.Timer
-	txCounter    int64
+    globalTx     *sql.Tx // lazily created
+    pendingCount  int
+    lastFlush    time.Time
+    timer        *time.Timer
+    cfg          BatchConfig
 }
 ```
 
 ---
 
-## Batch Commit Must Send Entire Buffer at Once
-
-**Problem if sent one-by-one:**
+## Timer Flush Behavior
 
 ```
-BatchTx has 3 operations in buffer:
-  Send op 1 → Timer fires → Flush → globalTx replaced
-  Send op 2 → globalTx is not the original one!
-  Send op 3 → Data loss!
+Timer fires (every FlushInterval):
+  1. TryLock() - if locked (BatchTx active), skip
+  2. If pendingCount > 0 → globalTx.Commit()
+  3. Reset timer
 ```
 
-**Solution: Send entire buffer atomically**
-
-```go
-func (btx *BatchTx) Commit() error {
-	btx.writer.cmdCh <- Command{
-		Type:   "BatchCommit",
-		Buffer: btx.buf, // Entire buffer at once!
-	}
-	result := <-btx.writer.cmdCh.ResultCh
-	return result.Error
-}
-```
-
----
-
-## Error Handling for Batch Operations
-
-Continue executing all statements, record each error:
-
-```go
-func (bw *BatchWriter) handleBatchCommit(cmd Command) {
-	results := make([]Result, 0, len(cmd.Buffer))
-	var commitErr error
-
-	// Execute all statements, record each error
-	for _, s := range cmd.Buffer {
-		_, err := bw.globalTx.Exec(s.query, s.args...)
-		results = append(results, Result{LastError: err})
-		if err != nil && commitErr == nil {
-			commitErr = err // Record first error but continue
-		}
-	}
-
-	// After all executed, decide Commit or Rollback
-	if commitErr != nil {
-		bw.globalTx.Exec("ROLLBACK TO "+cmd.SavepointName)
-		cmd.ResultCh <- Result{LastError: commitErr, Results: results}
-		return
-	}
-
-	bw.globalTx.Exec("RELEASE SAVEPOINT "+cmd.SavepointName)
-	cmd.ResultCh <- Result{Results: results}
-}
-```
+Timer uses `TryLock` to avoid blocking. If lock is held by BatchTx, the flush is skipped for that cycle.
 
 ---
 
@@ -277,13 +177,12 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 |-------|------|---------|-------------|
 | BatchSize | int | 100 | Flush when pending count reaches this |
 | FlushInterval | duration | 100ms | Time-based flush interval |
-| TxTimeout | duration | 30s | Timeout for single flush |
 
 ---
 
 ## Usage Examples
 
-### Direct Exec
+### Direct Exec (automatic batching)
 
 ```go
 bw := NewBatchWriter(db, BatchConfig{
@@ -297,74 +196,52 @@ bw.Exec("INSERT INTO orders (id, amount) VALUES (2, 200)")
 // All pending writes committed in single transaction
 ```
 
-### Explicit Transaction (with SAVEPOINT)
+### Explicit Transaction (drop-in replacement)
 
 ```go
 tx, _ := bw.BeginTx(ctx, nil)
 tx.Exec("INSERT INTO orders (id, amount) VALUES (1, 100)")
 tx.Exec("INSERT INTO items (order_id, product) VALUES (1, 'widget')")
-tx.Commit() // Both statements execute atomically within SAVEPOINT
+tx.Commit() // Both statements execute atomically
 ```
 
-### Atomicity Guarantee with SAVEPOINT
+### Rollback
 
 ```go
 tx, _ := bw.BeginTx(ctx, nil)
 tx.Exec("INSERT INTO orders ...")
-tx.Exec("INSERT INTO items ...")
-// If items insert fails, only this BatchTx is rolled back
-// Other BatchTxs and Direct Exec remain intact!
-tx.Rollback()
+tx.Rollback() // Changes discarded, no data written
 ```
 
 ---
 
-## Channel Protection Only
+## Implementation Details
 
-**Only Channel is needed for serialization:**
+### Commit Execution Order
 
-| Mechanism | Purpose |
-|-----------|---------|
-| cmdCh (Channel) | Serializes all commands to single goroutine |
+1. Execute all buffered statements in globalTx
+2. If any fails → rollback globalTx, start new, return error
+3. If all succeed → commit globalTx, start new, return nil
 
-- No mutex needed!
-- SAVEPOINT created at Commit time, not BeginTx time
-- Commit is atomic - all operations inside happen together
+### Why BeginTx Flushes Pending Data?
 
-This dual protection ensures:
-1. No race conditions on globalTx
-2. No savepoint conflicts
-3. Timer flush cannot break BatchTx atomicity
+Without flushing pending data:
+- BatchTx failure would rollback globalTx, losing prior data
 
----
+With flushing:
+- Pending data committed before BatchTx starts
+- BatchTx operates on fresh globalTx
+- BatchTx failure only affects its own buffer
 
-## Anti-Double-Unlock Protection
+### Lock Behavior
 
-When using `defer tx.Rollback()` after `tx.Commit()`:
-
-```go
-tx, _ := bw.BeginTx(ctx, nil)
-defer func() { _ = tx.Rollback() }()
-tx.Exec(...)
-tx.Commit() // marks done=true, releases savepoint
-
-// defer's Rollback() is safely ignored (done=true skips unlock)
-```
-
----
-
-## Failure Handling
-
-On flush error:
-1. Rollback globalTx
-2. Reset globalTx = nil
-3. Clear pendingCount
-4. Return error
-
-On BatchTx commit error:
-1. Execute `ROLLBACK TO savepoint` (only this BatchTx's changes discarded)
-2. Release savepoint
-3. Return error (other writes remain intact)
+| Operation | Lock | Unlock |
+|-----------|------|--------|
+| Exec | Lock | defer Unlock |
+| BeginTx | Lock | (held) |
+| BatchTx.Commit | (held) | Unlock |
+| BatchTx.Rollback | (held) | Unlock |
+| Timer | TryLock (skip if busy) | Unlock |
 
 ---
 
@@ -372,8 +249,7 @@ On BatchTx commit error:
 
 | File | Description |
 |------|-------------|
-| `batch.go` | Mutex-based implementation (legacy) |
-| `batch_channel.go` | Channel + SAVEPOINT implementation (recommended) |
+| `batch.go` | Implementation |
 | `batch_test.go` | Unit tests |
 | `BATCH.md` | This documentation |
 
@@ -381,8 +257,8 @@ On BatchTx commit error:
 
 ## Key Design Principles
 
-1. **Channel for serialization**: All globalTx operations go through single goroutine
-2. **SAVEPOINT at Commit time**: No lock needed, Commit is atomic
-3. **SAVEPOINT for isolation**: Each BatchTx has independent transaction boundary
-4. **Atomic batch commit**: BatchTx sends entire buffer at once, not one-by-one
-5. **Immediate rollback on error**: BatchCommit failure rolls back immediately (no need to wait for Rollback call)
+1. **BeginTx flushes pending data** - ensures BatchTx isolation
+2. **No SAVEPOINT needed** - simpler design with BeginTx flush
+3. **Drop-in replacement** - BatchTx satisfies sql.Tx interface
+4. **Timer uses TryLock** - doesn't block BatchTx operations
+5. **Immediate commit on BatchTx.Commit** - data visible immediately
