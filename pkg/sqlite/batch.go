@@ -209,7 +209,7 @@ func (bw *BatchWriter) transactionLoop() {
 func (bw *BatchWriter) handleExec(cmd Command) {
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := db.Begin()
+		tx, err := bw.DB.Begin()
 		if err != nil {
 			cmd.ResultCh <- Result{LastError: err}
 			return
@@ -244,7 +244,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	}
 
 	// Start fresh global transaction for BatchTx
-	tx, err := db.BeginTx(context.Background(), cmd.TxOptions)
+	tx, err := bw.DB.BeginTx(context.Background(), cmd.TxOptions)
 	if err != nil {
 		cmd.TxResultCh <- &TxResult{Error: err}
 		return
@@ -278,7 +278,7 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	if commitErr != nil {
 		// Failed - rollback globalTx and start new one
 		_ = bw.globalTx.Rollback()
-		bw.globalTx, _ = db.Begin()
+		bw.globalTx, _ = bw.DB.Begin()
 		bw.pendingCount = 0
 		cmd.ResultCh <- Result{LastError: commitErr}
 		return
@@ -287,12 +287,12 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	// Success - commit globalTx and start new one
 	if err := bw.globalTx.Commit(); err != nil {
 		cmd.ResultCh <- Result{LastError: err}
-		bw.globalTx, _ = db.Begin()
+		bw.globalTx, _ = bw.DB.Begin()
 		return
 	}
 
 	// Start new global transaction for future operations
-	bw.globalTx, _ = db.Begin()
+	bw.globalTx, _ = bw.DB.Begin()
 	bw.pendingCount = 0
 
 	cmd.ResultCh <- Result{LastError: nil}
@@ -327,7 +327,7 @@ func (bw *BatchWriter) doFlush() {
 	}
 
 	// Start new transaction for next batch
-	bw.globalTx, _ = db.Begin()
+	bw.globalTx, _ = bw.DB.Begin()
 	bw.pendingCount = 0
 	bw.lastFlush = time.Now()
 }
