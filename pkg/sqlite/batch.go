@@ -30,6 +30,19 @@ func (c *BatchConfig) Validate() {
 	}
 }
 
+// stmt represents a buffered statement.
+type stmt struct {
+	query string
+	args  []any
+}
+
+// Command sent to goroutine.
+type Command struct {
+	Type     string
+	Buffer   []stmt
+	ResultCh chan any
+}
+
 // Tx wraps operations for batched transaction.
 // It is a drop-in replacement for *sql.Tx.
 type Tx struct {
