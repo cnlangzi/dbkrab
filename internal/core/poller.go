@@ -20,6 +20,70 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
+// PollMetrics holds per-poll performance metrics
+type PollMetrics struct {
+	FetchedChanges    int           // total CDC changes fetched this poll
+	ProcessedTx       int           // number of transactions processed
+	SyncDurationMs    int64         // time spent in sync (handler + store) in milliseconds
+	StoreDurationMs   int64         // time spent in store write in milliseconds
+	DLQCount          int           // number of transactions sent to DLQ
+	LastPollTime      time.Time     // when the poll cycle started (fetch time)
+	LastFetchTime     time.Time     // when changes were fetched (same as LastPollTime)
+	LastSyncTime      time.Time     // when sync completed
+	LastLSN           string        // LSN after this poll
+	SyncTPS           float64       // computed TPS (fetched_changes / sync_duration_seconds)
+	EndToEndLatencyMs int64         // end-to-end latency from fetch to sync complete
+}
+
+// pollMetricsWindow maintains a sliding window of recent poll metrics
+type pollMetricsWindow struct {
+	samples    []PollMetrics
+	maxSamples int
+	mu         sync.Mutex
+}
+
+func newPollMetricsWindow(maxSamples int) *pollMetricsWindow {
+	return &pollMetricsWindow{
+		samples:    make([]PollMetrics, 0, maxSamples),
+		maxSamples: maxSamples,
+	}
+}
+
+func (w *pollMetricsWindow) add(m PollMetrics) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.samples = append(w.samples, m)
+	if len(w.samples) > w.maxSamples {
+		w.samples = w.samples[1:]
+	}
+}
+
+func (w *pollMetricsWindow) avgTPS() float64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.samples) == 0 {
+		return 0
+	}
+	var totalTPS float64
+	for _, s := range w.samples {
+		totalTPS += s.SyncTPS
+	}
+	return totalTPS / float64(len(w.samples))
+}
+
+func (w *pollMetricsWindow) avgLatencyMs() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.samples) == 0 {
+		return 0
+	}
+	var totalLatency int64
+	for _, s := range w.samples {
+		totalLatency += s.EndToEndLatencyMs
+	}
+	return totalLatency / int64(len(w.samples))
+}
+
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
 	cfg           *config.Config
@@ -47,6 +111,11 @@ type Poller struct {
 	// Hot reload fields
 	reloadCh      <-chan *config.Config  // Channel for config reload signals
 	pendingCfg    *config.Config         // Pending config to apply
+	
+	// Metrics fields
+	metricsMu        sync.RWMutex        // protects metrics
+	metrics          PollMetrics          // last poll metrics
+	metricsWindow    *pollMetricsWindow   // 1-minute sliding window (~60 samples at 1s interval)
 }
 
 // Store interface for storing changes
@@ -90,6 +159,7 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 		store:    store,
 		dlq:      dlqStore,
 		stopCh:   make(chan struct{}),
+		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
 
 	// TransactionBuffer is deprecated - not needed with simplified polling
@@ -232,6 +302,9 @@ func (p *Poller) poll(ctx context.Context) error {
 		return nil
 	}
 
+	// Metrics: track fetch time
+	fetchTime := time.Now()
+
 	// P0-6: Use timeout context for CDC queries to prevent blocking
 	const queryTimeout = 10 * time.Second
 	const minLSNTimeout = 5 * time.Second // Separate timeout for GetMinLSN
@@ -339,17 +412,22 @@ func (p *Poller) poll(ctx context.Context) error {
 	// Always use processDirect - no transaction buffer needed
 	// All changes from the same poll cycle arrive together, simplifying cross-table handling
 	if len(allChanges) > 0 {
-		return p.processDirect(ctx, allChanges, results)
+		return p.processDirect(ctx, allChanges, results, fetchTime)
 	}
 	// No changes but still update offsets for observability
-	return p.updateOffsets(results, allChanges)
+	return p.updateOffsets(results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
-func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult) error {
+func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time) error {
+	syncStartTime := time.Now()
 
 	// Group by transaction ID and deliver
 	txs := p.groupByTransaction(allChanges)
+
+	// Track DLQ count and store duration
+	dlqCount := 0
+	var totalStoreDuration time.Duration
 
 	// Process all transactions
 	var processErrors []error
@@ -367,20 +445,25 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(&tx, err, "handler")
+				dlqCount++
 			}
 		}
 
 		// Store processing with retry (blocking: must succeed for offset advancement)
 		if p.store != nil {
+			storeStart := time.Now()
 			err := retry.DoWithName(ctx, func() error {
 				return p.store.Write(&tx)
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
+			storeDuration := time.Since(storeStart)
+			totalStoreDuration += storeDuration
 			if err != nil {
 				slog.Error("store error",
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(&tx, err, "store")
 				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
+				dlqCount++
 			}
 		}
 	}
@@ -390,12 +473,15 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		return fmt.Errorf("store errors: %v", processErrors)
 	}
 
+	syncEndTime := time.Now()
+	syncDuration := syncEndTime.Sub(syncStartTime)
+
 	// All transactions successfully written - now update offsets
-	return p.updateOffsets(results, allChanges)
+	return p.updateOffsets(results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs))
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
-func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) error {
+func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
 	// Build set of successfully polled tables
 	successfulTables := make(map[string]bool)
 	for _, r := range results {
@@ -444,6 +530,51 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change) e
 		}
 	} else {
 		slog.Debug("store does not support UpdatePollerState")
+	}
+
+	// Record metrics and emit summary log if changes were fetched
+	if len(allChanges) > 0 {
+		syncEndTime := time.Now()
+		endToEndLatency := syncEndTime.Sub(fetchTime)
+		
+		// Compute TPS: fetched_changes / sync_duration_seconds
+		var syncTPS float64
+		if syncDuration.Seconds() > 0 {
+			syncTPS = float64(len(allChanges)) / syncDuration.Seconds()
+		}
+
+		// Update metrics window
+		pm := PollMetrics{
+			FetchedChanges:    len(allChanges),
+			ProcessedTx:       txCount,
+			SyncDurationMs:    syncDuration.Milliseconds(),
+			StoreDurationMs:   storeDuration.Milliseconds(),
+			DLQCount:          dlqCount,
+			LastPollTime:      fetchTime,
+			LastFetchTime:     fetchTime,
+			LastSyncTime:      syncEndTime,
+			LastLSN:           lastLSN,
+			SyncTPS:           syncTPS,
+			EndToEndLatencyMs: endToEndLatency.Milliseconds(),
+		}
+		p.metricsWindow.add(pm)
+		p.metricsMu.Lock()
+		p.metrics = pm
+		p.metricsMu.Unlock()
+
+		// Emit structured INFO summary log for non-empty polls
+		slog.Info("[poll cycle]",
+			"cdc_fetched", len(allChanges),
+			"tx_count", txCount,
+			"sync_tps", fmt.Sprintf("%.1f", syncTPS),
+			"sync_ms", syncDuration.Milliseconds(),
+			"store_ms", storeDuration.Milliseconds(),
+			"dlq", dlqCount,
+			"lsn", lastLSN,
+		)
+	} else {
+		// Empty poll - Debug level only
+		slog.Debug("[poll cycle] no changes fetched")
 	}
 
 	return nil
@@ -840,3 +971,26 @@ func tablesEqual(a, b []string) bool {
 	return true
 }
 
+
+// GetMetrics returns the current poll metrics and 1-minute window averages
+func (p *Poller) GetMetrics() map[string]interface{} {
+	p.metricsMu.RLock()
+	m := p.metrics
+	p.metricsMu.RUnlock()
+	
+	// Get window averages
+	avgTPS := p.metricsWindow.avgTPS()
+	avgLatency := p.metricsWindow.avgLatencyMs()
+	
+	return map[string]interface{}{
+		"last_fetched":        m.FetchedChanges,
+		"last_processed_tx":   m.ProcessedTx,
+		"last_sync_tps":       m.SyncTPS,
+		"last_sync_duration_ms": m.SyncDurationMs,
+		"last_dlq_count":      m.DLQCount,
+		"avg_tps_1m":          avgTPS,
+		"avg_latency_1m_ms":   avgLatency,
+		"last_poll_time":      m.LastPollTime,
+		"last_lsn":            m.LastLSN,
+	}
+}
