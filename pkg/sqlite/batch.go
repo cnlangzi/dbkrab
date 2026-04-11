@@ -116,10 +116,9 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 
 // Close stops the batch writer.
 func (bw *BatchWriter) Close() error {
+	close(bw.done) // Signal goroutines to stop first
 	bw.timer.Stop()
-	close(bw.done)  // Signal goroutines to stop
-	bw.wg.Wait()    // Wait for goroutines to exit
-	close(bw.cmdCh) // Signal transaction goroutine to stop
+	close(bw.cmdCh)
 
 	// Drain pending if any
 	if bw.globalTx != nil && len(bw.pendingStmts) > 0 {
@@ -416,12 +415,10 @@ func (bw *BatchWriter) timerLoop() {
 		case <-bw.timer.C:
 			bw.timer.Reset(bw.cfg.FlushInterval)
 
-			resultCh := make(chan Result, 1)
+			// Try to flush - non-blocking
 			select {
-			case bw.cmdCh <- Command{Type: "Flush", ResultCh: resultCh}:
-				<-resultCh // Wait for flush to complete
+			case bw.cmdCh <- Command{Type: "Flush"}:
 			default:
-				// Channel full, skip this trigger
 			}
 		case <-bw.done:
 			return // Exit when Close is called
