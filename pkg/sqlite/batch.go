@@ -96,6 +96,9 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 	// Start transaction goroutine
 	go bw.transactionLoop()
 
+	// Start timer goroutine
+	go bw.timerLoop()
+
 	return bw
 }
 
@@ -390,6 +393,21 @@ func (btx *BatchTx) Rollback() error {
 	btx.done = true
 	btx.buf = nil
 	return nil
+}
+
+// timerLoop listens to the timer channel and triggers flushes.
+func (bw *BatchWriter) timerLoop() {
+	for range bw.timer.C {
+		bw.timer.Reset(bw.cfg.FlushInterval)
+
+		resultCh := make(chan Result, 1)
+		select {
+		case bw.cmdCh <- Command{Type: "Flush", ResultCh: resultCh}:
+			<-resultCh // Wait for flush to complete
+		default:
+			// Channel full, skip this trigger
+		}
+	}
 }
 
 // OnTimer is called when the flush timer fires.
