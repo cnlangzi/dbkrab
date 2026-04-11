@@ -11,9 +11,11 @@ import (
 
 // BatchConfig holds batch writer configuration.
 type BatchConfig struct {
+	// TxTimeout is reserved for future use
+	TxTimeout     time.Duration // Default: 30s (not currently used)
 	// BatchSize is the number of statements to buffer before flushing.
 	// Default: 100
-	BatchSize int
+	BatchSize     int
 
 	// FlushInterval is the maximum time to wait before flushing.
 	// Default: 100ms
@@ -112,7 +114,7 @@ func (btx *BatchTx) Rollback() error {
 	}
 	btx.done = true
 	btx.buf = nil
-	bw.mu.Unlock()
+	btx.writer.mu.Unlock()
 	return nil
 }
 
