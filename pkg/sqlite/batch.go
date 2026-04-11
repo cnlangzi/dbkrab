@@ -106,7 +106,10 @@ func (bw *BatchWriter) Close() error {
 
 	// Drain pending if any
 	if bw.globalTx != nil && len(bw.pendingStmts) > 0 {
-		bw.globalTx.Commit()
+		if err := bw.globalTx.Commit(); err != nil {
+			slog.Error("BatchWriter.Close: commit failed", "error", err)
+			_ = bw.globalTx.Rollback()
+		}
 		bw.globalTx = nil
 	}
 	return nil
@@ -128,10 +131,15 @@ func (bw *BatchWriter) transactionLoop() {
 	}
 }
 
+// BufferLen returns the number of pending statements.
+func (bw *BatchWriter) BufferLen() int {
+	return bw.pendingCount
+}
+
 func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := bw.DB.Begin()
+		tx, err := bw.Begin()
 		if err != nil {
 			cmd.TxResultCh <- &BatchTxResult{Error: err}
 			return
@@ -151,7 +159,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 func (bw *BatchWriter) handleExec(cmd Command) {
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := bw.DB.Begin()
+		tx, err := bw.Begin()
 		if err != nil {
 			cmd.ResultCh <- Result{LastError: err}
 			return
@@ -264,7 +272,7 @@ func (bw *BatchWriter) doFlush() {
 	}
 
 	// Start new transaction for next batch
-	tx, err := bw.DB.Begin()
+	tx, err := bw.Begin()
 	if err != nil {
 		slog.Error("BatchWriter.doFlush: begin failed", "error", err)
 		bw.globalTx = nil
@@ -391,11 +399,4 @@ func (bw *BatchWriter) OnTimer() {
 	}
 }
 
-// Query/QueryRow pass through to embedded *sql.DB
-func (bw *BatchWriter) Query(query string, args ...any) (*sql.Rows, error) {
-	return bw.DB.Query(query, args...)
-}
 
-func (bw *BatchWriter) QueryRow(query string, args ...any) *sql.Row {
-	return bw.DB.QueryRow(query, args...)
-}
