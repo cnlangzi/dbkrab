@@ -64,19 +64,19 @@ type Command struct {
 
 // TxResult is returned to the caller of BeginTx.
 type TxResult struct {
-	Tx    *BatchTx
+	Tx    *Tx
 	Error error
 }
 
 // TxExec is the interface for transaction executors.
-// Both *sql.Tx and *BatchTx implement this interface.
+// Both *sql.Tx and *Tx implement this interface.
 type TxExec interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Commit() error
 	Rollback() error
 }
 
-// BatchTx wraps operations to provide deferred execution until Commit.
+// Tx wraps operations to provide deferred execution until Commit.
 // It is a drop-in replacement for *sql.Tx.
 type Tx struct {
 	writer *BatchWriter
@@ -246,7 +246,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 		bw.doFlush()
 	}
 
-	// Start fresh global transaction for BatchTx
+	// Start fresh global transaction for Tx
 	tx, err := bw.DB.BeginTx(context.Background(), cmd.TxOptions)
 	if err != nil {
 		cmd.TxResultCh <- &TxResult{Error: err}
@@ -254,7 +254,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	}
 	bw.globalTx = tx
 
-	// Create BatchTx wrapper
+	// Create Tx wrapper
 	btx := &Tx{
 		writer: bw,
 		buf:    make([]stmt, 0, bw.cfg.BatchSize),
@@ -350,12 +350,12 @@ func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
 
 // BeginTx starts a batched transaction.
 //
-// IMPORTANT: Before starting the BatchTx, any pending data in the global
-// transaction is committed. The BatchTx then operates on a fresh global
-// transaction. This ensures that BatchTx failures do not affect prior data.
+// IMPORTANT: Before starting the Tx, any pending data in the global
+// transaction is committed. The Tx then operates on a fresh global
+// transaction. This ensures that Tx failures do not affect prior data.
 //
-// Returns a *BatchTx that satisfies the sql.Tx interface.
-func (bw *BatchWriter) BeginBatchTx(ctx context.Context, opts *sql.TxOptions) (TxExec, error) {
+// Returns a *Tx that satisfies the sql.Tx interface.
+func (bw *BatchWriter) BeginTx(ctx context.Context, opts *sql.TxOptions) (TxExec, error) {
 	resultCh := make(chan *TxResult, 1)
 	bw.cmdCh <- Command{
 		Type:       "BeginTx",
