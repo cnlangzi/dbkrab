@@ -71,6 +71,7 @@ type BatchWriter struct {
 	*sql.DB
 	cfg   BatchConfig
 	cmdCh chan Command
+	done  chan struct{} // Signal goroutines to stop
 
 	// Protected by channel ordering (not mutex):
 	globalTx     *sql.Tx
@@ -88,6 +89,7 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 		DB:           db,
 		cfg:          cfg,
 		cmdCh:        make(chan Command, 100),
+		done:         make(chan struct{}),
 		pendingStmts: make([]stmt, 0, cfg.BatchSize),
 		timer:        time.NewTimer(cfg.FlushInterval),
 		lastFlush:    time.Now(),
@@ -105,6 +107,7 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 // Close stops the batch writer.
 func (bw *BatchWriter) Close() error {
 	bw.timer.Stop()
+	close(bw.done) // Signal goroutines to stop
 	close(bw.cmdCh) // Signal transaction goroutine to stop
 
 	// Drain pending if any
@@ -397,15 +400,20 @@ func (btx *BatchTx) Rollback() error {
 
 // timerLoop listens to the timer channel and triggers flushes.
 func (bw *BatchWriter) timerLoop() {
-	for range bw.timer.C {
-		bw.timer.Reset(bw.cfg.FlushInterval)
-
-		resultCh := make(chan Result, 1)
+	for {
 		select {
-		case bw.cmdCh <- Command{Type: "Flush", ResultCh: resultCh}:
-			<-resultCh // Wait for flush to complete
-		default:
-			// Channel full, skip this trigger
+		case <-bw.timer.C:
+			bw.timer.Reset(bw.cfg.FlushInterval)
+
+			resultCh := make(chan Result, 1)
+			select {
+			case bw.cmdCh <- Command{Type: "Flush", ResultCh: resultCh}:
+				<-resultCh // Wait for flush to complete
+			default:
+				// Channel full, skip this trigger
+			}
+		case <-bw.done:
+			return // Exit when Close is called
 		}
 	}
 }
