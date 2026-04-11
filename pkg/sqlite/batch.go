@@ -5,21 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 )
 
 // BatchConfig holds batch writer configuration.
 type BatchConfig struct {
-	// TxTimeout is reserved for future use
-	TxTimeout     time.Duration // Default: 30s (not currently used)
 	// BatchSize is the number of statements to buffer before flushing.
 	// Default: 100
-	BatchSize     int
+	BatchSize int
 
 	// FlushInterval is the maximum time to wait before flushing.
 	// Default: 100ms
 	FlushInterval time.Duration
+
+	// TxTimeout is reserved for future use
+	// Default: 30s (not currently used)
+	TxTimeout time.Duration
 }
 
 // Validate sets defaults and validates the configuration.
@@ -38,6 +39,35 @@ type stmt struct {
 	args  []any
 }
 
+// Result of an operation.
+type Result struct {
+	LastResult sql.Result
+	LastError  error
+}
+
+// Command sent to the transaction goroutine.
+type Command struct {
+	Type string // "Exec", "BeginTx", "BatchCommit", "Flush"
+
+	// For BeginTx
+	TxOptions  *sql.TxOptions
+	TxResultCh chan<- *TxResult
+
+	// For Exec / BatchCommit
+	Query string
+	Args  []any
+	Buffer []stmt // For BatchCommit (entire buffer at once!)
+
+	// Response channel
+	ResultCh chan<- Result
+}
+
+// TxResult is returned to the caller of BeginTx.
+type TxResult struct {
+	Tx   *BatchTx
+	Error error
+}
+
 // TxExec is the interface for transaction executors.
 // Both *sql.Tx and *BatchTx implement this interface.
 type TxExec interface {
@@ -46,13 +76,13 @@ type TxExec interface {
 	Rollback() error
 }
 
-// BatchTx wraps sql.Tx to provide deferred execution until Commit.
-// It is a drop-in replacement for *sql.Tx: call BeginTx to get a BatchTx,
-// Exec to buffer statements, and Commit to execute them atomically.
+// BatchTx wraps operations to provide deferred execution until Commit.
+// It is a drop-in replacement for *sql.Tx.
 type BatchTx struct {
-	writer *BatchWriter // reference to BatchWriter
-	buf    []stmt       // buffered statements
-	done   bool         // committed or rolled back
+	writer *BatchWriter
+	buf    []stmt
+	done   bool
+	resultCh chan Result
 }
 
 // Exec buffers the query instead of executing immediately.
@@ -64,46 +94,22 @@ func (btx *BatchTx) Exec(query string, args ...any) (sql.Result, error) {
 	return nil, nil
 }
 
-// Commit executes all buffered statements in the global transaction,
-// commits the transaction, and starts a new one for future operations.
-// On failure, the global transaction is rolled back and a new one is started.
+// Commit executes all buffered statements atomically in the global transaction.
 func (btx *BatchTx) Commit() error {
 	if btx.done {
 		return errors.New("transaction already committed or rolled back")
 	}
 	btx.done = true
 
-	bw := btx.writer
-
-	// Execute buffered statements in global transaction
-	for _, s := range btx.buf {
-		if _, err := bw.globalTx.Exec(s.query, s.args...); err != nil {
-			// Failed - rollback globalTx and start new one
-			_ = bw.globalTx.Rollback()
-			bw.globalTx, _ = bw.DB.Begin()
-			bw.pendingCount = 0
-			btx.buf = nil
-			bw.mu.Unlock()
-			return err
-		}
+	resultCh := make(chan Result, 1)
+	btx.writer.cmdCh <- Command{
+		Type:     "BatchCommit",
+		Buffer:   btx.buf,
+		ResultCh: resultCh,
 	}
+	result := <-resultCh
 	btx.buf = nil
-
-	// Commit the global transaction to make data visible
-	if err := bw.globalTx.Commit(); err != nil {
-		_ = bw.globalTx.Rollback()
-		bw.globalTx, _ = bw.DB.Begin()
-		bw.pendingCount = 0
-		bw.mu.Unlock()
-		return err
-	}
-
-	// Start new global transaction for future operations
-	bw.globalTx, _ = bw.DB.Begin()
-	bw.pendingCount = 0
-
-	bw.mu.Unlock()
-	return nil
+	return result.LastError
 }
 
 // Rollback discards all buffered statements.
@@ -114,23 +120,24 @@ func (btx *BatchTx) Rollback() error {
 	}
 	btx.done = true
 	btx.buf = nil
-	btx.writer.mu.Unlock()
+	// Send empty commit to release the lock
+	doneCh := make(chan struct{})
+	btx.writer.cmdCh <- Command{Type: "BatchRollback", ResultCh: doneCh}
+	<-doneCh
 	return nil
 }
 
-// BatchWriter wraps *sql.DB and provides transparent batch writing.
-// All writes accumulate in a global transaction and are executed together
-// when size or time threshold is reached.
+// BatchWriter provides transparent batch writing with channel-based coordination.
+// All writes are serialized through a single goroutine via cmdCh.
 type BatchWriter struct {
-	*sql.DB // embedded: BatchWriter is-a sql.DB for Query/QueryRow etc
-
+	*sql.DB
 	cfg BatchConfig
-	mu  sync.Mutex // Mutex allows Unlock from different goroutine
+	cmdCh chan Command
 
-	// Global transaction state
-	globalTx     *sql.Tx // lazily created
-	pendingCount int     // accumulated count
-	lastFlush    time.Time
+	// Global transaction state (only accessed by transaction goroutine)
+	globalTx     *sql.Tx
+	pendingCount int
+	lastFlush   time.Time
 
 	// Flush control
 	timer *time.Timer
@@ -142,89 +149,201 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 	bw := &BatchWriter{
 		DB:           db,
 		cfg:          cfg,
+		cmdCh:        make(chan Command, 100),
 		pendingCount: 0,
 		lastFlush:    time.Now(),
+		timer:        time.NewTimer(cfg.FlushInterval),
 	}
-	bw.timer = time.AfterFunc(cfg.FlushInterval, bw.onTimer)
+
+	// Start transaction goroutine
+	go bw.transactionLoop()
+
+	// Start timer goroutine
+	go bw.timerLoop()
+
 	return bw
 }
 
-// onTimer is called when the flush timer fires.
-func (bw *BatchWriter) onTimer() {
-	// Use TryLock to avoid blocking if lock is held by BeginTx
-	if !bw.mu.TryLock() {
-		bw.timer.Reset(bw.cfg.FlushInterval)
-		return
-	}
-	defer bw.mu.Unlock()
-
-	if bw.globalTx != nil && bw.pendingCount > 0 {
-		if err := bw.flushLocked(); err != nil {
-			slog.Error("BatchWriter.onTimer: flush failed", "error", err)
-		}
-	}
-
-	bw.timer.Reset(bw.cfg.FlushInterval)
-}
-
-// flushLocked commits the global transaction and resets.
-// Must be called with mu held.
-func (bw *BatchWriter) flushLocked() error {
-	if bw.globalTx == nil {
-		bw.pendingCount = 0
-		bw.lastFlush = time.Now()
-		return nil
-	}
-
-	if err := bw.globalTx.Commit(); err != nil {
-		_ = bw.globalTx.Rollback()
-		bw.globalTx = nil
-		bw.pendingCount = 0
-		return err
-	}
-
-	bw.globalTx = nil
-	bw.pendingCount = 0
-	bw.lastFlush = time.Now()
+// Close stops the timer.
+func (bw *BatchWriter) Close() error {
+	bw.timer.Stop()
+	close(bw.cmdCh)
 	return nil
 }
 
-// Exec executes a query in the global transaction.
-func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
-	bw.mu.Lock()
-	defer bw.mu.Unlock()
+// timerLoop handles time-based flushing.
+func (bw *BatchWriter) timerLoop() {
+	for {
+		select {
+		case <-bw.timer.C:
+			bw.timer.Reset(bw.cfg.FlushInterval)
+			// Non-blocking send to trigger flush
+			select {
+			case bw.cmdCh <- Command{Type: "Flush"}:
+			default:
+			}
+		case <-bw.cmdCh:
+			// Channel closed, exit
+			return
+		}
+	}
+}
 
+// transactionLoop runs in a single goroutine, serializing all operations.
+func (bw *BatchWriter) transactionLoop() {
+	for cmd := range bw.cmdCh {
+		switch cmd.Type {
+		case "Exec":
+			bw.handleExec(cmd)
+		case "BeginTx":
+			bw.handleBeginTx(cmd)
+		case "BatchCommit":
+			bw.handleBatchCommit(cmd)
+		case "BatchRollback":
+			bw.handleBatchRollback(cmd)
+		case "Flush":
+			bw.handleFlush(cmd)
+		}
+	}
+}
+
+func (bw *BatchWriter) handleExec(cmd Command) {
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := bw.Begin()
+		tx, err := bw.DB.Begin()
 		if err != nil {
-			return nil, err
+			cmd.ResultCh <- Result{LastError: err}
+			return
 		}
 		bw.globalTx = tx
 	}
 
-	// Execute immediately in global transaction
-	result, err := bw.globalTx.Exec(query, args...)
+	// Execute immediately
+	result, err := bw.globalTx.Exec(cmd.Query, cmd.Args...)
 	if err != nil {
 		_ = bw.globalTx.Rollback()
 		bw.globalTx = nil
 		bw.pendingCount = 0
-		return nil, err
+		cmd.ResultCh <- Result{LastResult: result, LastError: err}
+		return
 	}
 
 	bw.pendingCount++
-	bw.tryFlushLocked()
-	return result, nil
+
+	// Check size threshold
+	if bw.pendingCount >= bw.cfg.BatchSize {
+		bw.doFlush()
+	}
+
+	cmd.ResultCh <- Result{LastResult: result, LastError: nil}
 }
 
-// tryFlushLocked attempts to flush if size threshold is reached.
-// Must be called with mu held.
-func (bw *BatchWriter) tryFlushLocked() {
-	if bw.pendingCount >= bw.cfg.BatchSize {
-		if err := bw.flushLocked(); err != nil {
-			slog.Error("BatchWriter.tryFlushLocked: flush failed", "error", err)
+func (bw *BatchWriter) handleBeginTx(cmd Command) {
+	// If there's pending data, flush it first
+	if bw.globalTx != nil && bw.pendingCount > 0 {
+		bw.doFlush()
+	}
+
+	// Start fresh global transaction for BatchTx
+	tx, err := bw.DB.BeginTx(cmd.TxOptions)
+	if err != nil {
+		cmd.TxResultCh <- &TxResult{Error: err}
+		return
+	}
+	bw.globalTx = tx
+
+	// Create BatchTx wrapper
+	btx := &BatchTx{
+		writer: bw,
+		buf:    make([]stmt, 0, bw.cfg.BatchSize),
+	}
+
+	cmd.TxResultCh <- &TxResult{Tx: btx}
+}
+
+func (bw *BatchWriter) handleBatchCommit(cmd Command) {
+	if bw.globalTx == nil {
+		cmd.ResultCh <- Result{LastError: errors.New("no active transaction")}
+		return
+	}
+
+	// Execute all buffered statements
+	var commitErr error
+	for _, s := range cmd.Buffer {
+		if _, err := bw.globalTx.Exec(s.query, s.args...); err != nil {
+			commitErr = err
+			break
 		}
 	}
+
+	if commitErr != nil {
+		// Failed - rollback globalTx and start new one
+		_ = bw.globalTx.Rollback()
+		bw.globalTx, _ = bw.DB.Begin()
+		bw.pendingCount = 0
+		cmd.ResultCh <- Result{LastError: commitErr}
+		return
+	}
+
+	// Success - commit globalTx and start new one
+	if err := bw.globalTx.Commit(); err != nil {
+		cmd.ResultCh <- Result{LastError: err}
+		bw.globalTx, _ = bw.DB.Begin()
+		return
+	}
+
+	// Start new global transaction for future operations
+	bw.globalTx, _ = bw.DB.Begin()
+	bw.pendingCount = 0
+
+	cmd.ResultCh <- Result{LastError: nil}
+}
+
+func (bw *BatchWriter) handleBatchRollback(cmd Command) {
+	// Just acknowledge and release the lock
+	if cmd.ResultCh != nil {
+		cmd.ResultCh <- Result{}
+	}
+}
+
+func (bw *BatchWriter) handleFlush(cmd Command) {
+	bw.doFlush()
+	if cmd.ResultCh != nil {
+		cmd.ResultCh <- Result{}
+	}
+}
+
+func (bw *BatchWriter) doFlush() {
+	if bw.globalTx == nil || bw.pendingCount == 0 {
+		bw.lastFlush = time.Now()
+		return
+	}
+
+	if err := bw.globalTx.Commit(); err != nil {
+		slog.Error("BatchWriter.doFlush: commit failed", "error", err)
+		_ = bw.globalTx.Rollback()
+		bw.globalTx = nil
+		bw.pendingCount = 0
+		return
+	}
+
+	// Start new transaction for next batch
+	bw.globalTx, _ = bw.DB.Begin()
+	bw.pendingCount = 0
+	bw.lastFlush = time.Now()
+}
+
+// Exec executes a single statement in the global transaction.
+func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
+	resultCh := make(chan Result, 1)
+	bw.cmdCh <- Command{
+		Type:    "Exec",
+		Query:   query,
+		Args:    args,
+		ResultCh: resultCh,
+	}
+	result := <-resultCh
+	return result.LastResult, result.LastError
 }
 
 // BeginTx starts a batched transaction.
@@ -233,55 +352,31 @@ func (bw *BatchWriter) tryFlushLocked() {
 // transaction is committed. The BatchTx then operates on a fresh global
 // transaction. This ensures that BatchTx failures do not affect prior data.
 //
-// The lock is held until Commit or Rollback is called, ensuring atomicity:
-// time-based flush cannot interrupt the BatchTx's operations.
+// Returns a *BatchTx that satisfies the sql.Tx interface.
 func (bw *BatchWriter) BeginTx(ctx context.Context, opts *sql.TxOptions) (TxExec, error) {
-	bw.mu.Lock()
-
-	// If there's pending data, flush it first before starting BatchTx
-	if bw.globalTx != nil && bw.pendingCount > 0 {
-		if err := bw.globalTx.Commit(); err != nil {
-			_ = bw.globalTx.Rollback()
-		}
-		bw.globalTx = nil
-		bw.pendingCount = 0
+	resultCh := make(chan *TxResult, 1)
+	bw.cmdCh <- Command{
+		Type:       "BeginTx",
+		TxOptions:  opts,
+		TxResultCh: resultCh,
 	}
-
-	// Start fresh global transaction for BatchTx
-	tx, err := bw.DB.BeginTx(ctx, opts)
-	if err != nil {
-		bw.mu.Unlock()
-		return nil, err
-	}
-	bw.globalTx = tx
-
-	// Create BatchTx - lock is held until Commit/Rollback
-	btx := &BatchTx{
-		writer: bw,
-		buf:    make([]stmt, 0, bw.cfg.BatchSize),
-	}
-
-	return btx, nil
+	result := <-resultCh
+	return result.Tx, result.Error
 }
 
 // Flush commits the global transaction if there are pending statements.
 func (bw *BatchWriter) Flush() error {
-	bw.mu.Lock()
-	defer bw.mu.Unlock()
-	return bw.flushLocked()
+	resultCh := make(chan Result, 1)
+	bw.cmdCh <- Command{
+		Type:     "Flush",
+		ResultCh: resultCh,
+	}
+	result := <-resultCh
+	return result.LastError
 }
 
 // BufferLen returns the current number of pending statements.
 func (bw *BatchWriter) BufferLen() int {
-	bw.mu.Lock()
-	defer bw.mu.Unlock()
+	// This is approximate since we're using channel-based coordination
 	return bw.pendingCount
-}
-
-// Close stops the timer.
-func (bw *BatchWriter) Close() error {
-	if bw.timer != nil {
-		bw.timer.Stop()
-	}
-	return nil
 }

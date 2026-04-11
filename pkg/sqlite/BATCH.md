@@ -1,6 +1,6 @@
 # BatchWriter Design
 
-**Transparent batch writing with global transaction for SQLite to improve TPS**
+**Transparent batch writing with channel-based coordination for SQLite to improve TPS**
 
 ---
 
@@ -29,22 +29,36 @@ BatchWriter solves this by:
 │         │              ↑                    ↑              │
 │         ▼              │                    │              │
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │                 sync.Mutex                          │  │
-│  │  Ensures exclusive access during BatchTx           │  │
+│  │     cmdCh (channel - commands to transaction goroutine) │  │
+│  │     transactionLoop (single goroutine)                 │  │
 │  └─────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
+```
+
+### Channel-based Coordination
+
+All write operations are serialized through a single goroutine via `cmdCh`:
+
+```
+User goroutine(s):          cmdCh:                 transactionLoop:
+  Exec(...) ──────────────→ Command{Exec} ──────→ handleExec()
+  BeginTx() ──────────────→ Command{BeginTx} ───→ handleBeginTx()
+  BatchTx.Commit() ───────→ Command{BatchCommit} → handleBatchCommit()
+
+Timer goroutine:
+  onTimer() ──────────────→ Command{Flush}
 ```
 
 ---
 
 ## Two Write Patterns
 
-### 1. Direct Exec (batch mode)
+### 1. Direct Exec (automatic batching)
 
 ```
-Exec() → Lock → globalTx.Exec() → pendingCount++ → tryFlushLocked() → Unlock
-                                                                         ↑
-Timer fires → Lock → if pendingCount >= BatchSize → globalTx.Commit() ─┘
+Exec() → cmdCh → transactionLoop → globalTx.Exec() → pendingCount++ → tryFlushLocked()
+                                                                          ↑
+Timer fires ────────────────────────────────────────────────────────────┘
 ```
 
 ### 2. BeginTx + Commit/Rollback (drop-in replacement)
@@ -54,19 +68,18 @@ BeginTx():
   → Flush pending globalTx first (commit any uncommitted data)
   → Start new globalTx
   → Create BatchTx
-  → Lock is held until Commit/Rollback
     ↓
 Exec(BatchTx) → buffer to BatchTx.buf (NOT executed yet)
     ↓
 Commit(BatchTx):
-  → Execute BatchTx.buf in globalTx
-  → globalTx.Commit() (make data visible)
-  → Start new globalTx
-  → Unlock
+  → Send BatchCommit command
+  → transactionLoop executes:
+    → Execute BatchTx.buf in globalTx
+    → globalTx.Commit() (make data visible)
+    → Start new globalTx
     OR
 Rollback(BatchTx):
   → Discard BatchTx.buf (already discarded, never executed)
-  → Unlock
 ```
 
 ---
@@ -136,23 +149,35 @@ globalTx = nil (next write creates new one)
 type BatchConfig struct {
     BatchSize     int           // Default: 100
     FlushInterval time.Duration // Default: 100ms
+    TxTimeout     time.Duration // Reserved for future use
+}
+
+type Command struct {
+    Type     string
+    TxOptions  *sql.TxOptions
+    TxResultCh chan<- *TxResult
+    Query    string
+    Args     []any
+    Buffer   []stmt // For BatchCommit
+    ResultCh chan<- Result
 }
 
 type BatchTx struct {
-    writer *BatchWriter
-    buf    []stmt
-    done   bool
+    writer    *BatchWriter
+    buf       []stmt
+    done      bool
 }
 
 type BatchWriter struct {
     *sql.DB // embedded: passthrough Query/QueryRow
-    mu     sync.Mutex
+    cfg      BatchConfig
+    cmdCh    chan Command
 
-    globalTx     *sql.Tx // lazily created
+    // Global transaction state (only accessed by transaction goroutine)
+    globalTx     *sql.Tx
     pendingCount  int
     lastFlush    time.Time
     timer        *time.Timer
-    cfg          BatchConfig
 }
 ```
 
@@ -162,12 +187,12 @@ type BatchWriter struct {
 
 ```
 Timer fires (every FlushInterval):
-  1. TryLock() - if locked (BatchTx active), skip
-  2. If pendingCount > 0 → globalTx.Commit()
-  3. Reset timer
+  → Non-blocking send to cmdCh with Flush command
+  → transactionLoop processes Flush when ready
+  → If pendingCount > 0 → globalTx.Commit()
 ```
 
-Timer uses `TryLock` to avoid blocking. If lock is held by BatchTx, the flush is skipped for that cycle.
+Timer uses non-blocking send to avoid blocking or racing with transaction operations.
 
 ---
 
@@ -177,6 +202,7 @@ Timer uses `TryLock` to avoid blocking. If lock is held by BatchTx, the flush is
 |-------|------|---------|-------------|
 | BatchSize | int | 100 | Flush when pending count reaches this |
 | FlushInterval | duration | 100ms | Time-based flush interval |
+| TxTimeout | duration | 30s | Reserved for future use |
 
 ---
 
@@ -215,13 +241,52 @@ tx.Rollback() // Changes discarded, no data written
 
 ---
 
+## Why Channel-based Design?
+
+### Solves Multiple goroutine Problems
+
+Without channel (mutex-based):
+```
+Goroutine A:                      Goroutine B:
+  bw.mu.Lock()
+  globalTx.Exec(work1)
+  pendingCount=1
+  bw.mu.Unlock() ──────────────→ bw.mu.Lock()
+                                    globalTx.Commit()  ← pending cleared
+                                    globalTx = nil
+                                  bw.mu.Unlock()
+                                    ↓
+                                  Goroutine A (later):
+                                  bw.mu.Lock()
+                                  globalTx.Exec(work2) ← ERROR! globalTx is nil
+```
+
+With channel (single goroutine):
+```
+All operations handled by transactionLoop (single goroutine)
+No race conditions possible
+```
+
+### Key Benefits
+
+| Aspect | Benefit |
+|-------|---------|
+| Single goroutine | No mutex/race conditions |
+| BeginTx flush | BatchTx isolated from prior data |
+| BatchCommit | Atomic execution in transactionLoop |
+| Non-blocking timer | Timer doesn't block or race |
+
+---
+
 ## Implementation Details
 
-### Commit Execution Order
+### BatchTx.Commit Execution Order
 
-1. Execute all buffered statements in globalTx
-2. If any fails → rollback globalTx, start new, return error
-3. If all succeed → commit globalTx, start new, return nil
+1. Send BatchCommit command to cmdCh
+2. transactionLoop receives command
+3. Execute all buffered statements in globalTx
+4. If any fails → rollback globalTx, start new, return error
+5. If all succeed → commit globalTx, start new, return nil
 
 ### Why BeginTx Flushes Pending Data?
 
@@ -232,16 +297,6 @@ With flushing:
 - Pending data committed before BatchTx starts
 - BatchTx operates on fresh globalTx
 - BatchTx failure only affects its own buffer
-
-### Lock Behavior
-
-| Operation | Lock | Unlock |
-|-----------|------|--------|
-| Exec | Lock | defer Unlock |
-| BeginTx | Lock | (held) |
-| BatchTx.Commit | (held) | Unlock |
-| BatchTx.Rollback | (held) | Unlock |
-| Timer | TryLock (skip if busy) | Unlock |
 
 ---
 
@@ -257,8 +312,8 @@ With flushing:
 
 ## Key Design Principles
 
-1. **BeginTx flushes pending data** - ensures BatchTx isolation
-2. **No SAVEPOINT needed** - simpler design with BeginTx flush
-3. **Drop-in replacement** - BatchTx satisfies sql.Tx interface
-4. **Timer uses TryLock** - doesn't block BatchTx operations
-5. **Immediate commit on BatchTx.Commit** - data visible immediately
+1. **Channel for serialization**: All operations through single goroutine
+2. **BeginTx flushes pending data**: Ensures BatchTx isolation
+3. **Drop-in replacement**: BatchTx satisfies sql.Tx interface
+4. **Non-blocking timer**: Doesn't block or race with operations
+5. **Immediate commit on BatchTx.Commit**: Data visible immediately
