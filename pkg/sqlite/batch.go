@@ -54,8 +54,8 @@ type Command struct {
 	TxResultCh chan<- *TxResult
 
 	// For Exec / BatchCommit
-	Query string
-	Args  []any
+	Query  string
+	Args   []any
 	Buffer []stmt // For BatchCommit (entire buffer at once!)
 
 	// Response channel
@@ -64,7 +64,7 @@ type Command struct {
 
 // TxResult is returned to the caller of BeginTx.
 type TxResult struct {
-	Tx   *BatchTx
+	Tx    *BatchTx
 	Error error
 }
 
@@ -82,7 +82,6 @@ type BatchTx struct {
 	writer *BatchWriter
 	buf    []stmt
 	done   bool
-	resultCh chan Result
 }
 
 // Exec buffers the query instead of executing immediately.
@@ -107,7 +106,7 @@ func (btx *BatchTx) Commit() error {
 		ResultCh: resultCh,
 	}
 	result := <-resultCh
-	btx.done = true  // Mark done AFTER command completes
+	btx.done = true // Mark done AFTER command completes
 	btx.buf = nil
 	return result.LastError
 }
@@ -131,13 +130,13 @@ func (btx *BatchTx) Rollback() error {
 // All writes are serialized through a single goroutine via cmdCh.
 type BatchWriter struct {
 	*sql.DB
-	cfg BatchConfig
+	cfg   BatchConfig
 	cmdCh chan Command
 
 	// Global transaction state (only accessed by transaction goroutine)
 	globalTx     *sql.Tx
 	pendingCount int
-	lastFlush   time.Time
+	lastFlush    time.Time
 
 	// Flush control
 	timer *time.Timer
@@ -210,7 +209,7 @@ func (bw *BatchWriter) transactionLoop() {
 func (bw *BatchWriter) handleExec(cmd Command) {
 	// Ensure global transaction exists
 	if bw.globalTx == nil {
-		tx, err := bw.DB.Begin()
+		tx, err := db.Begin()
 		if err != nil {
 			cmd.ResultCh <- Result{LastError: err}
 			return
@@ -245,7 +244,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	}
 
 	// Start fresh global transaction for BatchTx
-	tx, err := bw.DB.BeginTx(context.Background(), cmd.TxOptions)
+	tx, err := db.BeginTx(context.Background(), cmd.TxOptions)
 	if err != nil {
 		cmd.TxResultCh <- &TxResult{Error: err}
 		return
@@ -279,7 +278,7 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	if commitErr != nil {
 		// Failed - rollback globalTx and start new one
 		_ = bw.globalTx.Rollback()
-		bw.globalTx, _ = bw.DB.Begin()
+		bw.globalTx, _ = db.Begin()
 		bw.pendingCount = 0
 		cmd.ResultCh <- Result{LastError: commitErr}
 		return
@@ -288,12 +287,12 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 	// Success - commit globalTx and start new one
 	if err := bw.globalTx.Commit(); err != nil {
 		cmd.ResultCh <- Result{LastError: err}
-		bw.globalTx, _ = bw.DB.Begin()
+		bw.globalTx, _ = db.Begin()
 		return
 	}
 
 	// Start new global transaction for future operations
-	bw.globalTx, _ = bw.DB.Begin()
+	bw.globalTx, _ = db.Begin()
 	bw.pendingCount = 0
 
 	cmd.ResultCh <- Result{LastError: nil}
@@ -328,7 +327,7 @@ func (bw *BatchWriter) doFlush() {
 	}
 
 	// Start new transaction for next batch
-	bw.globalTx, _ = bw.DB.Begin()
+	bw.globalTx, _ = db.Begin()
 	bw.pendingCount = 0
 	bw.lastFlush = time.Now()
 }
@@ -337,9 +336,9 @@ func (bw *BatchWriter) doFlush() {
 func (bw *BatchWriter) Exec(query string, args ...any) (sql.Result, error) {
 	resultCh := make(chan Result, 1)
 	bw.cmdCh <- Command{
-		Type:    "Exec",
-		Query:   query,
-		Args:    args,
+		Type:     "Exec",
+		Query:    query,
+		Args:     args,
 		ResultCh: resultCh,
 	}
 	result := <-resultCh
