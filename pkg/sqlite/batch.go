@@ -235,13 +235,19 @@ func (bw *BatchWriter) handleBatchCommit(cmd Command) {
 		return
 	}
 
-	// Move to pending for potential size-based flush
-	bw.pendingStmts = append(bw.pendingStmts, cmd.Buffer...)
-	bw.pendingCount += len(cmd.Buffer)
+	// Commit globalTx to make BatchTx changes permanent
+	if err := bw.globalTx.Commit(); err != nil {
+		slog.Error("BatchWriter.handleBatchCommit: commit failed", "error", err)
+		cmd.ResultCh <- Result{LastError: err, Results: results}
+		return
+	}
 
-	// Check size threshold
-	if bw.pendingCount >= bw.cfg.BatchSize {
-		bw.doFlush()
+	// Start new globalTx for next batch
+	bw.globalTx, err = bw.Begin()
+	if err != nil {
+		slog.Error("BatchWriter.handleBatchCommit: begin failed", "error", err)
+		cmd.ResultCh <- Result{LastError: err, Results: results}
+		return
 	}
 
 	cmd.ResultCh <- Result{Results: results}
