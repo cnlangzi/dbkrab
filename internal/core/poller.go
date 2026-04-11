@@ -27,7 +27,8 @@ type PollMetrics struct {
 	SyncDurationMs    int64         // time spent in sync (handler + store) in milliseconds
 	StoreDurationMs   int64         // time spent in store write in milliseconds
 	DLQCount          int           // number of transactions sent to DLQ
-	LastFetchTime     time.Time     // when changes were fetched
+	LastPollTime      time.Time     // when the poll cycle started (fetch time)
+	LastFetchTime     time.Time     // when changes were fetched (same as LastPollTime)
 	LastSyncTime      time.Time     // when sync completed
 	LastLSN           string        // LSN after this poll
 	SyncTPS           float64       // computed TPS (fetched_changes / sync_duration_seconds)
@@ -112,6 +113,7 @@ type Poller struct {
 	pendingCfg    *config.Config         // Pending config to apply
 	
 	// Metrics fields
+	metricsMu        sync.RWMutex        // protects metrics
 	metrics          PollMetrics          // last poll metrics
 	metricsWindow    *pollMetricsWindow   // 1-minute sliding window (~60 samples at 1s interval)
 }
@@ -413,7 +415,7 @@ func (p *Poller) poll(ctx context.Context) error {
 		return p.processDirect(ctx, allChanges, results, fetchTime)
 	}
 	// No changes but still update offsets for observability
-	return p.updateOffsets(results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0)
+	return p.updateOffsets(results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
@@ -475,11 +477,11 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	syncDuration := syncEndTime.Sub(syncStartTime)
 
 	// All transactions successfully written - now update offsets
-	return p.updateOffsets(results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount)
+	return p.updateOffsets(results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs))
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
-func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int) error {
+func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
 	// Build set of successfully polled tables
 	successfulTables := make(map[string]bool)
 	for _, r := range results {
@@ -541,9 +543,6 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, f
 			syncTPS = float64(len(allChanges)) / syncDuration.Seconds()
 		}
 
-		// Group changes by transaction to count processed transactions
-		txCount := len(p.groupByTransaction(allChanges))
-
 		// Update metrics window
 		pm := PollMetrics{
 			FetchedChanges:    len(allChanges),
@@ -551,6 +550,7 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, f
 			SyncDurationMs:    syncDuration.Milliseconds(),
 			StoreDurationMs:   storeDuration.Milliseconds(),
 			DLQCount:          dlqCount,
+			LastPollTime:      fetchTime,
 			LastFetchTime:     fetchTime,
 			LastSyncTime:      syncEndTime,
 			LastLSN:           lastLSN,
@@ -558,7 +558,9 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, f
 			EndToEndLatencyMs: endToEndLatency.Milliseconds(),
 		}
 		p.metricsWindow.add(pm)
+		p.metricsMu.Lock()
 		p.metrics = pm
+		p.metricsMu.Unlock()
 
 		// Emit structured INFO summary log for non-empty polls
 		slog.Info("[poll cycle]",
@@ -972,7 +974,9 @@ func tablesEqual(a, b []string) bool {
 
 // GetMetrics returns the current poll metrics and 1-minute window averages
 func (p *Poller) GetMetrics() map[string]interface{} {
+	p.metricsMu.RLock()
 	m := p.metrics
+	p.metricsMu.RUnlock()
 	
 	// Get window averages
 	avgTPS := p.metricsWindow.avgTPS()
@@ -986,7 +990,7 @@ func (p *Poller) GetMetrics() map[string]interface{} {
 		"last_dlq_count":      m.DLQCount,
 		"avg_tps_1m":          avgTPS,
 		"avg_latency_1m_ms":   avgLatency,
-		"last_poll_time":      m.LastSyncTime,
+		"last_poll_time":      m.LastPollTime,
 		"last_lsn":            m.LastLSN,
 	}
 }
