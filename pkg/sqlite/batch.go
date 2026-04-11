@@ -78,14 +78,14 @@ type TxExec interface {
 
 // BatchTx wraps operations to provide deferred execution until Commit.
 // It is a drop-in replacement for *sql.Tx.
-type BatchTx struct {
+type Tx struct {
 	writer *BatchWriter
 	buf    []stmt
 	done   bool
 }
 
 // Exec buffers the query instead of executing immediately.
-func (btx *BatchTx) Exec(query string, args ...any) (sql.Result, error) {
+func (btx *Tx) Exec(query string, args ...any) (sql.Result, error) {
 	if btx.done {
 		return nil, errors.New("transaction already committed or rolled back")
 	}
@@ -94,7 +94,7 @@ func (btx *BatchTx) Exec(query string, args ...any) (sql.Result, error) {
 }
 
 // Commit executes all buffered statements atomically in the global transaction.
-func (btx *BatchTx) Commit() error {
+func (btx *Tx) Commit() error {
 	if btx.done {
 		return errors.New("transaction already committed or rolled back")
 	}
@@ -113,7 +113,7 @@ func (btx *BatchTx) Commit() error {
 
 // Rollback discards all buffered statements.
 // If already committed (done=true), just return.
-func (btx *BatchTx) Rollback() error {
+func (btx *Tx) Rollback() error {
 	if btx.done {
 		return nil
 	}
@@ -247,7 +247,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	}
 
 	// Start fresh global transaction for BatchTx
-	tx, err := bw.BeginTx(context.Background(), cmd.TxOptions)
+	tx, err := bw.DB.BeginTx(context.Background(), cmd.TxOptions)
 	if err != nil {
 		cmd.TxResultCh <- &TxResult{Error: err}
 		return
@@ -255,7 +255,7 @@ func (bw *BatchWriter) handleBeginTx(cmd Command) {
 	bw.globalTx = tx
 
 	// Create BatchTx wrapper
-	btx := &BatchTx{
+	btx := &Tx{
 		writer: bw,
 		buf:    make([]stmt, 0, bw.cfg.BatchSize),
 	}
