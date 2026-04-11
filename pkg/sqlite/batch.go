@@ -92,8 +92,20 @@ func (btx *BatchTx) Commit() error {
 	bw.pendingCount += len(btx.buf)
 	btx.buf = nil
 
-	// Try to flush based on size, then release lock
-	bw.tryFlushLocked()
+	// Commit immediately to make data visible
+	if bw.globalTx != nil && bw.pendingCount > 0 {
+		if err := bw.globalTx.Commit(); err != nil {
+			_ = bw.globalTx.Rollback()
+			bw.globalTx = nil
+			bw.pendingCount = 0
+			bw.mu.Unlock()
+			return err
+		}
+		// Start new transaction for future operations
+		bw.globalTx, _ = bw.DB.Begin()
+	}
+	bw.pendingCount = 0
+
 	bw.mu.Unlock()
 	return nil
 }
