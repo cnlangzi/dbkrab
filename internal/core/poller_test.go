@@ -24,8 +24,9 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 
 	// Create poller with failing store
 	poller := &Poller{
-		store:   failSink,
-		offsets: offsetStore,
+		store:         failSink,
+		offsets:       offsetStore,
+		metricsWindow: newPollMetricsWindow(60),
 	}
 
 	// Create test transaction
@@ -46,7 +47,8 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 		{table: "dbo.Test", changes: tx.Changes, lastLSN: LSN{1, 2, 3, 4}, err: nil},
 	}
 
-	err := poller.processDirect(context.TODO(), tx.Changes, results)
+	fetchTime := time.Now()
+	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime)
 	if err == nil {
 		t.Fatal("Expected error from failing sink, got nil")
 	}
@@ -76,9 +78,10 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 
 	// Create poller
 	poller := &Poller{
-		store:   successSink,
-		offsets: offsetStore,
-		handler: failHandler,
+		store:         successSink,
+		offsets:       offsetStore,
+		handler:       failHandler,
+		metricsWindow: newPollMetricsWindow(60),
 	}
 
 	// Create test transaction
@@ -99,7 +102,8 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 		{table: "dbo.Test", changes: tx.Changes, lastLSN: LSN{1, 2, 3, 4}, err: nil},
 	}
 
-	err := poller.processDirect(context.TODO(), tx.Changes, results)
+	fetchTime := time.Now()
+	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime)
 	if err != nil {
 		t.Fatalf("Expected no error (handler failures don't block), got: %v", err)
 	}
@@ -326,4 +330,108 @@ func (h *mockHandler) Handle(ctx context.Context, tx *Transaction) error {
 		return errors.New("simulated handler failure")
 	}
 	return nil
+}
+
+// TestPollMetricsWindow tests the sliding window functionality
+func TestPollMetricsWindow(t *testing.T) {
+	window := newPollMetricsWindow(5)
+
+	// Add 3 samples
+	window.add(PollMetrics{SyncTPS: 100.0, EndToEndLatencyMs: 100})
+	window.add(PollMetrics{SyncTPS: 200.0, EndToEndLatencyMs: 200})
+	window.add(PollMetrics{SyncTPS: 300.0, EndToEndLatencyMs: 300})
+
+	// Check average TPS
+	avgTPS := window.avgTPS()
+	if avgTPS != 200.0 {
+		t.Errorf("Expected avg TPS 200.0, got %v", avgTPS)
+	}
+
+	// Check average latency
+	avgLatency := window.avgLatencyMs()
+	if avgLatency != 200 {
+		t.Errorf("Expected avg latency 200ms, got %v", avgLatency)
+	}
+
+	// Add 3 more samples to exceed window size (5)
+	window.add(PollMetrics{SyncTPS: 400.0, EndToEndLatencyMs: 400})
+	window.add(PollMetrics{SyncTPS: 500.0, EndToEndLatencyMs: 500})
+
+	// Window should have rolled, now containing last 5 samples (100,200,300,400,500)
+	avgTPS = window.avgTPS()
+	expectedAvgTPS := 300.0 // (100+200+300+400+500)/5
+	if avgTPS != expectedAvgTPS {
+		t.Errorf("Expected avg TPS %v, got %v", expectedAvgTPS, avgTPS)
+	}
+}
+
+// TestPollMetricsWindowEmpty tests empty window behavior
+func TestPollMetricsWindowEmpty(t *testing.T) {
+	window := newPollMetricsWindow(5)
+
+	avgTPS := window.avgTPS()
+	if avgTPS != 0 {
+		t.Errorf("Expected 0 TPS for empty window, got %v", avgTPS)
+	}
+
+	avgLatency := window.avgLatencyMs()
+	if avgLatency != 0 {
+		t.Errorf("Expected 0 latency for empty window, got %v", avgLatency)
+	}
+}
+
+// TestGetMetrics tests the GetMetrics method
+func TestGetMetrics(t *testing.T) {
+	poller := &Poller{
+		metricsWindow: newPollMetricsWindow(60),
+		metrics: PollMetrics{
+			FetchedChanges:    50,
+			ProcessedTx:       12,
+			SyncDurationMs:    42,
+			DLQCount:          1,
+			LastFetchTime:     time.Now().Add(-1 * time.Second),
+			LastSyncTime:      time.Now(),
+			LastLSN:           "0x00123:00004567",
+			SyncTPS:           285.7,
+			EndToEndLatencyMs: 100,
+		},
+	}
+
+	metrics := poller.GetMetrics()
+
+	if metrics["last_fetched"] != 50 {
+		t.Errorf("Expected last_fetched=50, got %v", metrics["last_fetched"])
+	}
+	if metrics["last_processed_tx"] != 12 {
+		t.Errorf("Expected last_processed_tx=12, got %v", metrics["last_processed_tx"])
+	}
+	if metrics["last_sync_tps"] != 285.7 {
+		t.Errorf("Expected last_sync_tps=285.7, got %v", metrics["last_sync_tps"])
+	}
+	if metrics["last_sync_duration_ms"] != int64(42) {
+		t.Errorf("Expected last_sync_duration_ms=42, got %v", metrics["last_sync_duration_ms"])
+	}
+	if metrics["last_dlq_count"] != 1 {
+		t.Errorf("Expected last_dlq_count=1, got %v", metrics["last_dlq_count"])
+	}
+	if metrics["last_lsn"] != "0x00123:00004567" {
+		t.Errorf("Expected last_lsn=0x00123:00004567, got %v", metrics["last_lsn"])
+	}
+}
+
+// TestEmptyPollMetrics tests that empty polls have zero metrics
+func TestEmptyPollMetrics(t *testing.T) {
+	poller := &Poller{
+		metricsWindow: newPollMetricsWindow(60),
+	}
+
+	metrics := poller.GetMetrics()
+
+	// Empty metrics should be zero values
+	if metrics["last_fetched"] != 0 {
+		t.Errorf("Expected last_fetched=0 for empty metrics, got %v", metrics["last_fetched"])
+	}
+	if metrics["avg_tps_1m"] != 0.0 {
+		t.Errorf("Expected avg_tps_1m=0 for empty window, got %v", metrics["avg_tps_1m"])
+	}
 }
