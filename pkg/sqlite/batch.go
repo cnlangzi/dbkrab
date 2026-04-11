@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -72,6 +73,7 @@ type BatchWriter struct {
 	cfg   BatchConfig
 	cmdCh chan Command
 	done  chan struct{} // Signal goroutines to stop
+	wg    sync.WaitGroup
 
 	// Protected by channel ordering (not mutex):
 	globalTx     *sql.Tx
@@ -96,10 +98,18 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 	}
 
 	// Start transaction goroutine
-	go bw.transactionLoop()
+	bw.wg.Add(1)
+	go func() {
+		bw.transactionLoop()
+		bw.wg.Done()
+	}()
 
 	// Start timer goroutine
-	go bw.timerLoop()
+	bw.wg.Add(1)
+	go func() {
+		bw.timerLoop()
+		bw.wg.Done()
+	}()
 
 	return bw
 }
@@ -107,7 +117,8 @@ func NewBatchWriter(db *sql.DB, cfg BatchConfig) *BatchWriter {
 // Close stops the batch writer.
 func (bw *BatchWriter) Close() error {
 	bw.timer.Stop()
-	close(bw.done) // Signal goroutines to stop
+	close(bw.done)  // Signal goroutines to stop
+	bw.wg.Wait()    // Wait for goroutines to exit
 	close(bw.cmdCh) // Signal transaction goroutine to stop
 
 	// Drain pending if any
