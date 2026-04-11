@@ -99,7 +99,6 @@ func (btx *BatchTx) Commit() error {
 	if btx.done {
 		return errors.New("transaction already committed or rolled back")
 	}
-	btx.done = true
 
 	resultCh := make(chan Result, 1)
 	btx.writer.cmdCh <- Command{
@@ -108,19 +107,20 @@ func (btx *BatchTx) Commit() error {
 		ResultCh: resultCh,
 	}
 	result := <-resultCh
+	btx.done = true  // Mark done AFTER command completes
 	btx.buf = nil
 	return result.LastError
 }
 
 // Rollback discards all buffered statements.
-// No actual work needed since statements were never executed.
+// If already committed (done=true), just return.
 func (btx *BatchTx) Rollback() error {
 	if btx.done {
 		return nil
 	}
 	btx.done = true
 	btx.buf = nil
-	// Send empty commit to release the lock
+	// Send empty rollback to release any lock
 	doneCh := make(chan Result, 1)
 	btx.writer.cmdCh <- Command{Type: "BatchRollback", ResultCh: doneCh}
 	<-doneCh
