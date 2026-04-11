@@ -43,7 +43,7 @@ All write operations are serialized through a single goroutine via `cmdCh`:
 User goroutine(s):          cmdCh:                 transactionLoop:
   Exec(...) ──────────────→ Command{Exec} ──────→ handleExec()
   BeginTx() ──────────────→ Command{BeginTx} ───→ handleBeginTx()
-  BatchTx.Commit() ───────→ Command{BatchCommit} → handleBatchCommit()
+  Tx.Commit() ───────→ Command{BatchCommit} → handleBatchCommit()
 
 Timer goroutine:
   onTimer() ──────────────→ Command{Flush}
@@ -67,19 +67,19 @@ Timer fires ──────────────────────�
 BeginTx():
   → Flush pending globalTx first (commit any uncommitted data)
   → Start new globalTx
-  → Create BatchTx
+  → Create Tx
     ↓
-Exec(BatchTx) → buffer to BatchTx.buf (NOT executed yet)
+Exec(Tx) → buffer to Tx.buf (NOT executed yet)
     ↓
-Commit(BatchTx):
+Commit(Tx):
   → Send BatchCommit command
   → transactionLoop executes:
-    → Execute BatchTx.buf in globalTx
+    → Execute Tx.buf in globalTx
     → globalTx.Commit() (make data visible)
     → Start new globalTx
     OR
-Rollback(BatchTx):
-  → Discard BatchTx.buf (already discarded, never executed)
+Rollback(Tx):
+  → Discard Tx.buf (already discarded, never executed)
 ```
 
 ---
@@ -90,15 +90,15 @@ Rollback(BatchTx):
 
 This ensures:
 1. **No SAVEPOINT needed** - simpler design
-2. **BatchTx failures don't affect prior data** - pending data already committed
-3. **BatchTx isolation** - operates on fresh globalTx
-4. **Drop-in replacement** - BatchTx satisfies sql.Tx interface
+2. **Tx failures don't affect prior data** - pending data already committed
+3. **Tx isolation** - operates on fresh globalTx
+4. **Drop-in replacement** - Tx satisfies sql.Tx interface
 
 ---
 
 ## Drop-in Replacement for *sql.Tx
 
-`BatchTx` implements the same interface as `*sql.Tx`:
+`Tx` implements the same interface as `*sql.Tx`:
 
 ```go
 type TxExec interface {
@@ -108,7 +108,7 @@ type TxExec interface {
 }
 ```
 
-Users can replace `*sql.Tx` with `*BatchTx`:
+Users can replace `*sql.Tx` with `*Tx`:
 
 ```go
 // Before
@@ -117,7 +117,7 @@ tx.Exec("INSERT ...")
 tx.Commit()
 
 // After (with BatchWriter)
-tx, _ := bw.BeginTx(ctx, nil)  // bw.BeginTx returns *BatchTx
+tx, _ := bw.BeginTx(ctx, nil)  // bw.BeginTx returns *Tx
 tx.Exec("INSERT ...")
 tx.Commit()
 ```
@@ -133,7 +133,7 @@ globalTx = db.Begin()
     ↓
 [If BeginTx]: Flush previous pending, start new globalTx
     ↓
-Accumulate writes (Direct Exec or BatchTx buffer)
+Accumulate writes (Direct Exec or Tx buffer)
     ↓
 size trigger (≥ BatchSize) → globalTx.Commit()
 time trigger → globalTx.Commit()
@@ -162,7 +162,7 @@ type Command struct {
     ResultCh chan<- Result
 }
 
-type BatchTx struct {
+type Tx struct {
     writer    *BatchWriter
     buf       []stmt
     done      bool
@@ -272,7 +272,7 @@ No race conditions possible
 | Aspect | Benefit |
 |-------|---------|
 | Single goroutine | No mutex/race conditions |
-| BeginTx flush | BatchTx isolated from prior data |
+| BeginTx flush | Tx isolated from prior data |
 | BatchCommit | Atomic execution in transactionLoop |
 | Non-blocking timer | Timer doesn't block or race |
 
@@ -280,7 +280,7 @@ No race conditions possible
 
 ## Implementation Details
 
-### BatchTx.Commit Execution Order
+### Tx.Commit Execution Order
 
 1. Send BatchCommit command to cmdCh
 2. transactionLoop receives command
@@ -291,12 +291,12 @@ No race conditions possible
 ### Why BeginTx Flushes Pending Data?
 
 Without flushing pending data:
-- BatchTx failure would rollback globalTx, losing prior data
+- Tx failure would rollback globalTx, losing prior data
 
 With flushing:
-- Pending data committed before BatchTx starts
-- BatchTx operates on fresh globalTx
-- BatchTx failure only affects its own buffer
+- Pending data committed before Tx starts
+- Tx operates on fresh globalTx
+- Tx failure only affects its own buffer
 
 ---
 
@@ -313,7 +313,7 @@ With flushing:
 ## Key Design Principles
 
 1. **Channel for serialization**: All operations through single goroutine
-2. **BeginTx flushes pending data**: Ensures BatchTx isolation
-3. **Drop-in replacement**: BatchTx satisfies sql.Tx interface
+2. **BeginTx flushes pending data**: Ensures Tx isolation
+3. **Drop-in replacement**: Tx satisfies sql.Tx interface
 4. **Non-blocking timer**: Doesn't block or race with operations
-5. **Immediate commit on BatchTx.Commit**: Data visible immediately
+5. **Immediate commit on Tx.Commit**: Data visible immediately
