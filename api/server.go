@@ -36,6 +36,11 @@ func getDashboardFS() fs.FS {
 	return sub
 }
 
+// PollMetricsProvider interface for accessing CDC poll metrics
+type PollMetricsProvider interface {
+	GetMetrics() map[string]interface{}
+}
+
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
 	manager       *plugin.Manager
@@ -51,6 +56,7 @@ type Server struct {
 	configWatcher *config.Watcher
 	sinksRoot     *os.Root // Secure root for sinks directory access
 	skillsPath    string   // Path to SQL skills directory from config
+	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 }
 
 // NewServer creates a new API server
@@ -89,6 +95,29 @@ func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdca
 		config:        cfg,
 		configWatcher: watcher,
 		skillsPath:    skillsPath,
+	}
+}
+
+// NewServerWithCDCAndMetrics creates a new API server with CDC admin and metrics support
+func NewServerWithCDCAndMetrics(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store store.Store, sinkerMgr *sinker.Manager, port int, configPath string, cfg *config.Config, watcher *config.Watcher, metricsProvider PollMetricsProvider) *Server {
+	// Get skills path from config, default to ./skills/sql if not configured
+	skillsPath := cfg.Plugins.SQL.Path
+	if skillsPath == "" {
+		skillsPath = "./skills/sql"
+	}
+
+	return &Server{
+		manager:        manager,
+		dlq:            dlqStore,
+		cdcAdmin:       cdcAdmin,
+		store:          store,
+		sinkerManager:  sinkerMgr,
+		port:           port,
+		configPath:     configPath,
+		config:         cfg,
+		configWatcher:  watcher,
+		skillsPath:     skillsPath,
+		metricsProvider: metricsProvider,
 	}
 }
 
@@ -522,6 +551,7 @@ func (s *Server) handleCDCLogs(c *xun.Context) error {
 
 // handleCDCStatus handles GET /api/cdc/status
 // Returns poller state: last_poll_time, last_lsn, total_changes
+// Also includes metrics block when metrics provider is available
 func (s *Server) handleCDCStatus(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{
@@ -538,10 +568,17 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 		})
 	}
 
-	return c.View(map[string]any{
+	response := map[string]any{
 		"success": true,
 		"state":   state,
-	})
+	}
+
+	// Include metrics if metrics provider is available
+	if s.metricsProvider != nil {
+		response["metrics"] = s.metricsProvider.GetMetrics()
+	}
+
+	return c.View(response)
 }
 
 // handleCDCGap handles GET /api/cdc/gap
