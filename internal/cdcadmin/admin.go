@@ -147,11 +147,13 @@ func (a *Admin) EnableCDC(schema, table string) error {
 
 	// Enable CDC for the table
 	// Note: This requires db_owner role
+	// supports_net_changes = 1 ensures UPDATE operations only return one record
+	// (operation=4 UPDATE_AFTER), not two records (operation=3 UPDATE_BEFORE and 4)
 	query := `EXEC sys.sp_cdc_enable_table 
 		@source_schema = @p1, 
 		@source_name = @p2, 
 		@role_name = NULL, 
-		@supports_net_changes = 0`
+		@supports_net_changes = 1`
 
 	_, err = db.Exec(query, schema, table)
 	if err != nil {
@@ -268,7 +270,7 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 					@source_schema = @schema,
 					@source_name = @table,
 					@role_name = NULL,
-					@supports_net_changes = 0
+					@supports_net_changes = 1
 			`
 			_, err = db.Exec(enableQuery, sql.Named("schema", schema), sql.Named("table", tableName))
 			if err != nil {
