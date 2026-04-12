@@ -481,45 +481,58 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
+// Each table maintains its own independent LSN offset.
+// Only tables with changes have their offsets advanced.
+// Tables with no changes keep their existing offset.
 func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
-	// Build set of successfully polled tables
-	successfulTables := make(map[string]bool)
+	// Track the maximum LSN across all tables for observability/metrics
+	var maxLSN LSN
+	tablesUpdated := 0
+
+	// Update each table's offset independently based on its own lastLSN
 	for _, r := range results {
-		if r.err == nil {
-			successfulTables[r.table] = true
+		if r.err != nil {
+			// Table had an error - don't update its offset
+			slog.Warn("skipping offset update for table with error",
+				"table", r.table,
+				"error", r.err)
+			continue
 		}
+
+		if len(r.changes) == 0 {
+			// No changes for this table - keep existing offset, don't block others
+			slog.Debug("no changes for table, keeping existing offset", "table", r.table)
+			continue
+		}
+
+		// Table has changes - advance its offset to its own lastLSN
+		if err := p.offsets.Set(r.table, r.lastLSN.String()); err != nil {
+			slog.Error("failed to save offset", "table", r.table, "error", err)
+			continue
+		}
+		tablesUpdated++
+
+		// Track max LSN for observability
+		if maxLSN.IsZero() || r.lastLSN.Compare(maxLSN) > 0 {
+			maxLSN = r.lastLSN
+		}
+
+		slog.Debug("advanced table offset",
+			"table", r.table,
+			"lsn", r.lastLSN.String(),
+			"changes", len(r.changes))
 	}
 
-	// Find minimum lastLSN across all tables that had changes
-	var validResults []tablePollResult
-	for _, r := range results {
-		if r.err == nil && len(r.changes) > 0 {
-			validResults = append(validResults, r)
-		}
+	if tablesUpdated > 0 {
+		slog.Info("advanced offsets for tables",
+			"tables_updated", tablesUpdated,
+			"max_lsn", maxLSN.String())
 	}
 
-	// Update poller state in store for observability (even if no changes)
-	var lastLSN string
-	if len(validResults) > 0 {
-		minLSN := validResults[0].lastLSN
-		for _, r := range validResults[1:] {
-			if r.lastLSN.Compare(minLSN) < 0 {
-				minLSN = r.lastLSN
-			}
-		}
-
-		// Only advance offsets for successfully polled tables
-		for table := range successfulTables {
-			if err := p.offsets.Set(table, minLSN.String()); err != nil {
-				slog.Error("failed to save offset", "table", table, "error", err)
-			}
-		}
-
-		slog.Info("advanced global checkpoint",
-			"lsn", minLSN.String(),
-			"tables", len(successfulTables))
-
-		lastLSN = minLSN.String()
+	// Use max LSN for observability state (not for checkpointing)
+	lastLSN := ""
+	if !maxLSN.IsZero() {
+		lastLSN = maxLSN.String()
 	}
 
 	// Always update poller state for observability
