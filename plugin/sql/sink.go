@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -67,14 +68,61 @@ func (s *SQLiteSink) Write(ctx context.Context, ops []core.Sink) error {
 	return nil
 }
 
+// colType infers a SQLite type name from a Go value.
+func colType(v any) string {
+	if v == nil {
+		return "TEXT"
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "INTEGER"
+	case reflect.Float32, reflect.Float64:
+		return "REAL"
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return "BLOB"
+		}
+		return "TEXT"
+	case reflect.Bool:
+		return "INTEGER"
+	default:
+		return "TEXT"
+	}
+}
+
+// sampleTypes returns a slice of SQLite type names, one per column.
+// It scans rows in order and uses the first non-nil value for each column.
+func sampleTypes(columns []string, rows [][]any) []string {
+	types := make([]string, len(columns))
+	for _, row := range rows {
+		for colIdx := range columns {
+			if types[colIdx] == "" && row[colIdx] != nil {
+				types[colIdx] = colType(row[colIdx])
+			}
+		}
+	}
+	// Default all remaining (all nil) columns to TEXT
+	for i := range types {
+		if types[i] == "" {
+			types[i] = "TEXT"
+		}
+	}
+	return types
+}
+
 // insertInTx inserts DataSet into table
 func (s *SQLiteSink) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
 
+	// Infer SQLite types from data
+	colTypes := sampleTypes(ds.Columns, ds.Rows)
+
 	// Ensure table exists
-	if err := s.ensureTable(tx, config.Output, ds.Columns); err != nil {
+	if err := s.ensureTable(tx, config.Output, ds.Columns, colTypes); err != nil {
 		return err
 	}
 
@@ -230,11 +278,11 @@ func (s *SQLiteSink) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.Dat
 	return nil
 }
 
-// ensureTable ensures the table exists with the given columns
-func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string) error {
+// ensureTable ensures the table exists with the given columns and types
+func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string, colTypes []string) error {
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
+		escapedCols[i] = fmt.Sprintf("[%s] %s", col, colTypes[i])
 	}
 
 	sqlStr := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)",
