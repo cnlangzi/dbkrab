@@ -18,17 +18,15 @@ import (
 // SQLiteSink writes business data to a dedicated SQLite file per skill.
 // It uses connection pooling for read/write separation and supports migrations.
 type SQLiteSink struct {
-	pool     *Pool
-	skill    *Skill
-	watchDir string // directory to watch for migration changes
+	pool  *Pool
+	skill *Skill
 }
 
 // NewSQLiteSink creates a new SQLite sink for a skill
 func NewSQLiteSink(skill *Skill, pool *Pool) *SQLiteSink {
 	return &SQLiteSink{
-		pool:     pool,
-		skill:    skill,
-		watchDir: pool.MigrationsPath(),
+		pool:  pool,
+		skill: skill,
 	}
 }
 
