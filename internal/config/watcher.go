@@ -150,9 +150,6 @@ func (w *Watcher) logRestartWarnings(newCfg *Config) {
 	if oldCfg.App.DB != newCfg.App.DB || oldCfg.App.DLQ != newCfg.App.DLQ {
 		slog.Warn("app DB path change requires restart", "old_db", oldCfg.App.DB, "new_db", newCfg.App.DB, "old_dlq", oldCfg.App.DLQ, "new_dlq", newCfg.App.DLQ)
 	}
-	if oldCfg.CDC.Offset.Type != newCfg.CDC.Offset.Type {
-		slog.Warn("offset type change requires restart", "old", oldCfg.CDC.Offset.Type, "new", newCfg.CDC.Offset.Type)
-	}
 	if oldCfg.App.Listen != newCfg.App.Listen {
 		slog.Warn("api_port change requires restart", "old", oldCfg.App.Listen, "new", newCfg.App.Listen)
 	}
