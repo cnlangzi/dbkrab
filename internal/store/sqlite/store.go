@@ -64,6 +64,11 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 		return nil, fmt.Errorf("init poller state: %w", err)
 	}
 
+	// Force commit init changes immediately
+	if err := db.Writer.Commit(); err != nil {
+		return nil, fmt.Errorf("commit init: %w", err)
+	}
+
 	return s, nil
 }
 
