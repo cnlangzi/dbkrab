@@ -3,11 +3,10 @@ package dlq
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,6 +16,9 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+//go:embed migrations
+var migrationsFS embed.FS
 
 // Status represents the DLQ entry status
 type Status string
@@ -89,19 +91,9 @@ func NewWithDB(db *sqlite.DB) (*DLQ, error) {
 
 // runMigrations discovers and applies DLQ schema migrations using sqle/migrate.
 func runMigrations(db *sqlite.DB) error {
-	migrationPath := os.Getenv("DBKRAB_DLQ_MIGRATION_PATH")
-	if migrationPath == "" {
-		// Default: migrations relative to the binary
-		execPath, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("get executable path: %w", err)
-		}
-		migrationPath = filepath.Join(filepath.Dir(execPath), "internal", "dlq", "migrations")
-	}
-
 	sqleDB := sqle.Open(db.Writer.DB)
 	migrator := migrate.New(sqleDB)
-	if err := migrator.Discover(os.DirFS(migrationPath), migrate.WithModule("dbkrab-dlq")); err != nil {
+	if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-dlq")); err != nil {
 		return fmt.Errorf("discover migrations: %w", err)
 	}
 

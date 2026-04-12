@@ -3,10 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 
 	"github.com/cnlangzi/sqlite"
@@ -15,6 +15,9 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+//go:embed migrations
+var migrationsFS embed.FS
 
 // DB is a wrapper around github.com/cnlangzi/sqlite.DB
 // providing read/write separation and migration support.
@@ -52,12 +55,12 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Run migrations if MigrationPath is provided
+	// Run migrations if embedded FS is provided
 	if config.MigrationPath != "" {
 		sqleDB := sqle.Open(db.Writer.DB)
 
 		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(os.DirFS(config.MigrationPath), migrate.WithModule(config.ModuleName)); err != nil {
+		if err := migrator.Discover(migrationsFS, migrate.WithModule(config.ModuleName)); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("load migrations: %w", err)
 		}
@@ -99,19 +102,6 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 
 // NewFile creates a SQLite DB from a file path.
 func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
-	// Ensure file exists
-	_, err := os.Stat(file)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			err = os.WriteFile(file, nil, 0666)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-
 	return New(ctx, Config{
 		File:          file,
 		InMemory:      false,
