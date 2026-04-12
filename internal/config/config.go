@@ -85,13 +85,14 @@ type GracefulDegradationConfig struct {
 	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
-// AppConfig contains the app-level database storage configuration (CDC transactions, DLQ, poller state, offsets)
+// AppConfig contains the app-level database storage configuration
 type AppConfig struct {
-	Listen         int    `yaml:"listen"`
-	Host           string `yaml:"host"`
-	Type           string `yaml:"type"`
-	Path           string `yaml:"path"`
-	MigrationPath  string `yaml:"migration_path"` // Path to sqle/migrate migration files
+	Listen        int    `yaml:"listen"`
+	Host          string `yaml:"host"`
+	Type          string `yaml:"type"`
+	DB            string `yaml:"db"`             // Path for store/offset DB (transactions, poller_state, offsets)
+	DLQ           string `yaml:"dlq"`            // Path for DLQ DB (dlq_entries)
+	MigrationPath string `yaml:"migration_path"` // Path to sqle/migrate migration files
 }
 
 // SinksConfig is a slice of DatabaseConfig for business sinks.
@@ -175,8 +176,11 @@ func Load(path string) (*Config, error) {
 	if cfg.App.Type == "" {
 		cfg.App.Type = "sqlite"
 	}
-	if cfg.App.Path == "" {
-		cfg.App.Path = "./data/app/dbkrab.db"
+	if cfg.App.DB == "" {
+		cfg.App.DB = "./data/app/dbkrab.db"
+	}
+	if cfg.App.DLQ == "" {
+		cfg.App.DLQ = "./data/app/dlq.db"
 	}
 	if cfg.App.MigrationPath == "" {
 		cfg.App.MigrationPath = "./internal/store/migrations"

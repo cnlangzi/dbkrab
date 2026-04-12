@@ -116,12 +116,12 @@ func main() {
 	switch cfg.App.Type {
 	case "sqlite":
 		appDB, err = internal_store.New(ctx, internal_store.Config{
-			File:          cfg.App.Path,
+			File:          cfg.App.DB,
 			ModuleName:    "dbkrab-store",
 			MigrationPath: migrationPath,
 		})
 		if err != nil {
-			slog.Error("failed to create unified SQLite DB", "error", err)
+			slog.Error("failed to create store SQLite DB", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
@@ -141,7 +141,7 @@ func main() {
 				slog.Warn("store.Close error", "error", err)
 			}
 		}()
-		slog.Info("unified SQLite store initialized", "path", cfg.App.Path, "migrations", migrationPath)
+		slog.Info("SQLite store initialized", "path", cfg.App.DB, "migrations", migrationPath)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
@@ -149,16 +149,20 @@ func main() {
 
 	// Create offset store using the unified DB
 	offsetStore := offset.NewUnifiedStore(appDB)
-	slog.Info("offset store initialized (unified)", "type", "sqlite")
+	slog.Info("offset store initialized", "type", "sqlite")
 
-	// Create DLQ using the unified DB
-	dlqStore, err := dlq.NewWithStoreDB(appDB)
+	// Create DLQ with its own separate DB
+	dlqStore, err := dlq.New(ctx, cfg.App.DLQ)
 	if err != nil {
 		slog.Error("failed to create DLQ", "error", err)
 		os.Exit(1)
 	}
-	// Note: DLQ shares the unified DB, so we don't close it separately
-	slog.Info("dead letter queue initialized (unified)")
+	defer func() {
+		if err := dlqStore.Close(); err != nil {
+			slog.Warn("dlqStore.Close error", "error", err)
+		}
+	}()
+	slog.Info("dead letter queue initialized", "path", cfg.App.DLQ)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()

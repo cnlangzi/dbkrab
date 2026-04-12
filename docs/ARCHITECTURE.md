@@ -184,13 +184,18 @@ if err := migrator.Migrate(ctx); err != nil {
 
 ### Unified App DB
 
-The main application database (`./data/app/dbkrab.db`) consolidates:
+The main application database (`./data/app/dbkrab.db`) stores:
 
 | Table | Purpose |
 |-------|---------|
 | `transactions` | Captured CDC changes |
 | `poller_state` | Polling progress and metrics |
 | `offsets` | Per-table LSN positions |
+
+The DLQ uses its own separate database (`./data/app/dlq.db`):
+
+| Table | Purpose |
+|-------|---------|
 | `dlq_entries` | Dead letter queue |
 
 ### Key Concepts

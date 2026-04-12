@@ -76,7 +76,8 @@ app:
   listen: 9020        # HTTP API listen port
   host: localhost      # HTTP API bind address
   type: sqlite
-  path: ./data/app/dbkrab.db    # Unified SQLite DB path (transactions, poller_state, offsets, dlq_entries)
+  db: ./data/app/dbkrab.db    # Store/offset DB (transactions, poller_state, offsets)
+  dlq: ./data/app/dlq.db      # DLQ DB (dlq_entries)
   migration_path: ./internal/store/migrations  # Path to sqle/migrate migration files
 
 # -----------------------------------------------------------------------------
