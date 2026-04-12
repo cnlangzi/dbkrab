@@ -94,7 +94,7 @@ func main() {
 	ctx := context.Background()
 
 	var appDB *internal_store.DB
-	var store internal_store.Store
+	var appStore internal_store.Store
 
 	switch cfg.App.Type {
 	case "sqlite":
@@ -113,14 +113,14 @@ func main() {
 		}()
 
 		// Create store using the unified DB
-		store, err = storeSQLite.NewStore(appDB)
+		appStore, err = storeSQLite.New(appDB)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
-			if err := store.Close(); err != nil {
-				slog.Warn("store.Close error", "error", err)
+			if err := appStore.Close(); err != nil {
+				slog.Warn("appStore.Close error", "error", err)
 			}
 		}()
 		slog.Info("SQLite store initialized", "path", cfg.App.DB)
@@ -173,7 +173,7 @@ func main() {
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, mssqlDB, store, offsetStore, dlqStore)
+	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore)
 	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction) error {
 		return pluginManager.Handle(ctx, tx)
 	}))
@@ -211,7 +211,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := api.NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, store, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
+	apiServer := api.NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {

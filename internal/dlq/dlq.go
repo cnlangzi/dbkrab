@@ -100,18 +100,6 @@ func runMigrations(db *sqlite.DB) error {
 	return migrator.Migrate(context.Background())
 }
 
-// NewWithStoreDB creates a new DLQ manager using the unified store database.
-// The DLQ uses the dlq_entries table managed by sqle/migrate migrations.
-// Writes go through the store's buffered writer; reads go through the reader.
-// The storeDB's lifecycle is managed externally (do not close DLQ separately).
-func NewWithStoreDB(storeDB *sqlite.DB) (*DLQ, error) {
-	return &DLQ{
-		db:     storeDB,
-		mu:     sync.RWMutex{},
-		closed: false,
-	}, nil
-}
-
 // Write writes a new entry to the dead letter queue
 func (d *DLQ) Write(entry *DLQEntry) error {
 	d.mu.Lock()

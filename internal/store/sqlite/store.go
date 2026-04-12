@@ -20,9 +20,9 @@ type Store struct {
 	db *store.DB
 }
 
-// NewStore creates a new SQLite store.
+// New creates a new SQLite store.
 // The DB should be created via internal/store.New() which runs migrations first.
-func NewStore(db *store.DB) (*Store, error) {
+func New(db *store.DB) (*Store, error) {
 	s := &Store{db: db}
 	return s, nil
 }
