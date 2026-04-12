@@ -6,10 +6,10 @@
     <!-- Overview Dashboard - loaded via HTMX with auto-refresh -->
     <div id="overview-container" 
          hx-get="/api/overview" 
-         hx-trigger="load every 30s"
+         hx-trigger="load every 10s"
          hx-swap="innerHTML">
         <!-- Initial loading state -->
-        <div class="space-y-6">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <!-- Health Status Card -->
             <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
                 <div class="flex items-center gap-4">

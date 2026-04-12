@@ -873,6 +873,21 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	}
 	sb.WriteString(`</div></div></div>`)
 	
+	// TPS Monitoring Card
+	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
+	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">TPS Monitoring</h3>`)
+	sb.WriteString(`<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">`)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Current TPS</p><p class="text-xl font-bold text-primary">%.1f</p></div>`, m.LastSyncTPS)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Avg TPS (1m)</p><p class="text-xl font-bold text-success">%.1f</p></div>`, m.AvgTPS1m)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Last Duration</p><p class="text-xl font-bold text-text">%d ms</p></div>`, m.LastSyncDurationMs)
+	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">DLQ Count</p><p class="text-xl font-bold text-error">%d</p></div>`, m.LastDLQCount)
+	if m.LastPollTime != "" {
+		fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Last Poll</p><p class="text-sm font-medium text-text"><span class="local-time" data-utc="%s">%s</span></p></div>`, m.LastPollTime, m.LastPollTime)
+	} else {
+		sb.WriteString(`<div><p class="text-textMuted text-sm">Last Poll</p><p class="text-sm font-medium text-textMuted">N/A</p></div>`)
+	}
+	sb.WriteString(`</div></div>`)
+
 	// DLQ Stats Cards
 	sb.WriteString(`<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">`)
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-error/20 hover:border-error/40 transition-all">`)
@@ -947,6 +962,13 @@ type OverviewMetrics struct {
 	// System Info
 	Uptime string
 	LastSyncTime string
+
+	// TPS Monitoring (from Poller.GetMetrics)
+	LastSyncTPS       float64
+	AvgTPS1m          float64
+	LastSyncDurationMs int64
+	LastDLQCount      int64
+	LastPollTime      string
 }
 
 // collectOverviewMetrics collects all metrics for the dashboard overview
@@ -1096,7 +1118,27 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			}
 		}
 	}
-	
+
+	// Collect TPS metrics from metrics provider
+	if s.metricsProvider != nil {
+		m := s.metricsProvider.GetMetrics()
+		if v, ok := m["last_sync_tps"].(float64); ok {
+			metrics.LastSyncTPS = v
+		}
+		if v, ok := m["avg_tps_1m"].(float64); ok {
+			metrics.AvgTPS1m = v
+		}
+		if v, ok := m["last_sync_duration_ms"].(int64); ok {
+			metrics.LastSyncDurationMs = v
+		}
+		if v, ok := m["last_dlq_count"].(int64); ok {
+			metrics.LastDLQCount = v
+		}
+		if v, ok := m["last_poll_time"].(string); ok && v != "" {
+			metrics.LastPollTime = v
+		}
+	}
+
 	return metrics
 }
 
