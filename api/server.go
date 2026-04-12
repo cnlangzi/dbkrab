@@ -874,9 +874,9 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`</div></div></div>`)
 	
 	// TPS Monitoring Card
-	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
+	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">TPS Monitoring</h3>`)
-	sb.WriteString(`<div class="grid grid-cols-2 sm:grid-cols-5 gap-4">`)
+	sb.WriteString(`<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">`)
 	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Current TPS</p><p class="text-xl font-bold text-primary">%.1f</p></div>`, m.LastSyncTPS)
 	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Avg TPS (1m)</p><p class="text-xl font-bold text-success">%.1f</p></div>`, m.AvgTPS1m)
 	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Last Duration</p><p class="text-xl font-bold text-text">%d ms</p></div>`, m.LastSyncDurationMs)
