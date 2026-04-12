@@ -46,9 +46,25 @@ if [ -f "$PID_FILE" ]; then
     sudo rm -f "$PID_FILE"
 fi
 
-# Also kill any running dbkrab processes
-pkill -9 -f "dbkrab -config" 2>/dev/null || true
-sleep 1
+# Also kill any running dbkrab processes (match by process name)
+pkill -9 -x "$BINARY_NAME" 2>/dev/null || true
+pkill -9 -f "$BINARY_NAME.*-config" 2>/dev/null || true
+
+# Wait for process to fully exit and release the binary file
+echo "   Waiting for process to exit..."
+for i in {1..10}; do
+    if ! pgrep -x "$BINARY_NAME" > /dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+
+# Final check - force kill any remaining
+if pgrep -x "$BINARY_NAME" > /dev/null 2>&1; then
+    echo "   Force killing remaining processes..."
+    pkill -9 -x "$BINARY_NAME" 2>/dev/null || true
+    sleep 1
+fi
 
 # ============================================
 # Step 3: Build binary (normal user - NO sudo)
@@ -60,8 +76,9 @@ make build
 # Step 4: Install binary (normal user)
 # ============================================
 echo "📦 Installing binary..."
-cp bin/dbkrab "$INSTALL_DIR/dbkrab"
-chmod +x "$INSTALL_DIR/dbkrab"
+# Use 'install' command which unlinks the old file first
+# This avoids "Text file busy" error when overwriting a running binary
+install -m 755 bin/dbkrab "$INSTALL_DIR/dbkrab"
 
 # ============================================
 # Step 5: Install config (normal user)
