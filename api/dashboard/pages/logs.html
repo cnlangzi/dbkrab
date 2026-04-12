@@ -115,6 +115,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Operation</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Transaction ID</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">LSN <span class="text-[10px] normal-case">(tx-level)</span></th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Changed At</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Pulled At</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Data</th>
@@ -122,7 +123,7 @@
                 </thead>
                 <tbody class="divide-y divide-border" id="logs-container-desktop">
                     <tr>
-                        <td colspan="6" class="px-6 py-8 text-center text-textMuted">
+                        <td colspan="8" class="px-6 py-8 text-center text-textMuted">
                             <div class="flex items-center justify-center gap-2">
                                 <svg class="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -200,6 +201,7 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono text-[10px] truncate max-w-[180px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</td>
             <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
             <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
             <td class="px-6 py-4 text-xs">
@@ -241,8 +243,9 @@ function renderMobileCard(log) {
                         </span>
                     </div>
                     <div class="text-xs text-textMuted">
-                        ID: ${escapeHtml(log.id)}
-                        <span class="truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span>
+                        ID: ${escapeHtml(log.id)}<br>
+                        TX: <span class="truncate max-w-[150px] font-mono" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span><br>
+                        LSN: <span class="font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</span>
                     </div>
                     <div class="text-xs text-textMuted mt-1">
                         <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(log.changed_at)}</div>
