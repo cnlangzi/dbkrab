@@ -45,6 +45,44 @@ Reads changes from MSSQL CDC tables using LSN-based incremental polling.
 - **LSN Tracking**: Persists last consumed LSN to SQLite
 - **Transaction Grouping**: Groups changes by `__$transaction_id`
 - **Gap Detection**: Monitors CDC cleanup window
+- **Net Changes Mode**: When MSSQL CDC is enabled with `supports_net_changes = 1`, the poller uses `fn_cdc_get_net_changes_*` functions which return only the final row state, eliminating `UPDATE_BEFORE` rows from the stream.
+
+#### CDC Capture Modes
+
+MSSQL CDC supports two capture modes:
+
+| Mode | Function | Returns | UPDATE_BEFORE Rows |
+|------|----------|---------|-------------------|
+| `all_changes` | `fn_cdc_get_all_changes_*` | All row versions | Yes (before image) |
+| `net_changes` | `fn_cdc_get_net_changes_*` | Final row state only | No |
+
+**Why Net Changes?**
+
+The `net_changes` mode eliminates `UPDATE_BEFORE` rows, which:
+- Prevents "unknown operation type: UPDATE_BEFORE" errors
+- Reduces the number of CDC rows to process
+- Simplifies transaction handling (no intermediate states)
+
+**Migration for Existing Capture Instances**
+
+If CDC was previously enabled without net_changes (`supports_net_changes = 0`), existing capture instances must be rebuilt to use net_changes:
+
+```sql
+-- Disable old capture instance
+EXEC sys.sp_cdc_disable_table
+    @source_schema = 'dbo',
+    @source_name = 'YourTable',
+    @capture_instance = 'dbo_YourTable';
+
+-- Re-enable with net_changes support
+EXEC sys.sp_cdc_enable_table
+    @source_schema = 'dbo',
+    @source_name = 'YourTable',
+    @role_name = NULL,
+    @supports_net_changes = 1;
+```
+
+> **Note**: Rebuilding a capture instance clears all CDC history for that table. Plan accordingly for production systems.
 
 ### 2. SQL Plugin Engine (`plugin/sql/`)
 
