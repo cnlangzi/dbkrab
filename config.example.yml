@@ -34,12 +34,6 @@ cdc:
   # Polling interval: CDC log poll frequency, default 500ms
   interval: 500ms
 
-  # Offset storage: tracks consumption position per table
-  offset:
-    type: json             # Storage type: json | sqlite
-    json_path: ./data/offset.json   # JSON file path
-    sqlite_path: ./data/offset.db   # SQLite file path
-
   # Gap protection: prevents data loss from CDC cleanup
   gap:
     enabled: true             # Enable gap detection
@@ -68,13 +62,14 @@ cdc:
 # -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
-# App Storage (CDC transactions, DLQ, poller state)
+# App Storage
 # -----------------------------------------------------------------------------
 app:
   listen: 9020        # HTTP API listen port
   host: localhost      # HTTP API bind address
   type: sqlite
-  path: ./data/system/dbkrab.db
+  db: ./data/app/dbkrab.db    # Store DB: transactions, poller_state, offsets
+  dlq: ./data/app/dlq.db      # DLQ DB: dlq_entries
 
 # -----------------------------------------------------------------------------
 # Business Sinks (data output targets)

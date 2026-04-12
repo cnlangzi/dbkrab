@@ -20,7 +20,7 @@ func setupTestDLQ(t *testing.T) (*DLQ, func()) {
 		t.Fatalf("Failed to close temp file: %v", err)
 	}
 
-	dlq, err := New(tmpPath)
+	dlq, err := New(context.Background(), tmpPath)
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		t.Fatalf("Failed to create DLQ: %v", err)
@@ -70,7 +70,7 @@ func TestDLQ_New(t *testing.T) {
 		}
 		defer func() { _ = os.Remove(tmpPath) }()
 
-		dlq, err := New(tmpPath)
+		dlq, err := New(context.Background(), tmpPath)
 		if err != nil {
 			t.Fatalf("Failed to create DLQ: %v", err)
 		}
@@ -85,40 +85,11 @@ func TestDLQ_New(t *testing.T) {
 	})
 
 	t.Run("invalid path", func(t *testing.T) {
-		_, err := New("/nonexistent/path/to/db.db")
+		_, err := New(context.Background(), "/nonexistent/path/to/db.db")
 		if err == nil {
 			t.Fatal("Expected error for invalid path")
 		}
 	})
-}
-
-func TestDLQ_NewWithDB(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "dlq_newwithdb_test_*.db")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	tmpPath := tmpFile.Name()
-	if err := tmpFile.Close(); err != nil {
-		t.Fatalf("Failed to close temp file: %v", err)
-	}
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	db, err := New(tmpPath)
-	if err != nil {
-		t.Fatalf("Failed to create initial DLQ: %v", err)
-	}
-	defer func() { _ = db.CloseAndDB() }()
-
-	// Create another DLQ with the same DB
-	dlq2, err := NewWithDB(db.db)
-	if err != nil {
-		t.Fatalf("Failed to create DLQ with existing DB: %v", err)
-	}
-	defer func() { _ = dlq2.Close() }()
-
-	if dlq2 == nil {
-		t.Fatal("Expected DLQ instance")
-	}
 }
 
 func TestDLQ_Write(t *testing.T) {
@@ -195,6 +166,7 @@ func TestDLQ_List(t *testing.T) {
 				t.Fatalf("Failed to write entry: %v", err)
 			}
 		}
+		_ = dlq.Flush()
 
 		entries, err := dlq.List("")
 		if err != nil {
@@ -221,6 +193,7 @@ func TestDLQ_List(t *testing.T) {
 		if err := dlq.Write(entry2); err != nil {
 			t.Fatalf("Failed to write entry 2: %v", err)
 		}
+		_ = dlq.Flush()
 
 		// List pending entries
 		entries, err := dlq.List(string(StatusPending))
@@ -256,6 +229,7 @@ func TestDLQ_Get(t *testing.T) {
 		if err := dlq.Write(entry); err != nil {
 			t.Fatalf("Failed to write entry: %v", err)
 		}
+		_ = dlq.Flush()
 
 		retrieved, err := dlq.Get(entry.ID)
 		if err != nil {
@@ -301,6 +275,7 @@ func TestDLQ_Replay(t *testing.T) {
 		if err := dlq.Write(entry); err != nil {
 			t.Fatalf("Failed to write entry: %v", err)
 		}
+		_ = dlq.Flush()
 
 		handlerCalled := false
 		handler := func(e *DLQEntry) error {
@@ -315,6 +290,7 @@ func TestDLQ_Replay(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Replay failed: %v", err)
 		}
+		_ = dlq.Flush()
 
 		if !handlerCalled {
 			t.Fatal("Expected handler to be called")
@@ -338,6 +314,7 @@ func TestDLQ_Replay(t *testing.T) {
 		if err := dlq.Write(entry); err != nil {
 			t.Fatalf("Failed to write entry: %v", err)
 		}
+		_ = dlq.Flush()
 
 		handler := func(e *DLQEntry) error {
 			return &TestError{Message: "handler failed"}
@@ -347,6 +324,7 @@ func TestDLQ_Replay(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected replay to fail")
 		}
+		_ = dlq.Flush()
 
 		// Verify status reverted to pending
 		retrieved, err := dlq.Get(entry.ID)
@@ -396,6 +374,7 @@ func TestDLQ_Ignore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Ignore failed: %v", err)
 		}
+		_ = dlq.Flush()
 
 		retrieved, err := dlq.Get(entry.ID)
 		if err != nil {
@@ -508,6 +487,7 @@ func TestDLQ_Stats(t *testing.T) {
 				t.Fatalf("Failed to write entry: %v", err)
 			}
 		}
+		_ = dlq.Flush()
 
 		stats, err := dlq.Stats()
 		if err != nil {
@@ -545,6 +525,7 @@ func TestDLQ_Count(t *testing.T) {
 				t.Fatalf("Failed to write entry: %v", err)
 			}
 		}
+		_ = dlq.Flush()
 
 		count, err := dlq.Count(StatusPending)
 		if err != nil {
@@ -564,6 +545,7 @@ func TestDLQ_Count(t *testing.T) {
 		if err := dlq.Write(entry); err != nil {
 			t.Fatalf("Failed to write entry: %v", err)
 		}
+		_ = dlq.Flush()
 
 		count, err := dlq.Count(StatusResolved)
 		if err != nil {
@@ -610,6 +592,7 @@ func TestDLQ_CountAll(t *testing.T) {
 				t.Fatalf("Failed to write entry: %v", err)
 			}
 		}
+		_ = dlq.db.Flush()
 
 		count, err := dlq.CountAll()
 		if err != nil {
