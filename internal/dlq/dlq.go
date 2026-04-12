@@ -6,39 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/cnlangzi/sqlite"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
 )
-
-// Schema contains the SQL schema for the DLQ table
-const Schema = `
-CREATE TABLE IF NOT EXISTS dlq_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id TEXT,
-    source TEXT,
-    lsn TEXT NOT NULL,
-    table_name TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    change_data TEXT NOT NULL,
-    error_message TEXT NOT NULL,
-    retry_count INTEGER DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    resolved_by TEXT,
-    resolved_at DATETIME,
-    resolved_note TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_dlq_status ON dlq_entries(status);
-CREATE INDEX IF NOT EXISTS idx_dlq_table ON dlq_entries(table_name);
-CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON dlq_entries(created_at);
-CREATE INDEX IF NOT EXISTS idx_dlq_lsn ON dlq_entries(lsn);
-`
 
 // Status represents the DLQ entry status
 type Status string
@@ -77,7 +55,7 @@ type DLQ struct {
 	closed bool
 }
 
-// New creates a new DLQ manager and initializes the database.
+// New creates a new DLQ manager and runs migrations.
 // The DB uses cnlangzi/sqlite's buffered writer for writes.
 func New(ctx context.Context, dbPath string) (*DLQ, error) {
 	db, err := sqlite.Open(ctx, dbPath)
@@ -85,12 +63,11 @@ func New(ctx context.Context, dbPath string) (*DLQ, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Create table using buffered writer
-	if _, err := db.Writer.Exec(Schema); err != nil {
+	if err := runMigrations(db); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
 			slog.Warn("db.Close error", "error", closeErr)
 		}
-		return nil, fmt.Errorf("create table: %w", err)
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return &DLQ{
@@ -99,16 +76,36 @@ func New(ctx context.Context, dbPath string) (*DLQ, error) {
 }
 
 // NewWithDB creates a new DLQ manager using an existing *sqlite.DB.
-// The caller is responsible for the DB lifecycle (including closing).
+// Migrations are run on the given DB. The caller manages the DB lifecycle.
 func NewWithDB(db *sqlite.DB) (*DLQ, error) {
-	// Create table if not exists
-	if _, err := db.Writer.Exec(Schema); err != nil {
-		return nil, fmt.Errorf("create table: %w", err)
+	if err := runMigrations(db); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return &DLQ{
 		db: db,
 	}, nil
+}
+
+// runMigrations discovers and applies DLQ schema migrations using sqle/migrate.
+func runMigrations(db *sqlite.DB) error {
+	migrationPath := os.Getenv("DBKRAB_DLQ_MIGRATION_PATH")
+	if migrationPath == "" {
+		// Default: migrations relative to the binary
+		execPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("get executable path: %w", err)
+		}
+		migrationPath = filepath.Join(filepath.Dir(execPath), "internal", "dlq", "migrations")
+	}
+
+	sqleDB := sqle.Open(db.Writer.DB)
+	migrator := migrate.New(sqleDB)
+	if err := migrator.Discover(os.DirFS(migrationPath), migrate.WithModule("dbkrab-dlq")); err != nil {
+		return fmt.Errorf("discover migrations: %w", err)
+	}
+
+	return migrator.Migrate(context.Background())
 }
 
 // NewWithStoreDB creates a new DLQ manager using the unified store database.
