@@ -52,7 +52,7 @@ func TestNewFile(t *testing.T) {
 	}
 
 	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
-	if err := db.Writer.Commit(); err != nil {
+	if err := db.Flush(); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
 

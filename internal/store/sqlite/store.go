@@ -55,7 +55,7 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 	}
 
 	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
-	if err := db.Writer.Commit(); err != nil {
+	if err := db.Flush(); err != nil {
 		return nil, fmt.Errorf("commit DDL: %w", err)
 	}
 
@@ -65,7 +65,7 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 	}
 
 	// Force commit init changes immediately
-	if err := db.Writer.Commit(); err != nil {
+	if err := db.Flush(); err != nil {
 		return nil, fmt.Errorf("commit init: %w", err)
 	}
 

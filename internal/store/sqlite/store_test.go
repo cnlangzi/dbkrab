@@ -169,7 +169,7 @@ func TestStore_UpdatePollerState(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Force commit to make data visible to reader
-	err = db.Writer.Commit()
+	err = db.Flush()
 	assert.NoError(t, err)
 
 	state, err := store.GetPollerState()
@@ -196,7 +196,7 @@ func TestStore_GetPollerState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Force commit to make data visible to reader
-	err = db.Writer.Commit()
+	err = db.Flush()
 	assert.NoError(t, err)
 
 	state, err = store.GetPollerState()

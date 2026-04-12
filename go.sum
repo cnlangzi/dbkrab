@@ -19,6 +19,8 @@ github.com/Knetic/govaluate v3.0.0+incompatible h1:7o6+MAPhYTCF0+fdvoz1xDedhRb4f
 github.com/Knetic/govaluate v3.0.0+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/cnlangzi/sqlite v0.0.1 h1:VgONgs4kFgm9vVN83sa8sisdekG2enktQBsSt7KFe5c=
 github.com/cnlangzi/sqlite v0.0.1/go.mod h1:ZFzkDD6M7EOGBfPtrD4lMe/0nYrOr1bVfOK0o3wEVbs=
+github.com/cnlangzi/sqlite v0.0.2 h1:KJS6d7daeol2xp0twHVGpChsnjSjMnEKPUNQGpIdTiI=
+github.com/cnlangzi/sqlite v0.0.2/go.mod h1:ZFzkDD6M7EOGBfPtrD4lMe/0nYrOr1bVfOK0o3wEVbs=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
