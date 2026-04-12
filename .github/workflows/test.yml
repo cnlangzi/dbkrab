@@ -41,6 +41,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      GOLANGCI_JOBS: 50  # High parallelism on CI (more memory)
 
     steps:
       - name: Checkout code

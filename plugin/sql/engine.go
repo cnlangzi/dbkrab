@@ -226,12 +226,15 @@ func mergeSinkGroup(key sinkKey, sinks []core.Sink) (core.Sink, error) {
 		mergedColIndex[col] = i
 	}
 
-	// Validate OnConflict consistency
+	// Validate OnConflict consistency - use first OnConflict if inconsistent
 	firstOnConflict := sinks[0].Config.OnConflict
 	for _, sink := range sinks[1:] {
 		if sink.Config.OnConflict != firstOnConflict {
-			return core.Sink{}, fmt.Errorf("inconsistent OnConflict for table %s pk %s: %s vs %s",
-				key.table, key.pk, firstOnConflict, sink.Config.OnConflict)
+			slog.Warn("mergeSinkGroup: inconsistent OnConflict, using first",
+				"table", key.table,
+				"pk", key.pk,
+				"expected", firstOnConflict,
+				"got", sink.Config.OnConflict)
 		}
 	}
 

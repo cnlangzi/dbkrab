@@ -23,7 +23,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/plugin"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

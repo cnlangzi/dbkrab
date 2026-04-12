@@ -7,8 +7,16 @@ import (
 	"strings"
 )
 
+// TxExec is the interface for executing statements within a transaction.
+// Both *sql.Tx and pkg/sqlite.TxExec implement this interface.
+type TxExec interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Commit() error
+	Rollback() error
+}
+
 // EnsureTable creates a table with the given columns if it doesn't exist.
-func EnsureTable(tx *sql.Tx, table string, columns []string) error {
+func EnsureTable(tx TxExec, table string, columns []string) error {
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
 		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
@@ -23,7 +31,7 @@ func EnsureTable(tx *sql.Tx, table string, columns []string) error {
 }
 
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
-func InsertInTx(tx *sql.Tx, config TableConfig, columns []string, rows [][]interface{}) error {
+func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -44,7 +52,7 @@ func InsertInTx(tx *sql.Tx, config TableConfig, columns []string, rows [][]inter
 }
 
 // UpdateInTx updates records in table.
-func UpdateInTx(tx *sql.Tx, config TableConfig, columns []string, rows [][]interface{}) error {
+func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -90,7 +98,7 @@ func UpdateInTx(tx *sql.Tx, config TableConfig, columns []string, rows [][]inter
 }
 
 // DeleteInTx deletes records from table.
-func DeleteInTx(tx *sql.Tx, config TableConfig, columns []string, rows [][]interface{}) error {
+func DeleteInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
 	}

@@ -6,25 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
+
+	"github.com/cnlangzi/sqlite"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var ErrUnreachable = errors.New("sqlite: is unreachable")
-
-// DB wraps SQLite database with read/write separation.
-// Writer is used for writes, Reader for reads.
-type DB struct {
-	Writer *sql.DB
-	Reader *sql.DB
-	ctx    context.Context
-}
+// DB is a wrapper around github.com/cnlangzi/sqlite.DB
+// providing read/write separation and migration support.
+type DB = sqlite.DB
 
 // Config holds SQLite configuration options.
 type Config struct {
@@ -34,14 +28,13 @@ type Config struct {
 	// ModuleName is used for migration discovery.
 	ModuleName string
 
-	// MigrationPath is the directory path for migration files (used with os.DirFS).
+	// MigrationPath is the directory path for migration files.
 	MigrationPath string
 
 	// InMemory indicates if this is an in-memory database.
 	InMemory bool
 
-	// MaxOpenConns sets maximum open connections (default: Writer=1, Reader=runtime.NumCPU()*2)
-	MaxOpenConnsWriter int
+	// MaxOpenConns sets maximum open connections for Reader.
 	MaxOpenConnsReader int
 
 	// MaxIdleConns sets maximum idle connections for Reader.
@@ -55,57 +48,61 @@ func New(ctx context.Context, config Config) (*DB, error) {
 	}
 
 	inmemory := strings.HasPrefix(config.File, ":memory:")
+	dsn := buildDSN(config.File, inmemory)
 
-	d := &DB{
-		ctx: ctx,
-	}
-
-	var err error
-	d.Writer, err = setupWriter(config.File, inmemory, config.MaxOpenConnsWriter)
+	db, err := sqlite.Open(ctx, dsn)
 	if err != nil {
 		return nil, err
 	}
 
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
-		if err := runMigrations(d.Writer, config.MigrationPath); err != nil {
-			_ = d.Writer.Close()
-			return nil, err
+		// Create sqle.DB from the underlying *sql.DB for migrations
+		sqleDB := sqle.Open(db.Writer.DB)
+
+		migrator := migrate.New(sqleDB)
+		if err := migrator.Discover(os.DirFS(config.MigrationPath), migrate.WithModule(config.ModuleName)); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("load migrations: %w", err)
+		}
+
+		if err := migrator.Migrate(context.Background()); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("run migrations: %w", err)
 		}
 	}
 
-	d.Reader, err = setupReader(config.File, inmemory, config.MaxOpenConnsReader, config.MaxIdleConnsReader)
-	if err != nil {
-		return nil, err
-	}
-
-	return d, nil
+	return db, nil
 }
 
-// NewInMemory creates an in-memory SQLite DB with shared cache for read/write separation.
-// Note: For in-memory DBs, we use a single connection to avoid transaction isolation issues.
+// NewInMemory creates an in-memory SQLite DB with shared cache.
 func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
-	db, err := setupWriter(":memory:", true, 0)
+	db, err := sqlite.Open(ctx, ":memory:")
 	if err != nil {
 		return nil, err
 	}
 
 	// Run migrations if provided
 	if migrations != nil {
-		if err := runMigrationsFS(db, migrations); err != nil {
+		// Create sqle.DB from the underlying *sql.DB for migrations
+		sqleDB := sqle.Open(db.Writer.DB)
+
+		migrator := migrate.New(sqleDB)
+		if err := migrator.Discover(migrations, migrate.WithModule(moduleName)); err != nil {
 			_ = db.Close()
-			return nil, err
+			return nil, fmt.Errorf("load migrations: %w", err)
+		}
+
+		if err := migrator.Migrate(context.Background()); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("run migrations: %w", err)
 		}
 	}
 
-	return &DB{
-		Writer: db,
-		Reader: db, // Use same connection for in-memory DB
-		ctx:    ctx,
-	}, nil
+	return db, nil
 }
 
-// NewFile creates a SQLite DB with read/write separation from a file.
+// NewFile creates a SQLite DB from a file path.
 func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
 	// Ensure file exists
 	_, err := os.Stat(file)
@@ -128,212 +125,11 @@ func NewFile(ctx context.Context, file string, moduleName string, migrationPath 
 	})
 }
 
-// runMigrations runs SQL migration files from a directory path.
-// Files are executed in alphabetical order.
-func runMigrations(db *sql.DB, migrationPath string) error {
-	entries, err := os.ReadDir(migrationPath)
-	if err != nil {
-		return fmt.Errorf("read migration directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-
-		filePath := filepath.Join(migrationPath, entry.Name())
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
-		}
-
-		if _, err := db.Exec(string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
-}
-
-// runMigrationsFS runs SQL migration files from an embedded FS.
-// Files are executed in alphabetical order by filename.
-func runMigrationsFS(db *sql.DB, migrations fs.FS) error {
-	entries, err := fs.ReadDir(migrations, ".")
-	if err != nil {
-		return fmt.Errorf("read migration directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-
-		content, err := fs.ReadFile(migrations, entry.Name())
-		if err != nil {
-			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
-		}
-
-		if _, err := db.Exec(string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
-}
-
-func setupWriter(file string, inmemory bool, maxOpenConns int) (*sql.DB, error) {
-	dsn := buildWriterDSN(file, inmemory)
-
-	d, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	if maxOpenConns > 0 {
-		d.SetMaxOpenConns(maxOpenConns)
-	} else {
-		d.SetMaxOpenConns(1)
-	}
-
-	if err := pingWithRetry(d); err != nil {
-		return nil, err
-	}
-
-	return d, nil
-}
-
-func setupReader(file string, inmemory bool, maxOpenConns, maxIdleConns int) (*sql.DB, error) {
-	dsn := buildReaderDSN(file, inmemory)
-
-	d, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	if maxOpenConns > 0 {
-		d.SetMaxOpenConns(maxOpenConns)
-	} else {
-		d.SetMaxOpenConns(max(10, runtime.NumCPU()*2))
-	}
-
-	if maxIdleConns > 0 {
-		d.SetMaxIdleConns(maxIdleConns)
-	} else {
-		d.SetMaxIdleConns(max(10, runtime.NumCPU()*2))
-	}
-
-	if err := pingWithRetry(d); err != nil {
-		return nil, err
-	}
-
-	return d, nil
-}
-
-func buildWriterDSN(file string, inmemory bool) string {
-	params := url.Values{}
-
+func buildDSN(file string, inmemory bool) string {
 	if inmemory {
-		params.Add("cache", "shared")
-		params.Add("mode", "memory")
-		params.Add("_busy_timeout", "5000")
-		params.Add("_synchronous", "OFF")
-		params.Add("_journal_mode", "MEMORY")
-	} else {
-		params.Add("cache", "shared")
-		params.Add("mode", "rwc")
-		params.Add("_journal_mode", "WAL")
-		params.Add("_synchronous", "NORMAL")
-		params.Add("_busy_timeout", "5000")
-		params.Add("_pragma", "temp_store(MEMORY)")
-		params.Add("_pragma", "cache_size(-100000)")
+		return ":memory:"
 	}
-
-	return file + "?" + params.Encode()
-}
-
-func buildReaderDSN(file string, inmemory bool) string {
-	params := url.Values{}
-
-	if inmemory {
-		params.Add("cache", "shared")
-		params.Add("mode", "ro")
-		params.Add("_query_only", "true")
-		params.Add("_pragma", "read_uncommitted(true)")
-		params.Add("_busy_timeout", "5000")
-	} else {
-		params.Add("mode", "ro")
-		params.Add("cache", "private")
-		params.Add("_journal_mode", "WAL")
-		params.Add("_busy_timeout", "5000")
-		params.Add("_query_only", "true")
-		params.Add("_synchronous", "OFF")
-		params.Add("_pragma", "mmap_size(1000000000)")
-		params.Add("_pragma", "temp_store(MEMORY)")
-	}
-
-	return file + "?" + params.Encode()
-}
-
-func pingWithRetry(d *sql.DB) error {
-	retries := 0
-	for {
-		err := d.Ping()
-		if err == nil {
-			return nil
-		}
-
-		retries++
-		if retries > 3 {
-			return ErrUnreachable
-		}
-		time.Sleep(1 * time.Second)
-	}
-}
-
-// Close closes both Writer and Reader connections.
-func (db *DB) Close() error {
-	var errs []error
-
-	if err := db.Writer.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := db.Reader.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
-}
-
-// Exec executes a write operation on Writer.
-func (db *DB) Exec(query string, args ...interface{}) (sql.Result, error) {
-	return db.Writer.Exec(query, args...)
-}
-
-// ExecContext executes a write operation on Writer with context.
-func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
-	return db.Writer.ExecContext(ctx, query, args...)
-}
-
-// Query executes a read operation on Reader.
-func (db *DB) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	return db.Reader.Query(query, args...)
-}
-
-// QueryContext executes a read operation on Reader with context.
-func (db *DB) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	return db.Reader.QueryContext(ctx, query, args...)
-}
-
-// QueryRow executes a read operation on Reader and returns a single row.
-func (db *DB) QueryRow(query string, args ...interface{}) *sql.Row {
-	return db.Reader.QueryRow(query, args...)
-}
-
-// QueryRowContext executes a read operation on Reader with context and returns a single row.
-func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
-	return db.Reader.QueryRowContext(ctx, query, args...)
+	return file
 }
 
 // Execer is an interface for executing queries
@@ -353,8 +149,8 @@ func InsertInTx(tx Execer, table string, columns []string, rows [][]interface{})
 	}
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		quoteIdent(table),
-		quoteIdentList(columns),
+		QuoteIdent(table),
+		QuoteIdentList(columns),
 		strings.Join(placeholders, ","))
 
 	for _, row := range rows {
@@ -374,10 +170,10 @@ func UpdateInTx(tx Execer, table string, columns []string, rows [][]interface{})
 
 	setClause := make([]string, len(columns))
 	for i, col := range columns {
-		setClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+		setClause[i] = fmt.Sprintf("%s = ?", QuoteIdent(col))
 	}
 
-	query := fmt.Sprintf("UPDATE %s SET %s", quoteIdent(table), strings.Join(setClause, ","))
+	query := fmt.Sprintf("UPDATE %s SET %s", QuoteIdent(table), strings.Join(setClause, ","))
 
 	for _, row := range rows {
 		if _, err := tx.Exec(query, row...); err != nil {
@@ -400,11 +196,11 @@ func DeleteInTx(tx Execer, table string, columns []string, rows [][]interface{})
 
 	whereClause := make([]string, len(columns))
 	for i, col := range columns {
-		whereClause[i] = fmt.Sprintf("%s = ?", quoteIdent(col))
+		whereClause[i] = fmt.Sprintf("%s = ?", QuoteIdent(col))
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s",
-		quoteIdent(table),
+		QuoteIdent(table),
 		strings.Join(whereClause, " AND "))
 
 	for _, row := range rows {
@@ -416,7 +212,7 @@ func DeleteInTx(tx Execer, table string, columns []string, rows [][]interface{})
 	return nil
 }
 
-func quoteIdent(s string) string {
+func QuoteIdent(s string) string {
 	var buf strings.Builder
 	buf.Grow(len(s) + 2)
 	buf.WriteByte('`')
@@ -430,10 +226,10 @@ func quoteIdent(s string) string {
 	return buf.String()
 }
 
-func quoteIdentList(columns []string) string {
+func QuoteIdentList(columns []string) string {
 	quoted := make([]string, len(columns))
 	for i, col := range columns {
-		quoted[i] = quoteIdent(col)
+		quoted[i] = QuoteIdent(col)
 	}
 	return strings.Join(quoted, ",")
 }
