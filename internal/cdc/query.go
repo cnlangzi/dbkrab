@@ -63,9 +63,27 @@ func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	return lsn, err
 }
 
+// incrementLSN returns the next LSN value after the given LSN
+// This is essential for CDC queries to avoid fetching the same LSN repeatedly.
+// MSSQL CDC function cdc.fn_cdc_get_all_changes_* returns __$start_lsn >= @from_lsn,
+// so we must increment from_lsn before querying to get only NEW changes.
+func (q *Querier) incrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
+	var incrementedLSN []byte
+	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_increment_lsn(@lsn)", sql.Named("lsn", lsn)).Scan(&incrementedLSN)
+	if err != nil {
+		return nil, fmt.Errorf("increment LSN: %w", err)
+	}
+	return incrementedLSN, nil
+}
+
 // GetChanges queries CDC changes for a table
 // captureInstance is used for MSSQL CDC queries (must include schema prefix)
 // tableName is the original table name used for returned Change.Table (without schema prefix)
+//
+// IMPORTANT: MSSQL CDC function cdc.fn_cdc_get_all_changes_* returns rows where
+// __$start_lsn >= @from_lsn. To avoid fetching the same LSN repeatedly,
+// we use sys.fn_cdc_increment_lsn() to increment the from_lsn before querying.
+// This ensures we only fetch NEW changes after the last processed LSN.
 func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN, toLSN []byte) ([]Change, error) {
 	// Validate capture instance to prevent SQL injection
 	if !validCaptureInstance.MatchString(captureInstance) {
@@ -84,6 +102,21 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		}
 	}
 
+	// Increment fromLSN to avoid fetching the same LSN again
+	// sys.fn_cdc_increment_lsn returns the next LSN value after fromLSN
+	// This is the correct way to query CDC for incremental changes
+	incrementedFromLSN := fromLSN
+	if len(fromLSN) > 0 {
+		var err error
+		incrementedFromLSN, err = q.incrementLSN(ctx, fromLSN)
+		if err != nil {
+			// If increment fails (e.g., LSN is at max), no new changes available
+			slog.Debug("increment LSN failed, likely no new changes", "fromLSN", fmt.Sprintf("%x", fromLSN), "error", err)
+			return nil, nil
+		}
+		slog.Debug("incremented fromLSN for CDC query", "original", fmt.Sprintf("%x", fromLSN), "incremented", fmt.Sprintf("%x", incrementedFromLSN))
+	}
+
 	// Note: Use * only to avoid duplicate columns (CDC function already returns metadata)
 	// Also convert LSN to transaction time
 	query := fmt.Sprintf(`
@@ -93,7 +126,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 	`, fnName)
 
 	rows, err := q.db.QueryContext(ctx, query,
-		sql.Named("from_lsn", fromLSN),
+		sql.Named("from_lsn", incrementedFromLSN),
 		sql.Named("to_lsn", toLSN),
 	)
 	if err != nil {
@@ -172,7 +205,9 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 						op = int64(v)
 					default:
 						// Try to parse from other numeric types
-						if n, err := fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &op); err != nil || n == 0 { op = 0 }
+						if n, err := fmt.Sscanf(fmt.Sprintf("%v", v), "%d", &op); err != nil || n == 0 {
+							op = 0
+						}
 					}
 				}
 			}
