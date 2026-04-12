@@ -104,7 +104,103 @@ dbkrab/
 
 ---
 
-## Key Concepts
+## Database Layer
+
+### Storage Engine: cnlangzi/sqlite
+
+All SQLite databases in dbkrab use **`github.com/cnlangzi/sqlite`** — a Go wrapper that provides:
+
+- **Read/Write separation**: dedicated reader pool and single buffered writer connection
+- **Buffered writes**: writer batches changes and flushes asynchronously (100ms interval, 100-item buffer) for better TPS
+- **WAL journal mode**: enabled automatically via DSN pragmas on the writer
+- **Automatic PRAGMAs**: busy_timeout, synchronous, cache_size, temp_store, mmap_size all configured via DSN parameters
+
+```go
+import "github.com/cnlangzi/sqlite"
+
+// All reads go through Reader (concurrent, connection-pooled)
+rows, err := db.Reader.Query("SELECT ...")
+
+// All writes go through Writer (buffered, auto-batched)
+_, err := db.Writer.Exec("INSERT INTO ...")
+
+// Flush ensures buffered writes are committed before reads
+db.Flush()
+```
+
+**Reader DSN pragmas**: `mode=ro`, `cache=private`, `query_only`, `mmap_size`, `threads` (scales with CPU count)
+
+**Writer DSN pragmas**: `mode=rwc`, `_journal_mode=WAL`, `_synchronous=NORMAL`, `_busy_timeout=5000`, `temp_store=MEMORY`, `cache_size`
+
+> **Do not** use `PRAGMA journal_mode=WAL` or other PRAGMA statements manually. The wrapper handles all SQLite tuning automatically.
+
+### Schema Migration: yaitoo/sqle/migrate
+
+Database schemas are managed by **`github.com/yaitoo/sqle/migrate`** with semver migration directories.
+
+**Migration directory structure:**
+
+```
+internal/store/migrations/
+└── 1.0.0/
+    └── 001_initial.sql
+```
+
+**SQL file format:**
+
+```sql
+-- Migration: 001_initial
+-- Module: dbkrab-store
+-- Description: Create initial schema
+
+CREATE TABLE IF NOT EXISTS transactions (...);
+CREATE INDEX IF NOT EXISTS idx_xxx ON transactions(...);
+```
+
+**Initialization (raw *sql.DB required for sqle/migrate):**
+
+```go
+import (
+    "embed"
+    "github.com/cnlangzi/sqlite"
+    "github.com/yaitoo/sqle"
+    "github.com/yaitoo/sqle/migrate"
+)
+
+//go:embed migrations
+var migrationsFS embed.FS
+
+// sqle/migrate needs the raw *sql.DB from the buffered writer
+sqleDB := sqle.Open(db.Writer.DB)
+
+migrator := migrate.New(sqleDB)
+if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-store")); err != nil {
+    return err
+}
+if err := migrator.Migrate(ctx); err != nil {
+    return err
+}
+```
+
+> **Important**: Only use `sqle.Open(db.Writer.DB)` for migrations. After migration, use `sqlite.DB` for all application reads and writes (Writer for writes, Reader for reads).
+
+### Unified App DB
+
+The main application database (`./data/app/dbkrab.db`) stores:
+
+| Table | Purpose |
+|-------|---------|
+| `transactions` | Captured CDC changes |
+| `poller_state` | Polling progress and metrics |
+| `offsets` | Per-table LSN positions |
+
+The DLQ uses its own separate database (`./data/app/dlq.db`):
+
+| Table | Purpose |
+|-------|---------|
+| `dlq_entries` | Dead letter queue |
+
+### Key Concepts
 
 ### CDC Parameters
 
@@ -172,4 +268,5 @@ For each CDC change (row):
 | `cdc.interval` | Poll frequency |
 | `plugins.sql.path` | Skills directory |
 | `app.listen` | Dashboard port |
-| `app.path` | System SQLite path |
+| `app.db` | Store/offset SQLite path |
+| `app.dlq` | DLQ SQLite path |

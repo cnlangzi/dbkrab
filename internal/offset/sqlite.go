@@ -23,14 +23,6 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, err
 	}
 
-	// Enable WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			slog.Warn("db.Close error", "error", closeErr)
-		}
-		return nil, err
-	}
-
 	// Create table if not exists
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS offsets (

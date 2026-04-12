@@ -3,40 +3,22 @@ package dlq
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/cnlangzi/sqlite"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Schema contains the SQL schema for the DLQ table
-const Schema = `
-CREATE TABLE IF NOT EXISTS dlq_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id TEXT,
-    source TEXT,
-    lsn TEXT NOT NULL,
-    table_name TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    change_data TEXT NOT NULL,
-    error_message TEXT NOT NULL,
-    retry_count INTEGER DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    resolved_by TEXT,
-    resolved_at DATETIME,
-    resolved_note TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_dlq_status ON dlq_entries(status);
-CREATE INDEX IF NOT EXISTS idx_dlq_table ON dlq_entries(table_name);
-CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON dlq_entries(created_at);
-CREATE INDEX IF NOT EXISTS idx_dlq_lsn ON dlq_entries(lsn);
-`
+//go:embed migrations
+var migrationsFS embed.FS
 
 // Status represents the DLQ entry status
 type Status string
@@ -67,34 +49,27 @@ type DLQEntry struct {
 	ResolvedNote string    `json:"resolved_note,omitempty"`
 }
 
-// DLQ manages the dead letter queue
+// DLQ manages the dead letter queue.
+// All writes go through sqlite.DB's buffered writer for better TPS.
 type DLQ struct {
-	db     *sql.DB
+	db     *sqlite.DB
 	mu     sync.RWMutex
 	closed bool
 }
 
-// New creates a new DLQ manager and initializes the database
-func New(dbPath string) (*DLQ, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+// New creates a new DLQ manager and runs migrations.
+// The DB uses cnlangzi/sqlite's buffered writer for writes.
+func New(ctx context.Context, dbPath string) (*DLQ, error) {
+	db, err := sqlite.Open(ctx, dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if err := runMigrations(db); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
 			slog.Warn("db.Close error", "error", closeErr)
 		}
-		return nil, fmt.Errorf("enable WAL mode: %w", err)
-	}
-
-	// Create table
-	if _, err := db.Exec(Schema); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			slog.Warn("db.Close error", "error", closeErr)
-		}
-		return nil, fmt.Errorf("create table: %w", err)
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return &DLQ{
@@ -102,16 +77,37 @@ func New(dbPath string) (*DLQ, error) {
 	}, nil
 }
 
-// NewWithDB creates a new DLQ manager using an existing database connection
-func NewWithDB(db *sql.DB) (*DLQ, error) {
-	// Create table if not exists
-	if _, err := db.Exec(Schema); err != nil {
-		return nil, fmt.Errorf("create table: %w", err)
+// NewWithDB creates a new DLQ manager using an existing *sqlite.DB.
+// Migrations are run on the given DB. The caller manages the DB lifecycle.
+func NewWithDB(db *sqlite.DB) (*DLQ, error) {
+	if err := runMigrations(db); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return &DLQ{
 		db: db,
 	}, nil
+}
+
+// runMigrations discovers and applies DLQ schema migrations using sqle/migrate.
+func runMigrations(db *sqlite.DB) error {
+	sqleDB := sqle.Open(db.Writer.DB)
+	migrator := migrate.New(sqleDB)
+	if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-dlq")); err != nil {
+		return fmt.Errorf("discover migrations: %w", err)
+	}
+
+	if err := migrator.Init(context.Background()); err != nil {
+		return fmt.Errorf("init migrations: %w", err)
+	}
+
+	return migrator.Migrate(context.Background())
+}
+
+// Flush ensures all buffered writes are committed to the database.
+// Call this after Write when immediate read consistency is needed (e.g., in tests).
+func (d *DLQ) Flush() error {
+	return d.db.Flush()
 }
 
 // Write writes a new entry to the dead letter queue
@@ -132,7 +128,7 @@ func (d *DLQ) Write(entry *DLQEntry) error {
 		entry.Status = StatusPending
 	}
 
-	result, err := d.db.Exec(`
+	result, err := d.db.Writer.Exec(`
 		INSERT INTO dlq_entries (
 			lsn, table_name, operation, change_data, error_message,
 			retry_count, status, created_at, updated_at
@@ -204,7 +200,7 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 		`
 	}
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.Reader.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query entries: %w", err)
 	}
@@ -265,7 +261,7 @@ func (d *DLQ) Get(id int64) (*DLQEntry, error) {
 	var resolvedBy, resolvedNote sql.NullString
 	var resolvedAt sql.NullTime
 
-	err := d.db.QueryRow(`
+	err := d.db.Reader.QueryRow(`
 		SELECT id, lsn, table_name, operation, change_data, error_message,
 			   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 		FROM dlq_entries
@@ -322,7 +318,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	var resolvedBy, resolvedNote sql.NullString
 	var resolvedAt sql.NullTime
 
-	err := d.db.QueryRowContext(ctx, `
+	err := d.db.Reader.QueryRowContext(ctx, `
 		SELECT id, lsn, table_name, operation, change_data, error_message,
 			   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 		FROM dlq_entries
@@ -342,7 +338,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	}
 
 	// Update status to retrying
-	_, err = d.db.ExecContext(ctx, `
+	_, err = d.db.Writer.ExecContext(ctx, `
 		UPDATE dlq_entries SET status = ?, updated_at = ?, retry_count = retry_count + 1
 		WHERE id = ?
 	`, StatusRetrying, time.Now(), id)
@@ -353,7 +349,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	// Call the handler
 	if err := handler(entry); err != nil {
 		// Handler failed - revert to pending
-		_, updateErr := d.db.Exec(`
+		_, updateErr := d.db.Writer.Exec(`
 			UPDATE dlq_entries SET status = ?, updated_at = ?, error_message = ?
 			WHERE id = ?
 		`, StatusPending, time.Now(),
@@ -365,7 +361,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	}
 
 	// Handler succeeded - mark as resolved
-	_, err = d.db.Exec(`
+	_, err = d.db.Writer.Exec(`
 		UPDATE dlq_entries SET
 			status = ?, updated_at = ?, resolved_by = ?, resolved_at = ?, resolved_note = ?
 		WHERE id = ?
@@ -387,7 +383,7 @@ func (d *DLQ) Ignore(id int64, note string) error {
 		return ErrDLQClosed
 	}
 
-	result, err := d.db.Exec(`
+	result, err := d.db.Writer.Exec(`
 		UPDATE dlq_entries SET
 			status = ?, updated_at = ?, resolved_by = ?, resolved_at = ?, resolved_note = ?
 		WHERE id = ? AND status = ?
@@ -417,7 +413,7 @@ func (d *DLQ) Delete(id int64) error {
 		return ErrDLQClosed
 	}
 
-	result, err := d.db.Exec(`DELETE FROM dlq_entries WHERE id = ?`, id)
+	result, err := d.db.Writer.Exec(`DELETE FROM dlq_entries WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete entry: %w", err)
 	}
@@ -443,7 +439,7 @@ func (d *DLQ) Stats() (map[Status]int, error) {
 		return nil, ErrDLQClosed
 	}
 
-	rows, err := d.db.Query(`
+	rows, err := d.db.Reader.Query(`
 		SELECT status, COUNT(*) as count
 		FROM dlq_entries
 		GROUP BY status
@@ -533,7 +529,7 @@ func (d *DLQ) Count(status Status) (int, error) {
 	}
 
 	var count int
-	err := d.db.QueryRow(`
+	err := d.db.Reader.QueryRow(`
 		SELECT COUNT(*) FROM dlq_entries WHERE status = ?
 	`, status).Scan(&count)
 	if err != nil {
@@ -553,7 +549,7 @@ func (d *DLQ) CountAll() (int, error) {
 	}
 
 	var count int
-	err := d.db.QueryRow(`SELECT COUNT(*) FROM dlq_entries`).Scan(&count)
+	err := d.db.Reader.QueryRow(`SELECT COUNT(*) FROM dlq_entries`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count entries: %w", err)
 	}

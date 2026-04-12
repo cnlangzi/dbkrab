@@ -6,29 +6,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 )
 
 // SQLiteSink writes business data to a dedicated SQLite file per skill.
 // It uses connection pooling for read/write separation and supports migrations.
 type SQLiteSink struct {
-	pool     *Pool
-	skill    *Skill
-	watchDir string // directory to watch for migration changes
+	pool  *Pool
+	skill *Skill
 }
 
 // NewSQLiteSink creates a new SQLite sink for a skill
 func NewSQLiteSink(skill *Skill, pool *Pool) *SQLiteSink {
 	return &SQLiteSink{
-		pool:     pool,
-		skill:    skill,
-		watchDir: pool.MigrationsPath(),
+		pool:  pool,
+		skill: skill,
 	}
 }
 
@@ -68,14 +66,61 @@ func (s *SQLiteSink) Write(ctx context.Context, ops []core.Sink) error {
 	return nil
 }
 
+// colType infers a SQLite type name from a Go value.
+func colType(v any) string {
+	if v == nil {
+		return "TEXT"
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "INTEGER"
+	case reflect.Float32, reflect.Float64:
+		return "REAL"
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return "BLOB"
+		}
+		return "TEXT"
+	case reflect.Bool:
+		return "INTEGER"
+	default:
+		return "TEXT"
+	}
+}
+
+// sampleTypes returns a slice of SQLite type names, one per column.
+// It scans rows in order and uses the first non-nil value for each column.
+func sampleTypes(columns []string, rows [][]any) []string {
+	types := make([]string, len(columns))
+	for _, row := range rows {
+		for colIdx := range columns {
+			if types[colIdx] == "" && row[colIdx] != nil {
+				types[colIdx] = colType(row[colIdx])
+			}
+		}
+	}
+	// Default all remaining (all nil) columns to TEXT
+	for i := range types {
+		if types[i] == "" {
+			types[i] = "TEXT"
+		}
+	}
+	return types
+}
+
 // insertInTx inserts DataSet into table
 func (s *SQLiteSink) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
 
+	// Infer SQLite types from data
+	colTypes := sampleTypes(ds.Columns, ds.Rows)
+
 	// Ensure table exists
-	if err := s.ensureTable(tx, config.Output, ds.Columns); err != nil {
+	if err := s.ensureTable(tx, config.Output, ds.Columns, colTypes); err != nil {
 		return err
 	}
 
@@ -231,11 +276,11 @@ func (s *SQLiteSink) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.Dat
 	return nil
 }
 
-// ensureTable ensures the table exists with the given columns
-func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string) error {
+// ensureTable ensures the table exists with the given columns and types
+func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string, colTypes []string) error {
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
+		escapedCols[i] = fmt.Sprintf("[%s] %s", col, colTypes[i])
 	}
 
 	sqlStr := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)",
@@ -246,7 +291,7 @@ func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string) err
 	return err
 }
 
-// RunMigrations runs any pending migrations in the migrations folder
+// RunMigrations runs any pending migrations using sqle/migrate
 func (s *SQLiteSink) RunMigrations() error {
 	migrationsDir := s.pool.MigrationsPath()
 
@@ -255,153 +300,20 @@ func (s *SQLiteSink) RunMigrations() error {
 		return nil // No migrations directory, skip
 	}
 
-	// Read version directories (format: 1.0.0, 1.0.1, etc.)
-	versionEntries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+	// Create sqle.DB from the pool's write connection
+	sqleDB := sqle.Open(s.pool.Write())
+
+	migrator := migrate.New(sqleDB)
+	moduleName := "dbkrab-sink-" + s.skill.Name
+	if err := migrator.Discover(os.DirFS(migrationsDir), migrate.WithModule(moduleName)); err != nil {
+		return fmt.Errorf("load migrations: %w", err)
 	}
 
-	// Filter and sort version directories
-	var versionDirs []string
-	for _, entry := range versionEntries {
-		if !entry.IsDir() {
-			continue
-		}
-		versionDirs = append(versionDirs, entry.Name())
-	}
-
-	// Sort version directories
-	sort.Strings(versionDirs)
-
-	// Collect migration files from all version directories
-	var migrationFiles []string
-	for _, versionDir := range versionDirs {
-		versionPath := filepath.Join(migrationsDir, versionDir)
-		entries, err := os.ReadDir(versionPath)
-		if err != nil {
-			return fmt.Errorf("read version dir %s: %w", versionDir, err)
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			if strings.HasSuffix(name, ".sql") && isMigrationFile(name) {
-				migrationFiles = append(migrationFiles, filepath.Join(versionDir, name))
-			}
-		}
-	}
-
-	// Sort migration files
-	sortMigrations(migrationFiles)
-
-	// Run each migration
-	for _, file := range migrationFiles {
-		if err := s.runMigrationFile(filepath.Join(migrationsDir, file)); err != nil {
-			return fmt.Errorf("run migration %s: %w", file, err)
-		}
+	if err := migrator.Migrate(context.Background()); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
 	}
 
 	return nil
-}
-
-// isMigrationFile checks if filename matches migration pattern (e.g., 001_description.sql)
-func isMigrationFile(name string) bool {
-	matched, _ := regexp.MatchString(`^\d+_.*\.sql$`, name)
-	return matched
-}
-
-// sortMigrations sorts migration files by version number
-func sortMigrations(files []string) {
-	// Simple bubble sort for small number of files
-	for i := 0; i < len(files)-1; i++ {
-		for j := 0; j < len(files)-i-1; j++ {
-			v1 := extractVersion(files[j])
-			v2 := extractVersion(files[j+1])
-			if v1 > v2 {
-				files[j], files[j+1] = files[j+1], files[j]
-			}
-		}
-	}
-}
-
-// extractVersion extracts version number from migration filename
-func extractVersion(name string) int {
-	// Extract leading digits
-	re := regexp.MustCompile(`^(\d+)`)
-	matches := re.FindStringSubmatch(name)
-	if len(matches) > 1 {
-		v, _ := strconv.Atoi(matches[1])
-		return v
-	}
-	return 0
-}
-
-// runMigrationFile executes a single migration file
-func (s *SQLiteSink) runMigrationFile(path string) error {
-	// Read migration content
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read file %s: %w", path, err)
-	}
-
-	// Execute migration in a transaction
-	tx, err := s.pool.Write().Begin()
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Execute each statement in the migration
-	statements := splitStatements(string(content))
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
-			continue
-		}
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("execute statement: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	return nil
-}
-
-// splitStatements splits SQL content into individual statements
-func splitStatements(content string) []string {
-	// Simple statement splitter - handles basic cases
-	var statements []string
-	var current strings.Builder
-
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--") {
-			continue // Skip comments
-		}
-		current.WriteString(line)
-		current.WriteString("\n")
-
-		if strings.HasSuffix(trimmed, ";") {
-			statements = append(statements, current.String())
-			current.Reset()
-		}
-	}
-
-	// Add any remaining content
-	if current.Len() > 0 {
-		stmt := strings.TrimSpace(current.String())
-		if stmt != "" {
-			statements = append(statements, stmt)
-		}
-	}
-
-	return statements
 }
 
 // Close closes the sink

@@ -21,7 +21,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
-	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 	"github.com/cnlangzi/dbkrab/plugin"
 	_ "github.com/denisenkom/go-mssqldb"
 )
@@ -59,24 +58,24 @@ func main() {
 		cfg.MSSQL.Database,
 	)
 
-	db, err := sql.Open("sqlserver", connStr)
+	mssqlDB, err := sql.Open("sqlserver", connStr)
 	if err != nil {
 		slog.Error("failed to connect to MSSQL", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			slog.Warn("db.Close error", "error", err)
+		if err := mssqlDB.Close(); err != nil {
+			slog.Warn("mssqlDB.Close error", "error", err)
 		}
 	}()
 
 	// Configure connection pool (P0-5: prevent connection exhaustion and stale connections)
-	db.SetMaxOpenConns(10)                     // Max concurrent connections to MSSQL
-	db.SetMaxIdleConns(5)                      // Keep warm connections for fast response
-	db.SetConnMaxLifetime(30 * time.Minute)   // Recycle connections to prevent server-side timeouts
-	db.SetConnMaxIdleTime(5 * time.Minute)    // Close idle connections
+	mssqlDB.SetMaxOpenConns(10)                     // Max concurrent connections to MSSQL
+	mssqlDB.SetMaxIdleConns(5)                      // Keep warm connections for fast response
+	mssqlDB.SetConnMaxLifetime(30 * time.Minute)   // Recycle connections to prevent server-side timeouts
+	mssqlDB.SetConnMaxIdleTime(5 * time.Minute)    // Close idle connections
 
-	if err := db.Ping(); err != nil {
+	if err := mssqlDB.Ping(); err != nil {
 		slog.Error("failed to ping MSSQL", "error", err)
 		os.Exit(1)
 	}
@@ -91,27 +90,20 @@ func main() {
 		"pool_max_lifetime", "30m",
 		"pool_max_idle_time", "5m")
 
-	// Create offset store
-	offsetStore, err := offset.NewStoreFromConfig(cfg.CDC.Offset.Type, cfg.CDC.Offset.JSONPath, cfg.CDC.Offset.SQLitePath)
-	if err != nil {
-		slog.Error("failed to create offset store", "error", err)
-		os.Exit(1)
-	}
-	slog.Info("offset store initialized", "type", cfg.CDC.Offset.Type)
-
-	// Create store using pkg/sqlite and internal/store/sqlite
+	// Create unified app DB with migrations
 	ctx := context.Background()
-	var appDB *sqlite.DB
-	var store internal_store.Store
+
+	var appDB *internal_store.DB
+	var appStore internal_store.Store
 
 	switch cfg.App.Type {
 	case "sqlite":
-		appDB, err = sqlite.New(ctx, sqlite.Config{
-			File:       cfg.App.Path,
-			ModuleName: "dbkrab",
+		appDB, err = internal_store.New(ctx, internal_store.Config{
+			File:       cfg.App.DB,
+			ModuleName: "dbkrab-store",
 		})
 		if err != nil {
-			slog.Error("failed to create SQLite DB", "error", err)
+			slog.Error("failed to create store SQLite DB", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
@@ -120,34 +112,39 @@ func main() {
 			}
 		}()
 
-		store, err = storeSQLite.NewStore(appDB)
+		// Create store using the unified DB
+		appStore, err = storeSQLite.New(appDB)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
-			if err := store.Close(); err != nil {
-				slog.Warn("store.Close error", "error", err)
+			if err := appStore.Close(); err != nil {
+				slog.Warn("appStore.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite store initialized", "path", cfg.App.Path)
+		slog.Info("SQLite store initialized", "path", cfg.App.DB)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
 	}
 
-	// Create DLQ (use same SQLite path as store for simplicity)
-	dlqStore, err := dlq.New(cfg.App.Path)
+	// Create offset store using the unified DB
+	offsetStore := offset.NewUnifiedStore(appDB)
+	slog.Info("offset store initialized", "type", "sqlite")
+
+	// Create DLQ with its own separate DB
+	dlqStore, err := dlq.New(ctx, cfg.App.DLQ)
 	if err != nil {
 		slog.Error("failed to create DLQ", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := dlqStore.CloseAndDB(); err != nil {
-			slog.Warn("dlq.CloseAndDB error", "error", err)
+		if err := dlqStore.Close(); err != nil {
+			slog.Warn("dlqStore.Close error", "error", err)
 		}
 	}()
-	slog.Info("dead letter queue initialized")
+	slog.Info("dead letter queue initialized", "path", cfg.App.DLQ)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
@@ -176,7 +173,7 @@ func main() {
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, db, store, offsetStore, dlqStore)
+	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore)
 	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction) error {
 		return pluginManager.Handle(ctx, tx)
 	}))
@@ -214,7 +211,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := api.NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, store, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
+	apiServer := api.NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {
@@ -223,7 +220,7 @@ func main() {
 	}()
 
 	// Initialize SQL plugins
-	if err := pluginManager.Init(ctx, db, struct {
+	if err := pluginManager.Init(ctx, mssqlDB, struct {
 		Enabled       bool
 		Path          string
 		SinkConfigs map[string]any
