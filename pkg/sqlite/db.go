@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/cnlangzi/sqlite"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -56,9 +58,18 @@ func New(ctx context.Context, config Config) (*DB, error) {
 
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
-		if err := runMigrations(db.Writer.DB, config.MigrationPath); err != nil {
+		// Create sqle.DB from the underlying *sql.DB for migrations
+		sqleDB := sqle.Open(db.Writer.DB)
+
+		migrator := migrate.New(sqleDB)
+		if err := migrator.Discover(os.DirFS(config.MigrationPath), migrate.WithModule(config.ModuleName)); err != nil {
 			_ = db.Close()
-			return nil, err
+			return nil, fmt.Errorf("load migrations: %w", err)
+		}
+
+		if err := migrator.Migrate(context.Background()); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("run migrations: %w", err)
 		}
 	}
 
@@ -74,9 +85,18 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 
 	// Run migrations if provided
 	if migrations != nil {
-		if err := runMigrationsFS(db.Writer.DB, migrations); err != nil {
+		// Create sqle.DB from the underlying *sql.DB for migrations
+		sqleDB := sqle.Open(db.Writer.DB)
+
+		migrator := migrate.New(sqleDB)
+		if err := migrator.Discover(migrations, migrate.WithModule(moduleName)); err != nil {
 			_ = db.Close()
-			return nil, err
+			return nil, fmt.Errorf("load migrations: %w", err)
+		}
+
+		if err := migrator.Migrate(context.Background()); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("run migrations: %w", err)
 		}
 	}
 
