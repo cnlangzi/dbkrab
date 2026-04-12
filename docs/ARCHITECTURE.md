@@ -118,6 +118,23 @@ CDC data is injected as SQL parameters:
 | `@cdc_operation` | Operation type (1=DELETE, 2=INSERT, 4=UPDATE) |
 | `@{table}_{field}` | Data field value (e.g., `@orders_order_id`) |
 
+### Transactions Table (SQLite)
+
+The `transactions` table stores captured CDC changes:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Local autoincrement ID |
+| `transaction_id` | TEXT | MSSQL transaction ID (GUID) |
+| `table_name` | TEXT | Source table name |
+| `operation` | TEXT | Operation type (INSERT/DELETE/UPDATE_AFTER) |
+| `data` | TEXT | JSON-encoded row data |
+| `lsn` | TEXT | CDC LSN as hex string (e.g., `0x0000002D00000A760066`), nullable |
+| `changed_at` | TIMESTAMP | Transaction commit time from MSSQL |
+| `pulled_at` | TIMESTAMP | When the change was pulled |
+
+**LSN Semantics**: LSN (Log Sequence Number) is a transaction-level identifier from MSSQL CDC. Multiple row changes in the same transaction share the same LSN. Stored as a `0x`-prefixed hex string for readability and deterministic sorting.
+
 ### Sinks
 
 | | Sinks |
