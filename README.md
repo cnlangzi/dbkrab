@@ -100,7 +100,7 @@ plugins:
 app:
   listen: 3000
   type: sqlite
-  path: ./data/system/dbkrab.db
+  path: ./data/app/dbkrab.db  # Unified: transactions, poller_state, offsets, dlq_entries
 ```
 
 ## Dashboard
