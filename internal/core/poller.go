@@ -374,17 +374,18 @@ func (p *Poller) poll(ctx context.Context) error {
 		// so we need to skip records where LSN == startLSN (the last processed LSN).
 		//
 		// Filtering logic:
-		//   - stored.LSN != ""  means startLSN came from offset store (subsequent poll)
+		//   - stored.LSN != "" AND len(changes) > 1 means startLSN came from offset store (subsequent poll)
 		//     → Filter records where LSN == startLSN to avoid duplicates
-		//   - stored.LSN == ""  means startLSN came from GetMinLSN (fresh start / CDC restart)
-		//     → No filtering needed, include all records including the first one
+		//   - stored.LSN == "" OR len(changes) == 1 means fresh start or CDC has only 1 record
+		//     → No filtering needed, include all records
 		//
 		// This fixes issue #132: CDC first query skips records due to incrementLSN logic.
 		filteredChanges := make([]cdc.Change, 0, len(cdcChanges))
 		for _, c := range cdcChanges {
 			// Skip duplicate records when startLSN came from offset store (stored.LSN != "")
-			// When starting fresh (stored.LSN == ""), all records are included.
-			if stored.LSN != "" && LSN(c.LSN).Compare(startLSN) == 0 {
+			// AND there are multiple records (len > 1) to avoid re-processing the first one.
+			// When starting fresh (stored.LSN == "") OR only 1 record exists, don't filter.
+			if stored.LSN != "" && len(cdcChanges) > 1 && LSN(c.LSN).Compare(startLSN) == 0 {
 				slog.Debug("skipping duplicate record with LSN == startLSN",
 					"table", table,
 					"lsn", fmt.Sprintf("%x", c.LSN))
