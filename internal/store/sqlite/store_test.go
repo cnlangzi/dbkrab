@@ -61,14 +61,14 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 	return db, tmpDir
 }
 
-func TestNewStore(t *testing.T) {
+func TestNew(t *testing.T) {
 	db, tmpDir := newTestDB(t)
 	defer func() {
 		_ = db.Close()
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	assert.NotNil(t, store)
 
@@ -83,7 +83,7 @@ func TestStore_Write(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -113,7 +113,7 @@ func TestStore_WriteOps(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -144,7 +144,7 @@ func TestStore_GetChanges(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -177,7 +177,7 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -224,7 +224,7 @@ func TestStore_UpdatePollerState(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -248,7 +248,7 @@ func TestStore_GetPollerState(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -278,7 +278,7 @@ func TestStore_WriteOps_Update(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -328,7 +328,7 @@ func TestStore_WriteOps_Delete(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 

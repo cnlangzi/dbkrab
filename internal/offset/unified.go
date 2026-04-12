@@ -77,7 +77,7 @@ func (s *UnifiedStore) GetAll() (map[string]Offset, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]Offset)
 	for rows.Next() {

@@ -97,7 +97,17 @@ func runMigrations(db *sqlite.DB) error {
 		return fmt.Errorf("discover migrations: %w", err)
 	}
 
+	if err := migrator.Init(context.Background()); err != nil {
+		return fmt.Errorf("init migrations: %w", err)
+	}
+
 	return migrator.Migrate(context.Background())
+}
+
+// Flush ensures all buffered writes are committed to the database.
+// Call this after Write when immediate read consistency is needed (e.g., in tests).
+func (d *DLQ) Flush() error {
+	return d.db.Flush()
 }
 
 // Write writes a new entry to the dead letter queue

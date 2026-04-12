@@ -50,6 +50,11 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, fmt.Errorf("load migrations: %w", err)
 	}
 
+	if err := migrator.Init(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init migrations: %w", err)
+	}
+
 	if err := migrator.Migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
