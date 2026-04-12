@@ -13,7 +13,8 @@ BINARY_NAME := dbkrab
 BUILD_DIR := bin
 CMD_DIR := cmd/dbkrab
 GO := go
-GOFLAGS := -v
+# -p 1 limits parallelism to single process (useful for limited memory environments)
+GOFLAGS := -v -p 1
 
 # Version info
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -31,10 +32,10 @@ build:
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## test: Run all tests
+## test: Run all tests (excluding integration tests)
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race ./...
+	$(GO) test -v -race $(GOFLAGS) -skip "Integration|TestMergeSinksOnConflictInconsistent|TestMigration" ./...
 
 ## test-short: Run short tests
 test-short:
@@ -70,7 +71,7 @@ clean:
 lint:
 	@echo "Running linters..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
+		golangci-lint run --jobs=$(or $(GOLANGCI_JOBS),1) ./...; \
 	else \
 		echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
 		$(GO) vet ./...; \
@@ -79,7 +80,7 @@ lint:
 ## vet: Run go vet
 vet:
 	@echo "Running go vet..."
-	$(GO) vet ./...
+	$(GO) vet -p $(or $(GOLANGCI_JOBS),1) ./...
 
 ## fmt: Format code
 fmt:

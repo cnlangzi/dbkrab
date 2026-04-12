@@ -51,6 +51,11 @@ func TestNewFile(t *testing.T) {
 		t.Fatalf("Create table failed: %v", err)
 	}
 
+	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
+	if err := db.Flush(); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
 	// Test read after write
 	rows, err := db.Reader.Query("SELECT name FROM sqlite_master WHERE type='table'")
 	if err != nil {
@@ -150,8 +155,9 @@ func TestQueryRowContext(t *testing.T) {
 // TestMigration tests that migrations are executed on startup
 func TestMigration(t *testing.T) {
 	// Create a simple in-memory fs with migration file
+	// Note: sqle/migrate expects migration files in versioned subdirectories
 	migrations := fstest.MapFS{
-		"001_create_test.sql": &fstest.MapFile{
+		"1.0.0/001_create_test.sql": &fstest.MapFile{
 			Data: []byte(`
 CREATE TABLE IF NOT EXISTS migration_test (
     id INTEGER PRIMARY KEY,
