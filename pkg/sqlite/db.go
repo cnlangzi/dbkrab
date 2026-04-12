@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/cnlangzi/sqlite"
@@ -124,55 +123,6 @@ func NewFile(ctx context.Context, file string, moduleName string, migrationPath 
 		ModuleName:    moduleName,
 		MigrationPath: migrationPath,
 	})
-}
-
-// runMigrations runs SQL migration files from a directory path.
-func runMigrations(db *sql.DB, migrationPath string) error {
-	entries, err := os.ReadDir(migrationPath)
-	if err != nil {
-		return fmt.Errorf("read migration directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-
-		filePath := filepath.Join(migrationPath, entry.Name())
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
-		}
-
-		if _, err := db.Exec(string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
-}
-
-// runMigrationsFS runs SQL migration files from an embedded FS.
-func runMigrationsFS(db *sql.DB, migrations fs.FS) error {
-	entries, err := fs.ReadDir(migrations, ".")
-	if err != nil {
-		return fmt.Errorf("read migration directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-
-		content, err := fs.ReadFile(migrations, entry.Name())
-		if err != nil {
-			return fmt.Errorf("read migration file %s: %w", entry.Name(), err)
-		}
-
-		if _, err := db.Exec(string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
 }
 
 func buildDSN(file string, inmemory bool) string {
