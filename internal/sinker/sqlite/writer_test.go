@@ -220,7 +220,6 @@ func TestSinker_InMemory(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-
 func TestSinker_DatabaseName(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Pool manages SQLite connections for a business sink database.
