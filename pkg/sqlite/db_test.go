@@ -155,9 +155,8 @@ func TestQueryRowContext(t *testing.T) {
 // TestMigration tests that migrations are executed on startup
 func TestMigration(t *testing.T) {
 	// Create a simple in-memory fs with migration file
-	// Migration files must be in versioned subdirectories
+	// Note: sqle/migrate expects migration files in versioned subdirectories
 	migrations := fstest.MapFS{
-		"1.0.0":             &fstest.MapDir{},
 		"1.0.0/001_create_test.sql": &fstest.MapFile{
 			Data: []byte(`
 CREATE TABLE IF NOT EXISTS migration_test (
