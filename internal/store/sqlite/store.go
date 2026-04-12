@@ -13,78 +13,18 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/internal/store"
-	"github.com/cnlangzi/dbkrab/pkg/sqlite"
 )
 
 // Store implements store.Store for SQLite
 type Store struct {
-	db *sqlite.DB
+	db *store.DB
 }
 
-// NewStore creates a new SQLite store with WAL mode and optimized settings.
-// Creates tables directly if they don't exist.
-func NewStore(db *sqlite.DB) (*Store, error) {
+// NewStore creates a new SQLite store.
+// The DB should be created via internal/store.New() which runs migrations first.
+func NewStore(db *store.DB) (*Store, error) {
 	s := &Store{db: db}
-
-	// Create tables directly since migrations may not have run
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS transactions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			transaction_id TEXT NOT NULL,
-			table_name TEXT NOT NULL,
-			operation TEXT NOT NULL,
-			data TEXT,
-			lsn TEXT,
-			changed_at TIMESTAMP,
-			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("create transactions table: %w", err)
-	}
-
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS poller_state (
-			id INTEGER PRIMARY KEY,
-			last_poll_time TIMESTAMP,
-			last_lsn TEXT,
-			total_changes INTEGER DEFAULT 0,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("create poller_state table: %w", err)
-	}
-
-	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
-	if err := db.Flush(); err != nil {
-		return nil, fmt.Errorf("commit DDL: %w", err)
-	}
-
-	// Add lsn column if it doesn't exist (for existing databases created before this migration)
-	_, _ = db.Exec(`ALTER TABLE transactions ADD COLUMN lsn TEXT`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn)`)
-
-	// Initialize poller state (INSERT OR IGNORE is idempotent)
-	if err := s.initPollerState(); err != nil {
-		return nil, fmt.Errorf("init poller state: %w", err)
-	}
-
-	// Force commit init changes immediately
-	if err := db.Flush(); err != nil {
-		return nil, fmt.Errorf("commit init: %w", err)
-	}
-
 	return s, nil
-}
-
-// initPollerState initializes the poller state row
-func (s *Store) initPollerState() error {
-	_, err := s.db.Exec(`
-		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
-		VALUES (1, NULL, NULL, 0)
-	`)
-	return err
 }
 
 // UpdatePollerState updates the poller state after successful poll

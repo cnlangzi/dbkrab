@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cnlangzi/sqlite"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -111,6 +113,17 @@ func NewWithDB(db *sql.DB) (*DLQ, error) {
 
 	return &DLQ{
 		db: db,
+	}, nil
+}
+
+// NewWithStoreDB creates a new DLQ manager using the unified store database.
+// The DLQ uses the dlq_entries table which is managed by sqle/migrate migrations.
+// The storeDB's lifecycle (including closing) is managed externally.
+func NewWithStoreDB(storeDB *sqlite.DB) (*DLQ, error) {
+	return &DLQ{
+		db:     storeDB.Writer.DB, // Use the store's underlying sql.DB connection
+		mu:     sync.RWMutex{},
+		closed: false,
 	}, nil
 }
 

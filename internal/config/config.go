@@ -85,12 +85,13 @@ type GracefulDegradationConfig struct {
 	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
-// AppConfig contains the app-level database storage configuration (CDC transactions, DLQ, poller state)
+// AppConfig contains the app-level database storage configuration (CDC transactions, DLQ, poller state, offsets)
 type AppConfig struct {
-	Listen      int    `yaml:"listen"`
-	Host        string `yaml:"host"`
-	Type string `yaml:"type"`
-	Path string `yaml:"path"`
+	Listen         int    `yaml:"listen"`
+	Host           string `yaml:"host"`
+	Type           string `yaml:"type"`
+	Path           string `yaml:"path"`
+	MigrationPath  string `yaml:"migration_path"` // Path to sqle/migrate migration files
 }
 
 // SinksConfig is a slice of DatabaseConfig for business sinks.
@@ -175,7 +176,10 @@ func Load(path string) (*Config, error) {
 		cfg.App.Type = "sqlite"
 	}
 	if cfg.App.Path == "" {
-		cfg.App.Path = "./data/system/dbkrab.db"
+		cfg.App.Path = "./data/app/dbkrab.db"
+	}
+	if cfg.App.MigrationPath == "" {
+		cfg.App.MigrationPath = "./internal/store/migrations"
 	}
 	if cfg.App.Listen == 0 {
 		cfg.App.Listen = 9020

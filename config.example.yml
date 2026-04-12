@@ -34,11 +34,13 @@ cdc:
   # Polling interval: CDC log poll frequency, default 500ms
   interval: 500ms
 
-  # Offset storage: tracks consumption position per table
-  offset:
-    type: json             # Storage type: json | sqlite
-    json_path: ./data/offset.json   # JSON file path
-    sqlite_path: ./data/offset.db   # SQLite file path
+  # NOTE: Offset storage is now unified with app storage.
+  # Offsets are stored in the unified DB (./data/app/dbkrab.db) in the 'offsets' table.
+  # The 'offset' section below is DEPRECATED and ignored.
+  # offset:
+  #   type: json             # Storage type: json | sqlite (DEPRECATED)
+  #   json_path: ./data/offset.json   # JSON file path (DEPRECATED)
+  #   sqlite_path: ./data/offset.db   # SQLite file path (DEPRECATED)
 
   # Gap protection: prevents data loss from CDC cleanup
   gap:
@@ -68,13 +70,14 @@ cdc:
 # -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
-# App Storage (CDC transactions, DLQ, poller state)
+# App Storage (CDC transactions, DLQ, poller state, offsets - unified)
 # -----------------------------------------------------------------------------
 app:
   listen: 9020        # HTTP API listen port
   host: localhost      # HTTP API bind address
   type: sqlite
-  path: ./data/system/dbkrab.db
+  path: ./data/app/dbkrab.db    # Unified SQLite DB path (transactions, poller_state, offsets, dlq_entries)
+  migration_path: ./internal/store/migrations  # Path to sqle/migrate migration files
 
 # -----------------------------------------------------------------------------
 # Business Sinks (data output targets)
