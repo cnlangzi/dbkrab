@@ -63,6 +63,30 @@ func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	return lsn, err
 }
 
+// supportsNetChanges checks if a capture instance was created with supports_net_changes = 1.
+// Returns true if net_changes is supported (fn_cdc_get_net_changes_* can be used),
+// false otherwise. This is determined by checking the cdc.change_tables catalog view.
+func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string) (bool, error) {
+	if !validCaptureInstance.MatchString(captureInstance) {
+		return false, fmt.Errorf("invalid capture instance name: %s", captureInstance)
+	}
+
+	// Check cdc.change_tables for supports_net_changes column
+	// 1 = net_changes enabled, 0 = only all_changes available
+	var supportsNetChanges int
+	query := `SELECT ISNULL(supports_net_changes, 0) FROM cdc.change_tables WHERE capture_instance = @p1`
+	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&supportsNetChanges)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Capture instance not found - might not have CDC enabled
+			return false, nil
+		}
+		return false, fmt.Errorf("check net_changes support: %w", err)
+	}
+
+	return supportsNetChanges == 1, nil
+}
+
 // incrementLSN returns the next LSN value after the given LSN
 // This is essential for CDC queries to avoid fetching the same LSN repeatedly.
 // MSSQL CDC function cdc.fn_cdc_get_all_changes_* returns __$start_lsn >= @from_lsn,
@@ -84,14 +108,37 @@ func (q *Querier) incrementLSN(ctx context.Context, lsn []byte) ([]byte, error) 
 // __$start_lsn >= @from_lsn. To avoid fetching the same LSN repeatedly,
 // we use sys.fn_cdc_increment_lsn() to increment the from_lsn before querying.
 // This ensures we only fetch NEW changes after the last processed LSN.
+//
+// When supports_net_changes is enabled for the capture instance, we use
+// fn_cdc_get_net_changes_* which returns only the final row state, eliminating
+// UPDATE_BEFORE rows and preventing "unknown operation type: UPDATE_BEFORE" errors.
 func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN, toLSN []byte) ([]Change, error) {
 	// Validate capture instance to prevent SQL injection
 	if !validCaptureInstance.MatchString(captureInstance) {
 		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
 	}
 
-	// Build the CDC function name
-	fnName := fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
+	// Check if net_changes is enabled for this capture instance
+	useNetChanges, err := q.supportsNetChanges(ctx, captureInstance)
+	if err != nil {
+		slog.Warn("failed to check net_changes support, falling back to all_changes",
+			"captureInstance", captureInstance, "error", err)
+		useNetChanges = false
+	}
+
+	// Build the CDC function name based on net_changes support
+	var fnName string
+	var rowFilterOption string
+	if useNetChanges {
+		fnName = fmt.Sprintf("cdc.fn_cdc_get_net_changes_%s", captureInstance)
+		// net_changes functions only support 'all' row filter option
+		rowFilterOption = "all"
+		slog.Debug("using net_changes CDC function", "fnName", fnName)
+	} else {
+		fnName = fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
+		rowFilterOption = "all"
+		slog.Debug("using all_changes CDC function", "fnName", fnName)
+	}
 
 	// Get max LSN if toLSN is not provided
 	if len(toLSN) == 0 {
@@ -121,9 +168,9 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 	// Also convert LSN to transaction time
 	query := fmt.Sprintf(`
 		SELECT *, sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS __$commit_time
-		FROM %s(@from_lsn, @to_lsn, N'all')
+		FROM %s(@from_lsn, @to_lsn, N'%s')
 		ORDER BY __$start_lsn
-	`, fnName)
+	`, fnName, rowFilterOption)
 
 	rows, err := q.db.QueryContext(ctx, query,
 		sql.Named("from_lsn", incrementedFromLSN),

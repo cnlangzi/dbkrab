@@ -698,10 +698,24 @@ func min(a, b time.Duration) time.Duration {
 }
 
 // groupByTransaction groups changes by transaction ID
+// It also defensively filters out OpUpdateBefore changes which should not reach
+// the sink writer or internal store. UPDATE_BEFORE rows are silently dropped
+// to prevent "unknown operation type: UPDATE_BEFORE" errors.
 func (p *Poller) groupByTransaction(changes []Change) []Transaction {
 	txMap := make(map[string]*Transaction)
 
 	for _, c := range changes {
+		// Defensively filter out UPDATE_BEFORE changes - they should not be
+		// captured when using net_changes mode, but we filter as a safeguard
+		// to prevent DLQ errors from reaching the sink writer.
+		if c.Operation == OpUpdateBefore {
+			slog.Debug("groupByTransaction: silently dropping UPDATE_BEFORE change",
+				"table", c.Table,
+				"tx_id", c.TransactionID,
+				"lsn", fmt.Sprintf("%x", c.LSN))
+			continue
+		}
+
 		tx, exists := txMap[c.TransactionID]
 		if !exists {
 			tx = NewTransaction(c.TransactionID)
