@@ -83,14 +83,6 @@ func New(dbPath string) (*DLQ, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			slog.Warn("db.Close error", "error", closeErr)
-		}
-		return nil, fmt.Errorf("enable WAL mode: %w", err)
-	}
-
 	// Create table
 	if _, err := db.Exec(Schema); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
