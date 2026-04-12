@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     table_name TEXT NOT NULL,
     operation TEXT NOT NULL,
     data TEXT,
+    lsn TEXT,
     changed_at TIMESTAMP,
     pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name);
 CREATE INDEX IF NOT EXISTS idx_changed_at ON transactions(changed_at);
+CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn);
 
 -- =============================================================================
 -- poller_state: tracks polling progress and metrics
@@ -35,7 +37,7 @@ INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
 VALUES (1, NULL, NULL, 0);
 
 -- =============================================================================
--- offsets: stores LSN offsets per table (merged from internal/offset/sqlite.go)
+-- offsets: stores LSN offsets per table
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS offsets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +49,7 @@ CREATE TABLE IF NOT EXISTS offsets (
 CREATE INDEX IF NOT EXISTS idx_offsets_table_name ON offsets(table_name);
 
 -- =============================================================================
--- dlq_entries: dead letter queue for failed transactions (merged from internal/dlq)
+-- dlq_entries: dead letter queue for failed transactions
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS dlq_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

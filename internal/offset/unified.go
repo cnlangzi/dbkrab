@@ -8,11 +8,11 @@ import (
 	"github.com/cnlangzi/sqlite"
 )
 
-// UnifiedStore manages LSN offsets using the unified SQLite database
+// UnifiedStore manages LSN offsets using the unified SQLite database.
+// Reads and writes are immediate (no buffering), so Load/Save are no-ops.
 type UnifiedStore struct {
-	db    *sqlite.DB
-	mu    sync.RWMutex
-	dirty bool
+	db *sqlite.DB
+	mu sync.RWMutex
 }
 
 // NewUnifiedStore creates a new unified offset store that uses the shared DB
@@ -22,15 +22,11 @@ func NewUnifiedStore(db *sqlite.DB) *UnifiedStore {
 	}
 }
 
-// Load reads offsets from the unified DB (no-op: data is already in DB)
-func (s *UnifiedStore) Load() error {
-	return nil // Data is already in the DB, no loading needed
-}
+// Load is a no-op: data is already in the DB.
+func (s *UnifiedStore) Load() error { return nil }
 
-// Save persists offsets to the unified DB (no-op: writes are immediate)
-func (s *UnifiedStore) Save() error {
-	return nil // Writes are immediate to the DB
-}
+// Save is a no-op: writes are immediate.
+func (s *UnifiedStore) Save() error { return nil }
 
 // Get returns the LSN for a table
 func (s *UnifiedStore) Get(table string) (Offset, error) {

@@ -47,17 +47,13 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		config.File = ":memory:"
 	}
 
-	inmemory := strings.HasPrefix(config.File, ":memory:")
-	dsn := buildDSN(config.File, inmemory)
-
-	db, err := sqlite.Open(ctx, dsn)
+	db, err := sqlite.Open(ctx, config.File)
 	if err != nil {
 		return nil, err
 	}
 
 	// Run migrations if MigrationPath is provided
 	if config.MigrationPath != "" {
-		// Create sqle.DB from the underlying *sql.DB for migrations
 		sqleDB := sqle.Open(db.Writer.DB)
 
 		migrator := migrate.New(sqleDB)
@@ -84,7 +80,6 @@ func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB,
 
 	// Run migrations if provided
 	if migrations != nil {
-		// Create sqle.DB from the underlying *sql.DB for migrations
 		sqleDB := sqle.Open(db.Writer.DB)
 
 		migrator := migrate.New(sqleDB)
@@ -123,13 +118,6 @@ func NewFile(ctx context.Context, file string, moduleName string, migrationPath 
 		ModuleName:    moduleName,
 		MigrationPath: migrationPath,
 	})
-}
-
-func buildDSN(file string, inmemory bool) string {
-	if inmemory {
-		return ":memory:"
-	}
-	return file
 }
 
 // Execer is an interface for executing queries
