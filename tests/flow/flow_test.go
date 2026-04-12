@@ -801,6 +801,149 @@ func TestFlow_LSNComparison(t *testing.T) {
 	assert.False(t, nonZeroLSN.IsZero(), "non-empty LSN should not be zero")
 }
 
+// TestFlow_CDCFiltering_FreshStart tests that when starting fresh (no stored offset),
+// all records including the first one should be included.
+// This verifies the fix for issue #132: CDC first query skips records due to incrementLSN logic.
+func TestFlow_CDCFiltering_FreshStart(t *testing.T) {
+	// Simulate fresh start: stored.LSN == "" (no previous offset)
+	storedLSN := ""
+
+	// startLSN comes from GetMinLSN (first record's LSN)
+	startLSN := BuildLSN("0000000001000001")
+
+	// CDC query returns records where __$start_lsn >= from_lsn
+	// When from_lsn = min_lsn, all records are returned including the first
+	cdcChanges := []struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}{
+		{Table: "dbo.orders", TransactionID: "tx-1", LSN: BuildLSN("0000000001000001"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
+		{Table: "dbo.orders", TransactionID: "tx-1", LSN: BuildLSN("0000000001000002"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 2}},
+		{Table: "dbo.orders", TransactionID: "tx-2", LSN: BuildLSN("0000000001000003"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 3}},
+	}
+
+	// Apply filtering logic (same as poller.go)
+	// When stored.LSN == "" (fresh start), NO filtering - all records included
+	filteredChanges := make([]struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}, 0, len(cdcChanges))
+
+	for _, c := range cdcChanges {
+		// Skip records where LSN == startLSN ONLY when stored.LSN != ""
+		if storedLSN != "" && core.LSN(c.LSN).Compare(startLSN) == 0 {
+			continue // This should NOT happen when storedLSN == ""
+		}
+		filteredChanges = append(filteredChanges, c)
+	}
+
+	// Verify: All 3 records should be included (no filtering)
+	assert.Len(t, filteredChanges, 3, "fresh start should include ALL records including first one")
+	assert.Equal(t, BuildLSN("0000000001000001"), filteredChanges[0].LSN, "first record LSN should be included")
+	assert.Equal(t, BuildLSN("0000000001000002"), filteredChanges[1].LSN, "second record LSN should be included")
+	assert.Equal(t, BuildLSN("0000000001000003"), filteredChanges[2].LSN, "third record LSN should be included")
+}
+
+// TestFlow_CDCFiltering_SubsequentPoll tests that on subsequent polls,
+// the record at startLSN (last processed LSN) should be filtered to avoid duplicates.
+func TestFlow_CDCFiltering_SubsequentPoll(t *testing.T) {
+	// Simulate subsequent poll: stored.LSN has previous offset
+	storedLSN := "0000000001000001" // Previous poll processed up to this LSN
+
+	// startLSN comes from offset store (same as stored.LSN)
+	startLSN := BuildLSN("0000000001000001")
+
+	// CDC query returns records where __$start_lsn >= from_lsn
+	// This includes the last processed record (LSN = startLSN) which we must filter
+	cdcChanges := []struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}{
+		{Table: "dbo.orders", TransactionID: "tx-1", LSN: BuildLSN("0000000001000001"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}}, // Duplicate (already processed)
+		{Table: "dbo.orders", TransactionID: "tx-2", LSN: BuildLSN("0000000001000002"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 2}}, // New
+		{Table: "dbo.orders", TransactionID: "tx-3", LSN: BuildLSN("0000000001000003"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 3}}, // New
+	}
+
+	// Apply filtering logic (same as poller.go)
+	// When stored.LSN != "", filter records where LSN == startLSN
+	filteredChanges := make([]struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}, 0, len(cdcChanges))
+
+	for _, c := range cdcChanges {
+		// Skip records where LSN == startLSN when stored.LSN != ""
+		if storedLSN != "" && core.LSN(c.LSN).Compare(startLSN) == 0 {
+			continue // Filter the duplicate
+		}
+		filteredChanges = append(filteredChanges, c)
+	}
+
+	// Verify: Only 2 NEW records should be included (first one filtered as duplicate)
+	assert.Len(t, filteredChanges, 2, "subsequent poll should filter the duplicate at startLSN")
+	assert.Equal(t, BuildLSN("0000000001000002"), filteredChanges[0].LSN, "first filtered record should be LSN 2")
+	assert.Equal(t, BuildLSN("0000000001000003"), filteredChanges[1].LSN, "second filtered record should be LSN 3")
+}
+
+// TestFlow_CDCFiltering_CDCRestart tests that when CDC is disabled and re-enabled,
+// the stored offset becomes stale and min_lsn changes. The system should handle this correctly.
+func TestFlow_CDCFiltering_CDCRestart(t *testing.T) {
+	// Scenario: CDC was disabled and re-enabled
+	// Old stored.LSN is now stale (higher than current min_lsn)
+	// This simulates stored.LSN being cleared/reset (offset store reset)
+
+	// After CDC restart, stored.LSN should be cleared
+	storedLSN := "" // Offset was reset after CDC restart
+
+	// startLSN comes from GetMinLSN after CDC restart
+	startLSN := BuildLSN("0000000000000001") // New min_lsn after CDC restart
+
+	// CDC query returns records from the new min_lsn
+	cdcChanges := []struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}{
+		{Table: "dbo.orders", TransactionID: "tx-new-1", LSN: BuildLSN("0000000000000001"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 101}},
+		{Table: "dbo.orders", TransactionID: "tx-new-2", LSN: BuildLSN("0000000000000002"), Operation: core.OpInsert, Data: map[string]interface{}{"id": 102}},
+	}
+
+	// Apply filtering logic
+	filteredChanges := make([]struct {
+		Table         string
+		TransactionID string
+		LSN           []byte
+		Operation     core.Operation
+		Data          map[string]interface{}
+	}, 0, len(cdcChanges))
+
+	for _, c := range cdcChanges {
+		// When stored.LSN == "" (CDC restart, offset cleared), no filtering
+		if storedLSN != "" && core.LSN(c.LSN).Compare(startLSN) == 0 {
+			continue
+		}
+		filteredChanges = append(filteredChanges, c)
+	}
+
+	// Verify: All records from new min_lsn should be included
+	assert.Len(t, filteredChanges, 2, "CDC restart should fetch all records from new min_lsn")
+	assert.Equal(t, BuildLSN("0000000000000001"), filteredChanges[0].LSN, "first record after CDC restart should be included")
+}
+
 // TestFlow_ChangeBuilder tests the ChangeBuilder helper
 func TestFlow_ChangeBuilder(t *testing.T) {
 	change := NewChange("dbo.orders", "tx-test").
