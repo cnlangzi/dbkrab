@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS users (
 	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err)
 }
+}
 
 // TestSinker_OnConflict_Overwrite verifies that INSERT OR REPLACE is used
 // when OnConflict is "overwrite", replacing existing rows instead of failing.
@@ -148,7 +149,6 @@ CREATE TABLE IF NOT EXISTS users (
 
 	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
 	require.NoError(t, err)
-	defer func() { _ = sinker.Close() }()
 
 	// Insert first row
 	ops := []core.Sink{
@@ -185,6 +185,18 @@ CREATE TABLE IF NOT EXISTS users (
 	}
 	err = sinker.Write(context.Background(), ops)
 	assert.NoError(t, err, "OnConflict overwrite should replace existing row")
+<<<<<<< HEAD
+=======
+
+	// Close sinker to flush data to file before querying
+	_ = sinker.Close()
+
+	// Verify: should still have 1 row with updated name
+	count := queryInt(tmpFile, "SELECT COUNT(*) FROM users")
+	assert.Equal(t, 1, count, "should still have 1 row")
+	name := queryRow(tmpFile, "SELECT name FROM users WHERE id=1")
+	assert.Equal(t, "alice-replaced", name, "name should be replaced")
+>>>>>>> 2267485 (test: close sinker before querying to flush data to file)
 }
 
 // TestSinker_UpdateOnlyAffectsTargetRow verifies that UPDATE only modifies
@@ -240,8 +252,21 @@ CREATE TABLE IF NOT EXISTS users (
 	assert.NoError(t, err)
 
 	// Verify: all 3 rows should still exist, only id=2 changed
+<<<<<<< HEAD
 	// Note: This test assumes the database can be queried directly
 	// In a real test, we would query the database to verify
+=======
+	// Close sinker to flush data to file before querying
+	_ = sinker.Close()
+	count := queryInt(tmpFile, "SELECT COUNT(*) FROM users")
+	assert.Equal(t, 3, count, "should have 3 rows")
+	id1status := queryRow(tmpFile, "SELECT status FROM users WHERE id=1")
+	id2status := queryRow(tmpFile, "SELECT status FROM users WHERE id=2")
+	id3status := queryRow(tmpFile, "SELECT status FROM users WHERE id=3")
+	assert.Equal(t, "active", id1status, "id=1 status should be unchanged")
+	assert.Equal(t, "active", id2status, "id=2 status should be updated to 'active'")
+	assert.Equal(t, "active", id3status, "id=3 status should be unchanged")
+>>>>>>> 2267485 (test: close sinker before querying to flush data to file)
 }
 
 func TestSinker_Write_Delete(t *testing.T) {
