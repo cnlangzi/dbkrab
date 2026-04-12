@@ -141,11 +141,24 @@ stop:
 ## restart: Restart dbkrab
 restart: stop deploy
 
-## install: Install binary to /usr/local/bin
-install: build
-	@echo "Installing to /usr/local/bin..."
-	sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/
-	@echo "Installed: /usr/local/bin/$(BINARY_NAME)"
+## reset: Reset CDC state (delete offset/cdc.db) and restart dbkrab
+reset:
+	@echo "Resetting CDC state..."
+	@echo "Stopping dbkrab..."
+	@pkill -f "dbkrab -config" 2>/dev/null || true
+	@sleep 2
+	@echo "Deleting offset.db and cdc.db..."
+	@rm -f /opt/dbkrab/data/app/offset.db /opt/dbkrab/data/app/offset.db-wal /opt/dbkrab/data/app/offset.db-shm
+	@rm -f /opt/dbkrab/data/app/cdc.db /opt/dbkrab/data/app/cdc.db-wal /opt/dbkrab/data/app/cdc.db-shm
+	@echo "✅ CDC state reset"
+	@echo "Starting dbkrab..."
+	@cd /opt/dbkrab && nohup ./dbkrab --config config.yaml > logs/dbkrab.log 2>&1 &
+	@sleep 3
+	@if pgrep -f "dbkrab -config" >/dev/null; then \
+		echo "✅ dbkrab restarted"; \
+	else \
+		echo "❌ dbkrab failed to start"; \
+	fi
 
 ## uninstall: Remove binary from /usr/local/bin
 uninstall:
