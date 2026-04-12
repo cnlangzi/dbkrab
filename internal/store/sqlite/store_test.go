@@ -2,26 +2,73 @@ package sqlite
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/pkg/sqlite"
+	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestDB(t *testing.T) *sqlite.DB {
-	// Use temp file for testing to avoid in-memory SQLite transaction isolation issues
-	db, err := sqlite.NewFile(context.Background(), t.TempDir()+"/test.db", "test", "")
+func newTestDB(t *testing.T) (*store.DB, string) {
+	// Create temp dir for test DB
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// For testing, we use a fake/no-op migration path since we create tables inline
+	// The actual migration logic is tested in integration tests
+	db, err := store.NewFile(context.Background(), dbPath, "dbkrab-store")
 	require.NoError(t, err)
-	return db
+
+	// Create the required tables inline for testing (migrations are tested separately)
+	_, err = db.Writer.Exec(`
+		CREATE TABLE IF NOT EXISTS transactions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			transaction_id TEXT NOT NULL,
+			table_name TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			data TEXT,
+			lsn TEXT,
+			changed_at TIMESTAMP,
+			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	require.NoError(t, err)
+
+	_, err = db.Writer.Exec(`
+		CREATE TABLE IF NOT EXISTS poller_state (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			last_poll_time TIMESTAMP,
+			last_lsn TEXT,
+			total_changes INTEGER DEFAULT 0,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	require.NoError(t, err)
+
+	// Initialize poller state row
+	_, err = db.Writer.Exec(`
+		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
+		VALUES (1, NULL, NULL, 0)
+	`)
+	require.NoError(t, err)
+
+	err = db.Flush()
+	require.NoError(t, err)
+
+	return db, tmpDir
 }
 
-func TestNewStore(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+func TestNew(t *testing.T) {
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	assert.NotNil(t, store)
 
@@ -30,9 +77,13 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestStore_Write(t *testing.T) {
-	db := newTestDB(t)
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -56,10 +107,13 @@ func TestStore_Write(t *testing.T) {
 }
 
 func TestStore_WriteOps(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -84,10 +138,13 @@ func TestStore_WriteOps(t *testing.T) {
 }
 
 func TestStore_GetChanges(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -114,10 +171,13 @@ func TestStore_GetChanges(t *testing.T) {
 }
 
 func TestStore_GetChangesWithFilter(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -158,10 +218,13 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 }
 
 func TestStore_UpdatePollerState(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -179,10 +242,13 @@ func TestStore_UpdatePollerState(t *testing.T) {
 }
 
 func TestStore_GetPollerState(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -206,10 +272,13 @@ func TestStore_GetPollerState(t *testing.T) {
 }
 
 func TestStore_WriteOps_Update(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
@@ -253,10 +322,13 @@ func TestStore_WriteOps_Update(t *testing.T) {
 }
 
 func TestStore_WriteOps_Delete(t *testing.T) {
-	db := newTestDB(t)
-	defer func() { _ = db.Close() }()
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
 
-	store, err := NewStore(db)
+	store, err := New(db)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
