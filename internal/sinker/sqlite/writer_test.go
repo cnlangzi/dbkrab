@@ -302,3 +302,56 @@ func TestSinker_Close(t *testing.T) {
 	err = sinker.Close()
 	assert.NoError(t, err)
 }
+
+// TestSinker_UnknownOperationTypeDropped verifies that unknown operation types
+// are logged and dropped gracefully instead of causing errors.
+// This is a defensive measure to prevent DLQ storms from malformed data.
+func TestSinker_UnknownOperationTypeDropped(t *testing.T) {
+	tmpFile := t.TempDir() + "/test.db"
+
+	sinker, err := NewSinker("test", pkgSqlite.Config{
+		File:       tmpFile,
+		ModuleName: "test",
+	})
+	require.NoError(t, err)
+	defer func() { _ = sinker.Close() }()
+
+	// First insert a row
+	ops := []core.Sink{
+		{
+			Config: core.SinkConfig{
+				Output:     "users",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
+			},
+			DataSet: &core.DataSet{
+				Columns: []string{"id", "name"},
+				Rows:    [][]any{{1, "alice"}},
+			},
+			OpType: core.OpInsert,
+		},
+	}
+	err = sinker.Write(context.Background(), ops)
+	require.NoError(t, err)
+
+	// Now send an unknown operation type (e.g., OpUpdateBefore = 3 which is not handled)
+	// This should NOT cause an error - it should be dropped gracefully
+	unknownOps := []core.Sink{
+		{
+			Config: core.SinkConfig{
+				Output:     "users",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
+			},
+			DataSet: &core.DataSet{
+				Columns: []string{"id", "name"},
+				Rows:    [][]any{{1, "should-be-dropped"}},
+			},
+			OpType: 999, // Unknown operation type
+		},
+	}
+
+	// Should NOT return an error - unknown ops should be dropped
+	err = sinker.Write(context.Background(), unknownOps)
+	assert.NoError(t, err, "Unknown operation type should be dropped, not cause an error")
+}

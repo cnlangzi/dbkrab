@@ -86,7 +86,14 @@ func (s *Sinker) writeOp(ctx context.Context, tx sqliteutil.TxExec, op core.Sink
 	case core.OpDelete:
 		return sqliteutil.DeleteInTx(tx, config, op.DataSet.Columns, op.DataSet.Rows)
 	default:
-		return fmt.Errorf("unknown operation type: %v", op.OpType)
+		// Defensively handle unknown operations by logging and dropping.
+		// This should not happen once upstream filtering and mapping are fixed,
+		// but we keep this to prevent DLQ storms from malformed data.
+		slog.Warn("SQLiteSinker.writeOp: unknown operation type, dropping",
+			"operation", op.OpType,
+			"output", op.Config.Output,
+			"database", s.name)
+		return nil
 	}
 }
 
