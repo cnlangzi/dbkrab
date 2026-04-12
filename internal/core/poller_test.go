@@ -435,3 +435,70 @@ func TestEmptyPollMetrics(t *testing.T) {
 		t.Errorf("Expected avg_tps_1m=0 for empty window, got %v", metrics["avg_tps_1m"])
 	}
 }
+
+// TestGroupByTransactionFiltersUpdateBefore tests that groupByTransaction
+// defensively filters out UPDATE_BEFORE changes to prevent DLQ errors.
+func TestGroupByTransactionFiltersUpdateBefore(t *testing.T) {
+	poller := &Poller{}
+
+	// Create changes including UPDATE_BEFORE and UPDATE_AFTER
+	changes := []Change{
+		{
+			Table:         "users",
+			TransactionID: "tx-1",
+			Operation:     OpUpdateBefore, // Should be filtered
+			Data:          map[string]interface{}{"id": 1, "name": "old-name"},
+			LSN:           []byte{0x01},
+		},
+		{
+			Table:         "users",
+			TransactionID: "tx-1",
+			Operation:     OpUpdateAfter, // Should remain
+			Data:          map[string]interface{}{"id": 1, "name": "new-name"},
+			LSN:           []byte{0x02},
+		},
+		{
+			Table:         "users",
+			TransactionID: "tx-1",
+			Operation:     OpInsert, // Should remain
+			Data:          map[string]interface{}{"id": 2, "name": "bob"},
+			LSN:           []byte{0x03},
+		},
+		{
+			Table:         "users",
+			TransactionID: "tx-1",
+			Operation:     OpDelete, // Should remain
+			Data:          map[string]interface{}{"id": 3},
+			LSN:           []byte{0x04},
+		},
+	}
+
+	txs := poller.groupByTransaction(changes)
+
+	// Should have 1 transaction
+	if len(txs) != 1 {
+		t.Fatalf("Expected 1 transaction, got %d", len(txs))
+	}
+
+	tx := txs[0]
+
+	// Should have 3 changes (UPDATE_BEFORE filtered out)
+	if len(tx.Changes) != 3 {
+		t.Errorf("Expected 3 changes after filtering UPDATE_BEFORE, got %d", len(tx.Changes))
+	}
+
+	// Verify UPDATE_BEFORE is not present
+	for _, c := range tx.Changes {
+		if c.Operation == OpUpdateBefore {
+			t.Error("UPDATE_BEFORE should have been filtered but was present")
+		}
+	}
+
+	// Verify remaining operations are correct
+	expectedOps := []Operation{OpUpdateAfter, OpInsert, OpDelete}
+	for i, expected := range expectedOps {
+		if tx.Changes[i].Operation != expected {
+			t.Errorf("Change[%d] expected %v, got %v", i, expected, tx.Changes[i].Operation)
+		}
+	}
+}
