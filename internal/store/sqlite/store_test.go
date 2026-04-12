@@ -19,7 +19,7 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 
 	// For testing, we use a fake/no-op migration path since we create tables inline
 	// The actual migration logic is tested in integration tests
-	db, err := store.NewFile(context.Background(), dbPath, "dbkrab-store", "")
+	db, err := store.NewFile(context.Background(), dbPath, "dbkrab-store")
 	require.NoError(t, err)
 
 	// Create the required tables inline for testing (migrations are tested separately)

@@ -6,7 +6,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
 
 	"github.com/cnlangzi/sqlite"
@@ -25,23 +24,11 @@ type DB = sqlite.DB
 
 // Config holds SQLite configuration options.
 type Config struct {
-	// File is the path to the SQLite file. Use ":memory:" for in-memory database.
+	// File is the path to the SQLite file.
 	File string
 
 	// ModuleName is used for migration discovery.
 	ModuleName string
-
-	// MigrationPath is the directory path for migration files.
-	MigrationPath string
-
-	// InMemory indicates if this is an in-memory database.
-	InMemory bool
-
-	// MaxOpenConns sets maximum open connections for Reader.
-	MaxOpenConnsReader int
-
-	// MaxIdleConns sets maximum idle connections for Reader.
-	MaxIdleConnsReader int
 }
 
 // New creates a new SQLite DB with read/write separation and migration support.
@@ -55,58 +42,27 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Run migrations if embedded FS is provided
-	if config.MigrationPath != "" {
-		sqleDB := sqle.Open(db.Writer.DB)
+	sqleDB := sqle.Open(db.Writer.DB)
 
-		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(migrationsFS, migrate.WithModule(config.ModuleName)); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("load migrations: %w", err)
-		}
-
-		if err := migrator.Migrate(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("run migrations: %w", err)
-		}
+	migrator := migrate.New(sqleDB)
+	if err := migrator.Discover(migrationsFS, migrate.WithModule(config.ModuleName)); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("load migrations: %w", err)
 	}
 
-	return db, nil
-}
-
-// NewInMemory creates an in-memory SQLite DB with shared cache.
-func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
-	db, err := sqlite.Open(ctx, ":memory:")
-	if err != nil {
-		return nil, err
-	}
-
-	// Run migrations if provided
-	if migrations != nil {
-		sqleDB := sqle.Open(db.Writer.DB)
-
-		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(migrations, migrate.WithModule(moduleName)); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("load migrations: %w", err)
-		}
-
-		if err := migrator.Migrate(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("run migrations: %w", err)
-		}
+	if err := migrator.Migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return db, nil
 }
 
 // NewFile creates a SQLite DB from a file path.
-func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
+func NewFile(ctx context.Context, file string, moduleName string) (*DB, error) {
 	return New(ctx, Config{
-		File:          file,
-		InMemory:      false,
-		ModuleName:    moduleName,
-		MigrationPath: migrationPath,
+		File:       file,
+		ModuleName: moduleName,
 	})
 }
 
