@@ -119,6 +119,10 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 					"columns", len(ds.Columns))
 
 				// Collect sink operation
+				// Note: OpType should be the original change.Operation, not sinkType.
+				// sinkType (sql.Operation) is used only for sink filtering (matching 'when' clause).
+				// Using core.Operation(sinkType) would incorrectly map sql.Insert(1) to OpDelete(1),
+				// sql.Update(2) to OpInsert(2), etc.
 				sinkOp := core.Sink{
 					Config: core.SinkConfig{
 						Name:       sinkCfg.Name,
@@ -128,7 +132,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 						OnConflict: sinkCfg.OnConflict,
 					},
 					DataSet: convertDataSet(ds),
-					OpType:  core.Operation(sinkType),
+					OpType:  change.Operation, // Use original change.Operation, not sinkType
 				}
 				allOps = append(allOps, sinkOp)
 			}
