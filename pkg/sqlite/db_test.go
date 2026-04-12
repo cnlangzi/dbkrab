@@ -51,6 +51,11 @@ func TestNewFile(t *testing.T) {
 		t.Fatalf("Create table failed: %v", err)
 	}
 
+	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
+	if err := db.Writer.Commit(); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
 	// Test read after write
 	rows, err := db.Reader.Query("SELECT name FROM sqlite_master WHERE type='table'")
 	if err != nil {
