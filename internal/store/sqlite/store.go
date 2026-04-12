@@ -54,9 +54,19 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 		return nil, fmt.Errorf("create poller_state table: %w", err)
 	}
 
+	// Force commit DDL changes immediately (DDL is buffered, need to commit before queries)
+	if err := db.Flush(); err != nil {
+		return nil, fmt.Errorf("commit DDL: %w", err)
+	}
+
 	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {
 		return nil, fmt.Errorf("init poller state: %w", err)
+	}
+
+	// Force commit init changes immediately
+	if err := db.Flush(); err != nil {
+		return nil, fmt.Errorf("commit init: %w", err)
 	}
 
 	return s, nil

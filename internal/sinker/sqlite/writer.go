@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -72,7 +71,7 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 	return nil
 }
 
-func (s *Sinker) writeOp(ctx context.Context, tx *sql.Tx, op core.Sink) error {
+func (s *Sinker) writeOp(ctx context.Context, tx sqliteutil.TxExec, op core.Sink) error {
 	config := sqliteutil.TableConfig{
 		Output:     op.Config.Output,
 		PrimaryKey: op.Config.PrimaryKey,
