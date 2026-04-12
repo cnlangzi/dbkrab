@@ -161,16 +161,20 @@ CREATE INDEX IF NOT EXISTS idx_xxx ON transactions(...);
 
 ```go
 import (
+    "embed"
     "github.com/cnlangzi/sqlite"
     "github.com/yaitoo/sqle"
     "github.com/yaitoo/sqle/migrate"
 )
 
+//go:embed migrations
+var migrationsFS embed.FS
+
 // sqle/migrate needs the raw *sql.DB from the buffered writer
 sqleDB := sqle.Open(db.Writer.DB)
 
 migrator := migrate.New(sqleDB)
-if err := migrator.Discover(os.DirFS("./internal/store/migrations"), migrate.WithModule("dbkrab-store")); err != nil {
+if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-store")); err != nil {
     return err
 }
 if err := migrator.Migrate(ctx); err != nil {
@@ -264,4 +268,5 @@ For each CDC change (row):
 | `cdc.interval` | Poll frequency |
 | `plugins.sql.path` | Skills directory |
 | `app.listen` | Dashboard port |
-| `app.path` | System SQLite path |
+| `app.db` | Store/offset SQLite path |
+| `app.dlq` | DLQ SQLite path |

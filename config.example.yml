@@ -78,7 +78,6 @@ app:
   type: sqlite
   db: ./data/app/dbkrab.db    # Store/offset DB (transactions, poller_state, offsets)
   dlq: ./data/app/dlq.db      # DLQ DB (dlq_entries)
-  migration_path: ./internal/store/migrations  # Path to sqle/migrate migration files
 
 # -----------------------------------------------------------------------------
 # Business Sinks (data output targets)

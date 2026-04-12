@@ -87,12 +87,11 @@ type GracefulDegradationConfig struct {
 
 // AppConfig contains the app-level database storage configuration
 type AppConfig struct {
-	Listen        int    `yaml:"listen"`
-	Host          string `yaml:"host"`
-	Type          string `yaml:"type"`
-	DB            string `yaml:"db"`             // Path for store/offset DB (transactions, poller_state, offsets)
-	DLQ           string `yaml:"dlq"`            // Path for DLQ DB (dlq_entries)
-	MigrationPath string `yaml:"migration_path"` // Path to sqle/migrate migration files
+	Listen int    `yaml:"listen"`
+	Host   string `yaml:"host"`
+	Type   string `yaml:"type"`
+	DB     string `yaml:"db"`  // Path for store/offset DB (transactions, poller_state, offsets)
+	DLQ    string `yaml:"dlq"` // Path for DLQ DB (dlq_entries)
 }
 
 // SinksConfig is a slice of DatabaseConfig for business sinks.
@@ -181,9 +180,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.App.DLQ == "" {
 		cfg.App.DLQ = "./data/app/dlq.db"
-	}
-	if cfg.App.MigrationPath == "" {
-		cfg.App.MigrationPath = "./internal/store/migrations"
 	}
 	if cfg.App.Listen == 0 {
 		cfg.App.Listen = 9020

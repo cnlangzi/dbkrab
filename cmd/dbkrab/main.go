@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -94,31 +93,14 @@ func main() {
 	// Create unified app DB with migrations
 	ctx := context.Background()
 
-	// Resolve migration path - default to embedded migrations
-	migrationPath := cfg.App.MigrationPath
-	if migrationPath == "" {
-		// Default: look for migrations relative to executable
-		execPath, err := os.Executable()
-		if err != nil {
-			slog.Error("failed to get executable path", "error", err)
-			os.Exit(1)
-		}
-		migrationPath = filepath.Join(filepath.Dir(execPath), "internal", "store", "migrations")
-		if _, err := os.Stat(migrationPath); os.IsNotExist(err) {
-			// Fallback: try relative to current working directory
-			migrationPath = "./internal/store/migrations"
-		}
-	}
-
 	var appDB *internal_store.DB
 	var store internal_store.Store
 
 	switch cfg.App.Type {
 	case "sqlite":
 		appDB, err = internal_store.New(ctx, internal_store.Config{
-			File:          cfg.App.DB,
-			ModuleName:    "dbkrab-store",
-			MigrationPath: migrationPath,
+			File:       cfg.App.DB,
+			ModuleName: "dbkrab-store",
 		})
 		if err != nil {
 			slog.Error("failed to create store SQLite DB", "error", err)
@@ -141,7 +123,7 @@ func main() {
 				slog.Warn("store.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite store initialized", "path", cfg.App.DB, "migrations", migrationPath)
+		slog.Info("SQLite store initialized", "path", cfg.App.DB)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
