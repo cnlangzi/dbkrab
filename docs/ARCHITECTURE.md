@@ -142,10 +142,8 @@ Database schemas are managed by **`github.com/yaitoo/sqle/migrate`** with semver
 
 ```
 internal/store/migrations/
-├── v1.0.0/
-│   └── 001_initial.sql
-└── v1.1.0/
-    └── 001_add_column.sql
+└── 1.0.0/
+    └── 001_initial.sql
 ```
 
 **SQL file format:**
