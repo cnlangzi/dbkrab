@@ -2,6 +2,7 @@ package offset
 
 import (
 	"database/sql"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -77,7 +78,11 @@ func (s *UnifiedStore) GetAll() (map[string]Offset, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Warn("rows.Close error", "error", err)
+		}
+	}()
 
 	result := make(map[string]Offset)
 	for rows.Next() {
