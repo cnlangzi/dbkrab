@@ -141,16 +141,17 @@ stop:
 ## restart: Restart dbkrab
 restart: stop deploy
 
-## reset: Reset CDC state (delete offset/cdc.db) and restart dbkrab
+## reset: Reset dbkrab state (clear DB and logs under /opt/dbkrab) and restart
 reset:
-	@echo "Resetting CDC state..."
+	@echo "Resetting dbkrab state..."
 	@echo "Stopping dbkrab..."
 	@pkill -x dbkrab 2>/dev/null || true
 	@sleep 2
-	@echo "Deleting offset.db and cdc.db..."
-	@rm -f /opt/dbkrab/data/app/offset.db /opt/dbkrab/data/app/offset.db-wal /opt/dbkrab/data/app/offset.db-shm
-	@rm -f /opt/dbkrab/data/app/cdc.db /opt/dbkrab/data/app/cdc.db-wal /opt/dbkrab/data/app/cdc.db-shm
-	@echo "✅ CDC state reset"
+	@echo "Deleting app data files..."
+	@rm -rf /opt/dbkrab/data/app/*
+	@echo "Deleting logs..."
+	@rm -rf /opt/dbkrab/logs/*
+	@mkdir -p /opt/dbkrab/logs
 	@echo "Starting dbkrab..."
 	@cd /opt/dbkrab && nohup ./dbkrab --config config.yaml > logs/dbkrab.log 2>&1 &
 	@sleep 3
