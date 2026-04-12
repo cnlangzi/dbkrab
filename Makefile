@@ -134,7 +134,7 @@ stop:
 		rm -f /var/run/dbkrab.pid; \
 		echo "✅ Stopped"; \
 	else \
-		pkill -f "dbkrab -config" 2>/dev/null || true; \
+		pkill -x dbkrab 2>/dev/null || true; \
 		echo "✅ Stopped"; \
 	fi
 
@@ -145,7 +145,7 @@ restart: stop deploy
 reset:
 	@echo "Resetting CDC state..."
 	@echo "Stopping dbkrab..."
-	@pkill -f "dbkrab -config" 2>/dev/null || true
+	@pkill -x dbkrab 2>/dev/null || true
 	@sleep 2
 	@echo "Deleting offset.db and cdc.db..."
 	@rm -f /opt/dbkrab/data/app/offset.db /opt/dbkrab/data/app/offset.db-wal /opt/dbkrab/data/app/offset.db-shm
@@ -154,7 +154,7 @@ reset:
 	@echo "Starting dbkrab..."
 	@cd /opt/dbkrab && nohup ./dbkrab --config config.yaml > logs/dbkrab.log 2>&1 &
 	@sleep 3
-	@if pgrep -f "dbkrab -config" >/dev/null; then \
+	@if pgrep -x dbkrab >/dev/null; then \
 		echo "✅ dbkrab restarted"; \
 	else \
 		echo "❌ dbkrab failed to start"; \
