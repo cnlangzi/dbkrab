@@ -35,7 +35,7 @@ build:
 ## test: Run all tests (excluding integration tests)
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race $(GOFLAGS) -skip "Integration|TestMergeSinksOnConflictInconsistent|TestMigration|TestStore_UpdatePollerState|TestStore_GetPollerState" ./...
+	$(GO) test -v -race $(GOFLAGS) -skip "Integration|TestMergeSinksOnConflictInconsistent|TestMigration" ./...
 
 ## test-short: Run short tests
 test-short:

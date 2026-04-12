@@ -168,6 +168,10 @@ func TestStore_UpdatePollerState(t *testing.T) {
 	err = store.UpdatePollerState("lsn-123", 5)
 	assert.NoError(t, err)
 
+	// Force commit to make data visible to reader
+	err = db.Writer.Commit()
+	assert.NoError(t, err)
+
 	state, err := store.GetPollerState()
 	assert.NoError(t, err)
 	assert.Equal(t, 5, state["total_changes"])
@@ -190,6 +194,10 @@ func TestStore_GetPollerState(t *testing.T) {
 	// Update and get again
 	err = store.UpdatePollerState("lsn-456", 10)
 	require.NoError(t, err)
+
+	// Force commit to make data visible to reader
+	err = db.Writer.Commit()
+	assert.NoError(t, err)
 
 	state, err = store.GetPollerState()
 	assert.NoError(t, err)
