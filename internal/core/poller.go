@@ -370,9 +370,28 @@ func (p *Poller) poll(ctx context.Context) error {
 			continue
 		}
 
+		// Filter duplicates: CDC query returns records where __$start_lsn >= from_lsn,
+		// so we need to skip records where LSN == startLSN (the last processed LSN).
+		// When starting fresh (startLSN = min_lsn from GetMinLSN), there's no last processed
+		// LSN to filter, so all records are included.
+		// Note: startLSN.IsZero() means it's from GetMinLSN (first time), not from offset store.
+		filteredChanges := make([]cdc.Change, 0, len(cdcChanges))
+		for _, c := range cdcChanges {
+			// Skip records where LSN == startLSN (duplicate from previous poll)
+			// Only filter if startLSN was loaded from offset store (i.e., stored.LSN != "")
+			// If startLSN was from GetMinLSN (first time), no filtering needed.
+			if stored.LSN != "" && LSN(c.LSN).Compare(startLSN) == 0 {
+				slog.Debug("skipping duplicate record with LSN == startLSN",
+					"table", table,
+					"lsn", fmt.Sprintf("%x", c.LSN))
+				continue
+			}
+			filteredChanges = append(filteredChanges, c)
+		}
+
 		// Convert cdc.Change to core.Change
-		changes := make([]Change, len(cdcChanges))
-		for i, c := range cdcChanges {
+		changes := make([]Change, len(filteredChanges))
+		for i, c := range filteredChanges {
 			changes[i] = Change{
 				Table:         c.Table,
 				TransactionID: c.TransactionID,
