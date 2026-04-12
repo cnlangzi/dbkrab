@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,6 +34,7 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 			table_name TEXT NOT NULL,
 			operation TEXT NOT NULL,
 			data TEXT,
+			lsn TEXT,
 			changed_at TIMESTAMP,
 			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
@@ -58,6 +60,10 @@ func NewStore(db *sqlite.DB) (*Store, error) {
 	if err := db.Flush(); err != nil {
 		return nil, fmt.Errorf("commit DDL: %w", err)
 	}
+
+	// Add lsn column if it doesn't exist (for existing databases created before this migration)
+	_, _ = db.Exec(`ALTER TABLE transactions ADD COLUMN lsn TEXT`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn)`)
 
 	// Initialize poller state (INSERT OR IGNORE is idempotent)
 	if err := s.initPollerState(); err != nil {
@@ -153,8 +159,8 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT INTO transactions (transaction_id, table_name, operation, data, changed_at, pulled_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO transactions (transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
@@ -176,11 +182,18 @@ func (s *Store) Write(tx *core.Transaction) error {
 			cdcTime = change.CommitTime // Already converted to UTC in CDC query layer
 		}
 
+		// Convert LSN bytes to hex string with 0x prefix for readability and deterministic sorting
+		var lsnStr string
+		if len(change.LSN) > 0 {
+			lsnStr = "0x" + hex.EncodeToString(change.LSN)
+		}
+
 		_, err = stmt.Exec(
 			tx.ID,
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
+			lsnStr,
 			cdcTime,
 			time.Now().UTC(), // pulled_at - store in UTC for consistency
 		)
@@ -246,7 +259,7 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, changed_at, pulled_at FROM transactions WHERE 1=1`
+	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM transactions WHERE 1=1`
 	args := []interface{}{}
 
 	if tableName != "" {
@@ -281,10 +294,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id int
-		var resultTxID, resultTableName, resultOperation, dataStr string
+		var resultTxID, resultTableName, resultOperation, dataStr, lsnStr string
 		var cdcTime, pulledAt interface{}
 
-		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &cdcTime, &pulledAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &lsnStr, &cdcTime, &pulledAt); err != nil {
 			return nil, err
 		}
 
@@ -299,6 +312,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			"table_name":     resultTableName,
 			"operation":      resultOperation,
 			"data":           data,
+			"lsn":            lsnStr,
 			"changed_at":     cdcTime,
 			"pulled_at":      pulledAt,
 		})
