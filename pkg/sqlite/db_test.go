@@ -151,7 +151,7 @@ func TestQueryRowContext(t *testing.T) {
 func TestMigration(t *testing.T) {
 	// Create a simple in-memory fs with migration file
 	migrations := fstest.MapFS{
-		"001_create_test.sql": &fstest.MapFile{
+		"1.0.0_init.sql": &fstest.MapFile{
 			Data: []byte(`
 CREATE TABLE IF NOT EXISTS migration_test (
     id INTEGER PRIMARY KEY,
