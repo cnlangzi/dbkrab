@@ -69,22 +69,24 @@ type DLQEntry struct {
 	ResolvedNote string    `json:"resolved_note,omitempty"`
 }
 
-// DLQ manages the dead letter queue
+// DLQ manages the dead letter queue.
+// All writes go through sqlite.DB's buffered writer for better TPS.
 type DLQ struct {
-	db     *sql.DB
+	db     *sqlite.DB
 	mu     sync.RWMutex
 	closed bool
 }
 
-// New creates a new DLQ manager and initializes the database
-func New(dbPath string) (*DLQ, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+// New creates a new DLQ manager and initializes the database.
+// The DB uses cnlangzi/sqlite's buffered writer for writes.
+func New(ctx context.Context, dbPath string) (*DLQ, error) {
+	db, err := sqlite.Open(ctx, dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Create table
-	if _, err := db.Exec(Schema); err != nil {
+	// Create table using buffered writer
+	if _, err := db.Writer.Exec(Schema); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
 			slog.Warn("db.Close error", "error", closeErr)
 		}
@@ -96,10 +98,11 @@ func New(dbPath string) (*DLQ, error) {
 	}, nil
 }
 
-// NewWithDB creates a new DLQ manager using an existing database connection
-func NewWithDB(db *sql.DB) (*DLQ, error) {
+// NewWithDB creates a new DLQ manager using an existing *sqlite.DB.
+// The caller is responsible for the DB lifecycle (including closing).
+func NewWithDB(db *sqlite.DB) (*DLQ, error) {
 	// Create table if not exists
-	if _, err := db.Exec(Schema); err != nil {
+	if _, err := db.Writer.Exec(Schema); err != nil {
 		return nil, fmt.Errorf("create table: %w", err)
 	}
 
@@ -109,11 +112,12 @@ func NewWithDB(db *sql.DB) (*DLQ, error) {
 }
 
 // NewWithStoreDB creates a new DLQ manager using the unified store database.
-// The DLQ uses the dlq_entries table which is managed by sqle/migrate migrations.
-// The storeDB's lifecycle (including closing) is managed externally.
+// The DLQ uses the dlq_entries table managed by sqle/migrate migrations.
+// Writes go through the store's buffered writer; reads go through the reader.
+// The storeDB's lifecycle is managed externally (do not close DLQ separately).
 func NewWithStoreDB(storeDB *sqlite.DB) (*DLQ, error) {
 	return &DLQ{
-		db:     storeDB.Writer.DB, // Use the store's underlying sql.DB connection
+		db:     storeDB,
 		mu:     sync.RWMutex{},
 		closed: false,
 	}, nil
@@ -137,7 +141,7 @@ func (d *DLQ) Write(entry *DLQEntry) error {
 		entry.Status = StatusPending
 	}
 
-	result, err := d.db.Exec(`
+	result, err := d.db.Writer.Exec(`
 		INSERT INTO dlq_entries (
 			lsn, table_name, operation, change_data, error_message,
 			retry_count, status, created_at, updated_at
@@ -209,7 +213,7 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 		`
 	}
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.Reader.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query entries: %w", err)
 	}
@@ -270,7 +274,7 @@ func (d *DLQ) Get(id int64) (*DLQEntry, error) {
 	var resolvedBy, resolvedNote sql.NullString
 	var resolvedAt sql.NullTime
 
-	err := d.db.QueryRow(`
+	err := d.db.Reader.QueryRow(`
 		SELECT id, lsn, table_name, operation, change_data, error_message,
 			   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 		FROM dlq_entries
@@ -327,7 +331,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	var resolvedBy, resolvedNote sql.NullString
 	var resolvedAt sql.NullTime
 
-	err := d.db.QueryRowContext(ctx, `
+	err := d.db.Reader.QueryRowContext(ctx, `
 		SELECT id, lsn, table_name, operation, change_data, error_message,
 			   retry_count, status, created_at, updated_at, resolved_by, resolved_at, resolved_note
 		FROM dlq_entries
@@ -347,7 +351,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	}
 
 	// Update status to retrying
-	_, err = d.db.ExecContext(ctx, `
+	_, err = d.db.Writer.ExecContext(ctx, `
 		UPDATE dlq_entries SET status = ?, updated_at = ?, retry_count = retry_count + 1
 		WHERE id = ?
 	`, StatusRetrying, time.Now(), id)
@@ -358,7 +362,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	// Call the handler
 	if err := handler(entry); err != nil {
 		// Handler failed - revert to pending
-		_, updateErr := d.db.Exec(`
+		_, updateErr := d.db.Writer.Exec(`
 			UPDATE dlq_entries SET status = ?, updated_at = ?, error_message = ?
 			WHERE id = ?
 		`, StatusPending, time.Now(),
@@ -370,7 +374,7 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 	}
 
 	// Handler succeeded - mark as resolved
-	_, err = d.db.Exec(`
+	_, err = d.db.Writer.Exec(`
 		UPDATE dlq_entries SET
 			status = ?, updated_at = ?, resolved_by = ?, resolved_at = ?, resolved_note = ?
 		WHERE id = ?
@@ -392,7 +396,7 @@ func (d *DLQ) Ignore(id int64, note string) error {
 		return ErrDLQClosed
 	}
 
-	result, err := d.db.Exec(`
+	result, err := d.db.Writer.Exec(`
 		UPDATE dlq_entries SET
 			status = ?, updated_at = ?, resolved_by = ?, resolved_at = ?, resolved_note = ?
 		WHERE id = ? AND status = ?
@@ -422,7 +426,7 @@ func (d *DLQ) Delete(id int64) error {
 		return ErrDLQClosed
 	}
 
-	result, err := d.db.Exec(`DELETE FROM dlq_entries WHERE id = ?`, id)
+	result, err := d.db.Writer.Exec(`DELETE FROM dlq_entries WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete entry: %w", err)
 	}
@@ -448,7 +452,7 @@ func (d *DLQ) Stats() (map[Status]int, error) {
 		return nil, ErrDLQClosed
 	}
 
-	rows, err := d.db.Query(`
+	rows, err := d.db.Reader.Query(`
 		SELECT status, COUNT(*) as count
 		FROM dlq_entries
 		GROUP BY status
@@ -538,7 +542,7 @@ func (d *DLQ) Count(status Status) (int, error) {
 	}
 
 	var count int
-	err := d.db.QueryRow(`
+	err := d.db.Reader.QueryRow(`
 		SELECT COUNT(*) FROM dlq_entries WHERE status = ?
 	`, status).Scan(&count)
 	if err != nil {
@@ -558,7 +562,7 @@ func (d *DLQ) CountAll() (int, error) {
 	}
 
 	var count int
-	err := d.db.QueryRow(`SELECT COUNT(*) FROM dlq_entries`).Scan(&count)
+	err := d.db.Reader.QueryRow(`SELECT COUNT(*) FROM dlq_entries`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count entries: %w", err)
 	}
