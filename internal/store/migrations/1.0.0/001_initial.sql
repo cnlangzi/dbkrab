@@ -1,12 +1,20 @@
 -- Migration: 001_initial
 -- Module: dbkrab-store
 -- Description: Create initial schema for unified app DB (transactions, poller_state, offsets, dlq_entries)
-
+-- Versioning Rules:
+--   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
+--   - Schema table-structure changes: increment minor version (e.g., 1.1.0, 1.2.0)
+--   - Field-only changes (defaults, constraints without structural change): increment patch (e.g., 1.0.1)
+--   - All migrations live under the initial semver folder (1.0.0) per current policy decision
+--
 -- =============================================================================
 -- transactions: stores CDC transaction changes
 -- =============================================================================
+-- id is a deterministic content-based hash: SHA256(transaction_id + table_name + data + lsn + operation)
+-- truncated to first 16 bytes (32 hex chars). This prevents CDC record loss caused by LSN advancement
+-- skipping rows in the same LSN group when using auto-increment primary key.
 CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     transaction_id TEXT NOT NULL,
     table_name TEXT NOT NULL,
     operation TEXT NOT NULL,

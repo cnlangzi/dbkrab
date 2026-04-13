@@ -25,7 +25,7 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 	// Create the required tables inline for testing (migrations are tested separately)
 	_, err = db.Writer.Exec(`
 		CREATE TABLE IF NOT EXISTS transactions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id TEXT PRIMARY KEY,
 			transaction_id TEXT NOT NULL,
 			table_name TEXT NOT NULL,
 			operation TEXT NOT NULL,
@@ -35,6 +35,15 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 			pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
+	require.NoError(t, err)
+
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id)`)
+	require.NoError(t, err)
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name)`)
+	require.NoError(t, err)
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_changed_at ON transactions(changed_at)`)
+	require.NoError(t, err)
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn)`)
 	require.NoError(t, err)
 
 	_, err = db.Writer.Exec(`
@@ -368,4 +377,161 @@ func TestStore_WriteOps_Delete(t *testing.T) {
 	}
 	err = store.WriteOps(ops)
 	assert.NoError(t, err)
+}
+
+func TestStore_Write_DuplicateIgnored(t *testing.T) {
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	store, err := New(db)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// Write the same transaction twice
+	tx := &core.Transaction{
+		ID: "tx-dup-001",
+		Changes: []core.Change{
+			{
+				Table:         "users",
+				TransactionID: "tx-dup-001",
+				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
+				Operation:     core.OpInsert,
+				Data: map[string]interface{}{
+					"id":   1,
+					"name": "alice",
+				},
+			},
+		},
+	}
+
+	err = store.Write(tx)
+	require.NoError(t, err)
+
+	// Write the same transaction again - should be ignored (not an error)
+	err = store.Write(tx)
+	require.NoError(t, err) // INSERT OR IGNORE should prevent duplicate
+
+	// Force commit to make data visible to reader
+	err = db.Flush()
+	require.NoError(t, err)
+
+	// Only one record should exist
+	changes, err := store.GetChanges(10)
+	require.NoError(t, err)
+	assert.Len(t, changes, 1)
+	assert.Equal(t, "tx-dup-001", changes[0]["transaction_id"])
+}
+
+func TestStore_Write_SameLSNDifferentContent(t *testing.T) {
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	store, err := New(db)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// Two different rows in the same transaction (same LSN, different content)
+	tx := &core.Transaction{
+		ID: "tx-lsn-001",
+		Changes: []core.Change{
+			{
+				Table:         "users",
+				TransactionID: "tx-lsn-001",
+				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
+				Operation:     core.OpInsert,
+				Data: map[string]interface{}{
+					"id":   1,
+					"name": "alice",
+				},
+			},
+			{
+				Table:         "users",
+				TransactionID: "tx-lsn-001",
+				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10}, // same LSN
+				Operation:     core.OpInsert,
+				Data: map[string]interface{}{
+					"id":   2,
+					"name": "bob",
+				}, // different content
+			},
+		},
+	}
+
+	err = store.Write(tx)
+	require.NoError(t, err)
+
+	// Force commit
+	err = db.Flush()
+	require.NoError(t, err)
+
+	// Both rows should be stored (different content = different hash)
+	changes, err := store.GetChanges(10)
+	require.NoError(t, err)
+	assert.Len(t, changes, 2)
+}
+
+func TestStore_Write_ContentBasedId(t *testing.T) {
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	store, err := New(db)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// Same content but different LSN -> different id
+	tx1 := &core.Transaction{
+		ID: "tx-lsn-002",
+		Changes: []core.Change{
+			{
+				Table:         "users",
+				TransactionID: "tx-lsn-002",
+				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
+				Operation:     core.OpInsert,
+				Data:          map[string]interface{}{"id": 1, "name": "alice"},
+			},
+		},
+	}
+	tx2 := &core.Transaction{
+		ID: "tx-lsn-002",
+		Changes: []core.Change{
+			{
+				Table:         "users",
+				TransactionID: "tx-lsn-002",
+				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11}, // different LSN
+				Operation:     core.OpInsert,
+				Data:          map[string]interface{}{"id": 1, "name": "alice"}, // same content
+			},
+		},
+	}
+
+	err = store.Write(tx1)
+	require.NoError(t, err)
+	err = store.Write(tx2)
+	require.NoError(t, err) // different LSN -> different hash, should both be stored
+
+	err = db.Flush()
+	require.NoError(t, err)
+
+	// Both should exist since LSN differs -> different hash ids
+	changes, err := store.GetChanges(10)
+	require.NoError(t, err)
+	assert.Len(t, changes, 2)
+
+	// Verify both ids are different (32-char hex strings)
+	ids := []string{}
+	for _, c := range changes {
+		ids = append(ids, c["id"].(string))
+	}
+	assert.NotEqual(t, ids[0], ids[1])
+	assert.Len(t, ids[0], 32)
+	assert.Len(t, ids[1], 32)
 }
