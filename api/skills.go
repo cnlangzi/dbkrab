@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -828,9 +829,77 @@ func (s *Server) handleFolderCreate(c *xun.Context) error {
 
 	return c.View(map[string]any{
 		"success": true,
-		"message": "Folder creation successful",
-		"name":    req.Name,
+		"message": "Folder created successfully",
 	})
+}
+
+// handleSkillSaveHTML handles POST /skills/{id}/save/html - HTML fragment for htmx
+func (s *Server) handleSkillSaveHTML(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return writeHTML(c, "<p class='text-error'>Skill ID required</p>")
+	}
+
+	if s.manager == nil {
+		return writeHTML(c, "<p class='text-error'>Plugin manager not initialized</p>")
+	}
+
+	// Get content from form data
+	content := c.Request.FormValue("content")
+	if content == "" {
+		return writeHTML(c, "<p class='text-error'>Content is required</p>")
+	}
+
+	// Get existing skill
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return writeHTML(c, "<p class='text-error'>Skill not found: "+resp.Error+"</p>")
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return writeHTML(c, "<p class='text-error'>Invalid skill data</p>")
+	}
+
+	filePath := skill.File
+
+	// Validate YAML
+	var newSkill sql.Skill
+	if err := yaml.Unmarshal([]byte(content), &newSkill); err != nil {
+		return writeHTML(c, "<p class='text-error'>Invalid YAML: "+err.Error()+"</p>")
+	}
+
+	if newSkill.Name == "" {
+		return writeHTML(c, "<p class='text-error'>Skill name required</p>")
+	}
+
+	if len(newSkill.On) == 0 {
+		return writeHTML(c, "<p class='text-error'>At least one table required</p>")
+	}
+
+	// Security check
+	skillPath := filepath.Join("skills", filePath)
+	cleanPath := filepath.Clean(skillPath)
+	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+		return writeHTML(c, "<p class='text-error'>Invalid path</p>")
+	}
+
+	// Write file
+	if err := os.WriteFile(skillPath, []byte(content), 0644); err != nil {
+		return writeHTML(c, "<p class='text-error'>Failed to save: "+err.Error()+"</p>")
+	}
+
+	slog.Info("Skill saved via HTML endpoint", "id", id, "file", filePath)
+
+	return writeHTML(c, "<p class='text-success'>✓ Saved! Redirecting...</p><script>setTimeout(function(){window.location.href='/skills';},1500);</script>")
+}
+
+// writeHTML writes HTML fragment to response
+func writeHTML(c *xun.Context, html string) error {
+	c.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.Response.WriteHeader(http.StatusOK)
+	c.Response.Write([]byte(html))
+	return nil
 }
 
 // isValidSkillName validates skill/folder names

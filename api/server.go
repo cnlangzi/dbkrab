@@ -18,6 +18,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/plugin/sql"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
@@ -191,6 +192,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/skills/{id}", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/{id}/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/{id}/save/html", s.handleSkillSaveHTML) // HTML fragment for htmx
 	api.Delete("/skills/{id}", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/validate", s.handleSkillValidate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/file/{path...}", s.handleSkillFileGet, xun.WithViewer(&xun.JsonViewer{}))
@@ -241,7 +243,40 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	// Skills edit page uses JavaScript to extract ID from URL (see sinks/{id}.html pattern)
+	// Skills edit page - SSR with skill data passed to template
+	// Override auto-registered route to pass skill data
+	s.app.Get("/skills/edit/{id}", s.handleSkillsEditPage)
+}
+
+// handleSkillsEditPage handles GET /skills/edit/{id} - SSR page
+func (s *Server) handleSkillsEditPage(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return c.View(map[string]any{"error": "Skill ID required"})
+	}
+
+	if s.manager == nil {
+		return c.View(map[string]any{"error": "Plugin manager not initialized"})
+	}
+
+	// Get skill from memory
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return c.View(map[string]any{"error": resp.Error})
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return c.View(map[string]any{"error": "Invalid skill data"})
+	}
+
+	// Pass skill data to template for SSR
+	return c.View(map[string]any{
+		"id":      skill.Id,
+		"name":    skill.Name,
+		"file":    skill.File,
+		"content": skill.Raw,
+	})
 }
 
 // handlePlugins handles GET /api/plugins

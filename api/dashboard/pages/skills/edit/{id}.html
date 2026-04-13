@@ -8,7 +8,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
             </svg>
         </a>
-        <h1 class="text-2xl font-bold text-text" id="page-title">Edit Skill</h1>
+        <h1 class="text-2xl font-bold text-text" id="page-title">Edit: {{.Data.Name}}</h1>
     </div>
 
     <!-- Editor -->
@@ -22,17 +22,20 @@
                 <button onclick="validateYAML()" class="px-4 py-2 bg-surfaceHover hover:bg-surface text-text text-sm font-medium rounded-lg transition-colors">
                     Validate
                 </button>
-                <button onclick="saveSkill()" class="px-4 py-2 bg-primary hover:bg-primaryHover text-white text-sm font-medium rounded-lg transition-colors">
+                <button hx-post="/skills/{{.Data.Id}}/save/html"
+                        hx-include="#yaml-editor"
+                        hx-target="#status-message"
+                        hx-swap="innerHTML"
+                        class="px-4 py-2 bg-primary hover:bg-primaryHover text-white text-sm font-medium rounded-lg transition-colors">
                     Save Changes
                 </button>
             </div>
         </div>
         <div class="p-4">
-            <textarea id="yaml-editor" rows="20" 
-                      class="w-full px-3 py-2 bg-bg border border-border rounded-lg text-text font-mono text-sm focus:outline-none focus:border-primary"
-                      placeholder="Loading..."></textarea>
+            <textarea id="yaml-editor" name="content" rows="20" 
+                      class="w-full px-3 py-2 bg-bg border border-border rounded-lg text-text font-mono text-sm focus:outline-none focus:border-primary">{{.Data.Content}}</textarea>
         </div>
-        <div id="status-message" class="hidden p-4 border-t border-border"></div>
+        <div id="status-message" class="p-4 border-t border-border"></div>
     </div>
 
     <!-- Info Card -->
@@ -44,50 +47,38 @@
             <div class="text-sm text-text">
                 <p class="font-medium text-text mb-1">Editing Tips</p>
                 <ul class="text-textMuted space-y-1">
-                    <li>• ID: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-id">-</code></li>
-                    <li>• File: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-file">-</code></li>
+                    <li>• ID: <code class="px-1 py-0.5 bg-surfaceHover rounded">{{.Data.Id}}</code></li>
+                    <li>• File: <code class="px-1 py-0.5 bg-surfaceHover rounded">{{.Data.File}}</code></li>
                     <li>• Plugin will auto-reload after ~1 second</li>
                     <li>• At least one table must be specified in <code class="px-1 py-0.5 bg-surfaceHover rounded">on</code> field</li>
                 </ul>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Bottom Save Bar -->
-<div class="fixed bottom-0 left-0 right-0 p-4 bg-bg/95 backdrop-blur border-t border-border lg:hidden">
-    <button onclick="saveSkill()" 
-            class="w-full py-3 bg-primary hover:bg-primaryHover text-white font-medium rounded-xl transition-colors">
-        Save Changes
-    </button>
+    <!-- Error Card (shown if error) -->
+    {{ if .Data.Error }}
+    <div class="mt-4 bg-error/10 border border-error/20 rounded-xl p-4">
+        <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-error flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div class="text-sm text-text">
+                <p class="font-medium text-error mb-1">Error</p>
+                <p class="text-textMuted">{{.Data.Error}}</p>
+            </div>
+        </div>
+    </div>
+    {{ end }}
 </div>
 
 <script>
-// Skill ID from URL
-const skillId = window.location.pathname.split('/').pop(); // Extract ID from URL
-
-// Load skill content
-async function loadSkill() {
-    try {
-        const response = await fetch('/api/skills/' + skillId);
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('yaml-editor').value = data.content;
-            document.getElementById('page-title').textContent = 'Edit: ' + data.name;
-            document.getElementById('skill-id').textContent = data.id;
-            document.getElementById('skill-file').textContent = data.file;
-        } else {
-            showError('Failed to load skill: ' + data.error);
-        }
-    } catch (err) {
-        showError('Error loading skill: ' + err.message);
-    }
-}
-
-// Validate YAML
+// Validate YAML via API
 async function validateYAML() {
     const content = document.getElementById('yaml-editor').value;
+    const statusEl = document.getElementById('status-message');
+    
+    statusEl.innerHTML = '<p class="text-textMuted">Validating...</p>';
     
     try {
         const response = await fetch('/api/skills/validate', {
@@ -98,60 +89,13 @@ async function validateYAML() {
         const result = await response.json();
         
         if (result.success && result.valid) {
-            showStatus('✓ YAML is valid', 'success');
+            statusEl.innerHTML = '<p class="text-success">✓ YAML is valid</p>';
         } else {
-            showStatus('✗ Validation failed: ' + (result.errors || ['Unknown error']).join(', '), 'error');
+            statusEl.innerHTML = '<p class="text-error">✗ Validation failed: ' + (result.errors || ['Unknown error']).join(', ') + '</p>';
         }
     } catch (err) {
-        showStatus('✗ Error: ' + err.message, 'error');
+        statusEl.innerHTML = '<p class="text-error">✗ Error: ' + err.message + '</p>';
     }
 }
-
-// Save skill
-async function saveSkill() {
-    const content = document.getElementById('yaml-editor').value;
-    showStatus('Saving...', 'info');
-    
-    try {
-        const response = await fetch('/api/skills/' + skillId + '/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            showStatus('✓ Saved! Plugin will reload automatically...', 'success');
-            setTimeout(() => {
-                window.location.href = '/skills';
-            }, 1500);
-        } else {
-            showStatus('✗ Save failed: ' + result.error, 'error');
-        }
-    } catch (err) {
-        showStatus('✗ Error: ' + err.message, 'error');
-    }
-}
-
-function showStatus(message, type) {
-    const el = document.getElementById('status-message');
-    el.classList.remove('hidden');
-    
-    const colors = {
-        success: 'bg-success/20 text-success border-success/20',
-        error: 'bg-error/20 text-error border-error/20',
-        info: 'bg-primary/20 text-primary border-primary/20'
-    };
-    
-    el.className = 'p-4 border-t ' + colors[type];
-    el.textContent = message;
-}
-
-function showError(message) {
-    alert(message);
-}
-
-// Load on page load
-loadSkill();
 </script>
 {{ end }}
