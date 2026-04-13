@@ -55,7 +55,7 @@ type DatabaseConfig struct {
 	Description    string `yaml:"description"`     // Human-readable description
 	Type            string `yaml:"type"`            // sqlite, duckdb, mssql, etc.
 	Path            string `yaml:"path"`             // Path for file-based databases
-	MigrationPath  string `yaml:"migrations"`      // Path to migration SQL files
+	Migrations  string `yaml:"migrations"`      // Path to migration SQL files
 	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
 }
 
