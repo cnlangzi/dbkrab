@@ -134,6 +134,75 @@ sinks:
 
 ---
 
+## Skill Outputs Metadata
+
+When a skill is loaded, the `Skill.Outputs` map is automatically populated by parsing the SQL from all insert/update sinks. This metadata provides a static map of output table names to their field lists, enabling other components to rely on this information without re-parsing SQL at runtime.
+
+### Outputs Structure
+
+```go
+type Skill struct {
+    // ... other fields ...
+    Outputs map[string][]string `yaml:"-"` // key = output table name, value = field names
+}
+```
+
+### Field Extraction Rules
+
+The loader parses each sink's SQL (inline or from `sql_file`) and extracts column names following these rules:
+
+| SQL Pattern | Extracted Field Name |
+|-------------|----------------------|
+| `SELECT @cdc_lsn as cdc_lsn` | `cdc_lsn` (uses AS alias) |
+| `SELECT o.order_id` | `order_id` (strips table prefix) |
+| `SELECT @variable` | `variable` (removes @ prefix) |
+
+### Example
+
+For a skill with:
+
+```yaml
+sinks:
+  - name: customers_sync
+    when: [insert, update]
+    sql: |
+      SELECT 
+        @cdc_lsn as cdc_lsn,
+        @orders_customer_id as customer_id,
+        c.name as customer_name,
+        c.email as customer_email
+      FROM customers c
+      WHERE c.customer_id = @orders_customer_id;
+    output: customers_sync
+    primary_key: customer_id
+
+  - name: customers_delete
+    when: [delete]
+    sql: |
+      SELECT @cdc_lsn as cdc_lsn, @orders_customer_id as customer_id
+    output: customers_sync
+    primary_key: customer_id
+```
+
+After loading, `Skill.Outputs` will contain:
+
+```go
+skill.Outputs = map[string][]string{
+    "customers_sync": {"cdc_lsn", "customer_id", "customer_name", "customer_email"},
+}
+```
+
+Note: Only insert/update sinks are analyzed. Delete-only sinks (`when: [delete]`) are ignored for Outputs extraction.
+
+### Deterministic Field Ordering
+
+Fields within each output are ordered by first-seen order in SQL (top to bottom, left to right). This ensures predictable ordering for testing and debugging.
+
+### YAML Serialization
+
+The `Outputs` field is marked with `yaml:"-"`, so it is never serialized to disk. It exists only as an in-memory field populated at load time.
+
+
 ## Conditional Sink Triggering (`if` field)
 
 The optional `if` field allows sinks to be triggered conditionally based on CDC payload values. It uses SQL/WHERE-like syntax that is evaluated at runtime against each CDC event.
