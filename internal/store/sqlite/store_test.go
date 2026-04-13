@@ -41,6 +41,9 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 	require.NoError(t, err)
 	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name)`)
 	require.NoError(t, err)
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_changed_at ON transactions(changed_at)`)
+	require.NoError(t, err)
+	_, err = db.Writer.Exec(`CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn)`)
 	require.NoError(t, err)
 
 	_, err = db.Writer.Exec(`
