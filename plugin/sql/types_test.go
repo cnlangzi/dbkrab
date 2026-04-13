@@ -278,6 +278,24 @@ func TestValidateSinks(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid insert only sink",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"insert"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid update only sink",
+			skill: Skill{
+				Sinks: []Sink{
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"update"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "missing when field",
 			skill: Skill{
 				Sinks: []Sink{
@@ -308,24 +326,14 @@ func TestValidateSinks(t *testing.T) {
 			errMsg:  "cannot mix delete with insert/update",
 		},
 		{
-			name: "only insert without update",
+			name: "mixed update and delete",
 			skill: Skill{
 				Sinks: []Sink{
-					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"insert"}},
+					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"update", "delete"}},
 				},
 			},
 			wantErr: true,
-			errMsg:  "insert requires update",
-		},
-		{
-			name: "only update without insert",
-			skill: Skill{
-				Sinks: []Sink{
-					{SinkConfig: SinkConfig{Name: "test"}, When: []string{"update"}},
-				},
-			},
-			wantErr: true,
-			errMsg:  "update requires insert",
+			errMsg:  "cannot mix delete with insert/update",
 		},
 	}
 

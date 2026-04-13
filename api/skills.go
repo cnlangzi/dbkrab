@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -426,7 +427,11 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	}
 
 	// Check if skill file already exists
-	skillPath := filepath.Join("skills", req.Name+".yml")
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, req.Name+".yml")
 	if _, err := os.Stat(skillPath); err == nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -523,13 +528,19 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 		})
 	}
 
-	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", filePath)
+	// Security: ensure path is within skills/sql directory
+	// filePath is relative to config.plugins.sql.path (e.g., "cost.yml")
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid path: must be within skills directory",
+			"error":   "Invalid path: must be within skills/sql directory",
 		})
 	}
 
@@ -587,13 +598,18 @@ func (s *Server) handleSkillDelete(c *xun.Context) error {
 
 	filePath := skill.File
 
-	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", filePath)
+	// Security: ensure path is within skills/sql directory
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid path: must be within skills directory",
+			"error":   "Invalid path: must be within skills/sql directory",
 		})
 	}
 
@@ -709,8 +725,10 @@ func (s *Server) handleSkillFileGet(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	// filePath should be like "sql/cost.yml" (includes subdirectory)
+	sqlPath := "skills" // base skills directory
+	cleanPath := filepath.Clean(filepath.Join(sqlPath, filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(sqlPath)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -751,8 +769,10 @@ func (s *Server) handleSkillFileSave(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	// filePath should be like "sql/cost.yml" (includes subdirectory)
+	skillsDir := "skills" // base skills directory
+	cleanPath := filepath.Clean(filepath.Join(skillsDir, filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(skillsDir)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -809,9 +829,11 @@ func (s *Server) handleFolderCreate(c *xun.Context) error {
 	}
 
 	// Security: ensure path is within skills directory
-	folderPath := filepath.Join("skills", req.Name)
+	// This allows creating subdirectories within skills
+	skillsDir := "skills"
+	folderPath := filepath.Join(skillsDir, req.Name)
 	cleanPath := filepath.Clean(folderPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	if !strings.HasPrefix(cleanPath, filepath.Clean(skillsDir)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -828,9 +850,83 @@ func (s *Server) handleFolderCreate(c *xun.Context) error {
 
 	return c.View(map[string]any{
 		"success": true,
-		"message": "Folder creation successful",
-		"name":    req.Name,
+		"message": "Folder created successfully",
 	})
+}
+
+// handleSkillSaveHTML handles POST /skills/{id}/save/html - HTML fragment for htmx
+func (s *Server) handleSkillSaveHTML(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return writeHTML(c, "<p class='text-error'>Skill ID required</p>")
+	}
+
+	if s.manager == nil {
+		return writeHTML(c, "<p class='text-error'>Plugin manager not initialized</p>")
+	}
+
+	// Get content from form data
+	content := c.Request.FormValue("content")
+	if content == "" {
+		return writeHTML(c, "<p class='text-error'>Content is required</p>")
+	}
+
+	// Get existing skill
+	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
+	if !resp.Success {
+		return writeHTML(c, "<p class='text-error'>Skill not found: "+resp.Error+"</p>")
+	}
+
+	skill, ok := resp.Data.(*sql.Skill)
+	if !ok {
+		return writeHTML(c, "<p class='text-error'>Invalid skill data</p>")
+	}
+
+	filePath := skill.File
+
+	// Validate YAML
+	var newSkill sql.Skill
+	if err := yaml.Unmarshal([]byte(content), &newSkill); err != nil {
+		return writeHTML(c, "<p class='text-error'>Invalid YAML: "+err.Error()+"</p>")
+	}
+
+	if newSkill.Name == "" {
+		return writeHTML(c, "<p class='text-error'>Skill name required</p>")
+	}
+
+	if len(newSkill.On) == 0 {
+		return writeHTML(c, "<p class='text-error'>At least one table required</p>")
+	}
+
+	// Security: ensure path is within skills/sql directory
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
+	cleanPath := filepath.Clean(skillPath)
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
+		return writeHTML(c, "<p class='text-error'>Invalid path</p>")
+	}
+
+	// Write file
+	if err := os.WriteFile(skillPath, []byte(content), 0644); err != nil {
+		return writeHTML(c, "<p class='text-error'>Failed to save: "+err.Error()+"</p>")
+	}
+
+	slog.Info("Skill saved via HTML endpoint", "id", id, "file", filePath)
+
+	return writeHTML(c, "<p class='text-success'>✓ Saved! Redirecting...</p><script>setTimeout(function(){window.location.href='/skills';},1500);</script>")
+}
+
+// writeHTML writes HTML fragment to response
+func writeHTML(c *xun.Context, html string) error {
+	c.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.Response.WriteHeader(http.StatusOK)
+	//nolint:errcheck
+	c.Response.Write([]byte(html))
+	return nil
 }
 
 // isValidSkillName validates skill/folder names

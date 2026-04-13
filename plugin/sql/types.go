@@ -195,18 +195,13 @@ func (s *Skill) ValidateSinks() error {
 			}
 		}
 
-		// Validate: either (insert+update) or (delete only), never mixed
+		// Validate: delete cannot mix with insert/update
+		// Valid combinations: [insert], [update], [delete], [insert, update]
 		if hasDelete && (hasInsert || hasUpdate) {
 			return fmt.Errorf("sink[%d].when: cannot mix delete with insert/update", i)
 		}
-		if !hasDelete && (!hasInsert && !hasUpdate) {
-			return fmt.Errorf("sink[%d].when: must be either [insert, update] or [delete]", i)
-		}
-		if hasInsert && !hasUpdate {
-			return fmt.Errorf("sink[%d].when: insert requires update (use [insert, update] for shared SQL)", i)
-		}
-		if hasUpdate && !hasInsert {
-			return fmt.Errorf("sink[%d].when: update requires insert (use [insert, update] for shared SQL)", i)
+		if !hasDelete && !hasInsert && !hasUpdate {
+			return fmt.Errorf("sink[%d].when: must specify at least one of insert, update, or delete", i)
 		}
 
 		// Validate and precompile 'if' expression

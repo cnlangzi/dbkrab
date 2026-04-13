@@ -88,7 +88,7 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 type Poller struct {
 	cfg           *config.Config
 	db            *sql.DB
-	querier       *cdc.Querier
+	querier       CDCQuerier
 	cdcAdmin      *cdcadmin.Admin
 	gapDetector   *cdc.GapDetector
 	alertManager  *alert.AlertManager
@@ -128,6 +128,14 @@ type Store interface {
 // Handle processes a transaction with the given context for cancellation/timeout.
 type Handler interface {
 	Handle(ctx context.Context, tx *Transaction) error
+}
+
+// CDCQuerier interface for CDC database operations
+type CDCQuerier interface {
+	GetMinLSN(ctx context.Context, captureInstance string) ([]byte, error)
+	GetMaxLSN(ctx context.Context) ([]byte, error)
+	IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error)
+	GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]cdc.Change, error)
 }
 
 // PluginHandler is a function type for plugin-based handling
@@ -471,7 +479,7 @@ func (p *Poller) poll(ctx context.Context) error {
 		return p.processDirect(ctx, allChanges, results, fetchTime)
 	}
 	// No changes but still update offsets for observability
-	return p.updateOffsets(results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0)
+	return p.updateOffsets(ctx, results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
@@ -533,14 +541,14 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	syncDuration := syncEndTime.Sub(syncStartTime)
 
 	// All transactions successfully written - now update offsets
-	return p.updateOffsets(results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs))
+	return p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs))
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
 // Each table maintains its own independent LSN offset.
 // Only tables with changes have their offsets advanced.
 // Tables with no changes keep their existing offset.
-func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
+func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
 	// Track the maximum LSN across all tables for observability/metrics
 	var maxLSN LSN
 	tablesUpdated := 0
@@ -561,8 +569,15 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, f
 			continue
 		}
 
-		// Table has changes - advance its offset to its own lastLSN
-		if err := p.offsets.Set(r.table, r.lastLSN.String()); err != nil {
+		// Table has changes - advance its offset to the LSN after the last change.
+		// MSSQL CDC functions return rows where __$start_lsn >= from_lsn,
+		// so we must store incrementLSN(lastLSN) to avoid re-fetching the same row.
+		nextLSN, err := p.querier.IncrementLSN(ctx, []byte(r.lastLSN))
+		if err != nil {
+			slog.Error("failed to increment LSN for offset", "table", r.table, "lastLSN", r.lastLSN.String(), "error", err)
+			continue
+		}
+		if err := p.offsets.Set(r.table, LSN(nextLSN).String()); err != nil {
 			slog.Error("failed to save offset", "table", r.table, "error", err)
 			continue
 		}
