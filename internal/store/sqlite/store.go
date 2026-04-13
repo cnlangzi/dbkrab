@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -99,8 +100,8 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT INTO transactions (transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT OR IGNORE INTO transactions (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
@@ -128,7 +129,14 @@ func (s *Store) Write(tx *core.Transaction) error {
 			lsnStr = "0x" + hex.EncodeToString(change.LSN)
 		}
 
+		// Compute content-based id: SHA256(transaction_id + table_name + data + lsn + operation)
+		// Take first 16 bytes and encode as 32-character hex string (deterministic, unique per change)
+		hashInput := tx.ID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
+		hash := sha256.Sum256([]byte(hashInput))
+		id := hex.EncodeToString(hash[:16]) // first 16 bytes = 32 hex chars
+
 		_, err = stmt.Exec(
+			id,
 			tx.ID,
 			change.Table,
 			change.Operation.String(),
@@ -233,7 +241,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id int
+		var id string
 		var resultTxID, resultTableName, resultOperation, dataStr, lsnStr string
 		var cdcTime, pulledAt interface{}
 
