@@ -8,20 +8,19 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
-	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 )
 
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
 	name   string
-	db     *pkgSqlite.DB
+	db     *DB
 	mu     sync.Mutex
 	closed bool
 }
 
 // NewSinker creates a new SQLite sinker.
-func NewSinker(name string, cfg pkgSqlite.Config) (*Sinker, error) {
-	db, err := pkgSqlite.New(context.Background(), cfg)
+func NewSinker(name string, dsn string, migrations string) (*Sinker, error) {
+	db, err := NewSinkerDB(context.Background(), dsn, migrations)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite db: %w", err)
 	}
