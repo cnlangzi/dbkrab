@@ -151,7 +151,7 @@ func (h *testHarness) setupSkillFixtures() {
 }
 
 // setupPluginManager creates a plugin manager with skill fixtures
-func (h *testHarness) setupPluginManager(dbConfigs map[string]config.DatabaseConfig) *plugin.Manager {
+func (h *testHarness) setupPluginManager(dbConfigs map[string]config.SinkConfig) *plugin.Manager {
 	mgr := plugin.NewManager()
 	if err := mgr.Init(context.Background(), nil, struct {
 		Enabled      bool
@@ -188,13 +188,13 @@ func buildPollResult(table string, changes []core.Change) pollResult {
 }
 
 // buildDBConfigs creates database configs for testing
-func buildDBConfigs(dbNames ...string) map[string]config.DatabaseConfig {
-	configs := make(map[string]config.DatabaseConfig)
+func buildDBConfigs(dbNames ...string) map[string]config.SinkConfig {
+	configs := make(map[string]config.SinkConfig)
 	for _, name := range dbNames {
-		configs[name] = config.DatabaseConfig{
+		configs[name] = config.SinkConfig{
 			Name: name,
 			Type: "sqlite",
-			Path: "", // Will be set by sink writer
+			DSN: "", // Will be set by sink writer
 		}
 	}
 	return configs
@@ -409,9 +409,9 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 
 	h.setupSkillFixtures()
 
-	dbConfigs := map[string]config.DatabaseConfig{
-		"business":  {Name: "business", Type: "sqlite", Path: ""},
-		"inventory": {Name: "inventory", Type: "sqlite", Path: ""},
+	dbConfigs := map[string]config.SinkConfig{
+		"business":  {Name: "business", Type: "sqlite", DSN: ""},
+		"inventory": {Name: "inventory", Type: "sqlite", DSN: ""},
 	}
 
 	pluginMgr := h.setupPluginManager(dbConfigs)
@@ -617,9 +617,9 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 
 	h.setupSkillFixtures()
 
-	dbConfigs := map[string]config.DatabaseConfig{
-		"business":  {Name: "business", Type: "sqlite", Path: ""},
-		"inventory": {Name: "inventory", Type: "sqlite", Path: ""},
+	dbConfigs := map[string]config.SinkConfig{
+		"business":  {Name: "business", Type: "sqlite", DSN: ""},
+		"inventory": {Name: "inventory", Type: "sqlite", DSN: ""},
 	}
 
 	pluginMgr := h.setupPluginManager(dbConfigs)

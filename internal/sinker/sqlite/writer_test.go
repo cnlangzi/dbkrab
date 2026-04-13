@@ -2,22 +2,46 @@ package sqlite
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewSinker(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+func testMigrationDir(t *testing.T, migrationSQL string) string {
+	tmpMigrationDir := filepath.Join(t.TempDir(), "migrations")
+	require.NoError(t, os.MkdirAll(tmpMigrationDir, 0755))
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:          tmpFile,
-		ModuleName:    "test",
-		MigrationPath: "",
-	})
+	// Create a version subdirectory to match sqle migration format
+	versionDir := filepath.Join(tmpMigrationDir, "1.0.0")
+	require.NoError(t, os.MkdirAll(versionDir, 0755))
+
+	// Write migration with proper sqle/migrate format
+	// The header is required for sqle/migrate to discover the migration
+	migrationContent := `-- Migration: 001_initial
+-- Module: test
+-- Description: Create test tables
+
+` + migrationSQL
+
+	require.NoError(t, os.WriteFile(filepath.Join(versionDir, "001_initial.sql"), []byte(migrationContent), 0644))
+	return tmpMigrationDir
+}
+
+func TestNewSinker(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
+
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	assert.NotNil(t, sinker)
 	assert.Equal(t, "test", sinker.DatabaseName())
@@ -28,12 +52,16 @@ func TestNewSinker(t *testing.T) {
 }
 
 func TestSinker_Write(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -57,12 +85,16 @@ func TestSinker_Write(t *testing.T) {
 }
 
 func TestSinker_Write_Update(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -104,12 +136,16 @@ func TestSinker_Write_Update(t *testing.T) {
 }
 
 func TestSinker_Write_Delete(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -139,7 +175,7 @@ func TestSinker_Write_Delete(t *testing.T) {
 				PrimaryKey: "id",
 			},
 			DataSet: &core.DataSet{
-				Columns: []string{"id", "name"},
+				Columns: []string{"id"},
 				Rows:    [][]any{{1}},
 			},
 			OpType: core.OpDelete,
@@ -150,12 +186,16 @@ func TestSinker_Write_Delete(t *testing.T) {
 }
 
 func TestSinker_Write_Empty(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -165,12 +205,16 @@ func TestSinker_Write_Empty(t *testing.T) {
 }
 
 func TestSinker_Write_SkipOnConflict(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -194,10 +238,15 @@ func TestSinker_Write_SkipOnConflict(t *testing.T) {
 }
 
 func TestSinker_InMemory(t *testing.T) {
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       ":memory:",
-		ModuleName: "test",
-	})
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
+
+	sinker, err := NewSinker("test", ":memory:", tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -221,12 +270,16 @@ func TestSinker_InMemory(t *testing.T) {
 }
 
 func TestSinker_DatabaseName(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("mydb", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("mydb", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -234,12 +287,16 @@ func TestSinker_DatabaseName(t *testing.T) {
 }
 
 func TestSinker_DatabaseType(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -247,12 +304,20 @@ func TestSinker_DatabaseType(t *testing.T) {
 }
 
 func TestSinker_MultipleTables(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY,
+    amount REAL
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -288,12 +353,16 @@ func TestSinker_MultipleTables(t *testing.T) {
 }
 
 func TestSinker_Close(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 
 	// Double close should not panic
@@ -307,12 +376,16 @@ func TestSinker_Close(t *testing.T) {
 // are logged and dropped gracefully instead of causing errors.
 // This is a defensive measure to prevent DLQ storms from malformed data.
 func TestSinker_UnknownOperationTypeDropped(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+	tmpMigrationDir := testMigrationDir(t, `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+`)
 
-	sinker, err := NewSinker("test", pkgSqlite.Config{
-		File:       tmpFile,
-		ModuleName: "test",
-	})
+	sinker, err := NewSinker("test", tmpFile, tmpMigrationDir)
+
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
@@ -354,4 +427,16 @@ func TestSinker_UnknownOperationTypeDropped(t *testing.T) {
 	// Should NOT return an error - unknown ops should be dropped
 	err = sinker.Write(context.Background(), unknownOps)
 	assert.NoError(t, err, "Unknown operation type should be dropped, not cause an error")
+}
+
+// TestSinker_MissingMigrationPath verifies that creating a sinker without
+// a migration path fails fast with a clear error.
+func TestSinker_MissingMigrationPath(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
+
+	// Creating a sinker without migration path should fail
+	_, err := NewSinker("test", tmpFile, "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "migration path is required")
 }

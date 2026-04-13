@@ -432,12 +432,13 @@ func TestMergeSinks(t *testing.T) {
 					}
 				}
 			}
-		})
+})
 	}
 }
 
 func TestMergeSinksOnConflictInconsistent(t *testing.T) {
-	// When OnConflict is inconsistent, mergeSinks should log error and skip the group
+	// When OnConflict is inconsistent, mergeSinks logs a warning but still merges
+	// using the first OnConflict value
 	sinks := []core.Sink{
 		{
 			Config: core.SinkConfig{
@@ -467,8 +468,38 @@ func TestMergeSinksOnConflictInconsistent(t *testing.T) {
 		},
 	}
 	result := mergeSinks(sinks)
-	// Should skip the conflicting group, returning empty
-	if len(result) != 0 {
-		t.Errorf("mergeSinks() with inconsistent OnConflict got %d sinks, want 0", len(result))
+	// Should merge and use first OnConflict ("overwrite"), not skip
+	if len(result) != 1 {
+		t.Errorf("mergeSinks() with inconsistent OnConflict got %d sinks, want 1", len(result))
+	}
+	if result[0].Config.OnConflict != "overwrite" {
+		t.Errorf("OnConflict = %v, want overwrite", result[0].Config.OnConflict)
+	}
+	// Should merge columns from both sinks (order may vary by processing)
+	if len(result[0].DataSet.Columns) != 3 {
+		t.Errorf("Columns length = %d, want 3", len(result[0].DataSet.Columns))
+	}
+	// Check that columns from both sinks are present
+	hasID := false
+	hasName := false
+	hasEmail := false
+	for _, col := range result[0].DataSet.Columns {
+		if col == "id" {
+			hasID = true
+		}
+		if col == "name" {
+			hasName = true
+		}
+		if col == "email" {
+			hasEmail = true
+		}
+	}
+	if !hasID || !hasName || !hasEmail {
+		t.Errorf("Columns = %v, missing some columns (hasID=%v, hasName=%v, hasEmail=%v)",
+			result[0].DataSet.Columns, hasID, hasName, hasEmail)
+	}
+	// Should have merged the single row with values from both sinks
+	if len(result[0].DataSet.Rows) != 1 {
+		t.Errorf("Rows length = %d, want 1", len(result[0].DataSet.Rows))
 	}
 }

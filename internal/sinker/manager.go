@@ -11,14 +11,13 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
-	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
 type Manager struct {
 	sinkers   map[string]Sinker // keyed by database name
-	dbConfigs map[string]config.DatabaseConfig
+	dbConfigs map[string]config.SinkConfig
 	mu        sync.RWMutex
 }
 
@@ -26,12 +25,12 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		sinkers:   make(map[string]Sinker),
-		dbConfigs: make(map[string]config.DatabaseConfig),
+		dbConfigs: make(map[string]config.SinkConfig),
 	}
 }
 
 // Configure configures the manager with database configurations
-func (m *Manager) Configure(dbConfigs map[string]config.DatabaseConfig) {
+func (m *Manager) Configure(dbConfigs map[string]config.SinkConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.dbConfigs = dbConfigs
@@ -78,20 +77,14 @@ func (m *Manager) GetSinker(dbName string) (Sinker, error) {
 }
 
 // createSQLiteSinker creates a SQLite sinker for the given database config
-func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig) (*sinkSqlite.Sinker, error) {
-	path := dbConfig.Path
+func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*sinkSqlite.Sinker, error) {
+	path := dbConfig.DSN
 	if path == "" {
 		// Default path for SQLite
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	cfg := pkgSqlite.Config{
-		File:          path,
-		ModuleName:    "dbkrab",
-		MigrationPath: dbConfig.MigrationPath,
-	}
-
-	s, err := sinkSqlite.NewSinker(name, cfg)
+	s, err := sinkSqlite.NewSinker(name, path, dbConfig.Migrations)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite sinker: %w", err)
 	}
@@ -186,7 +179,7 @@ func (m *Manager) ListDatabases() []string {
 }
 
 // GetSinkConfig returns the configuration for a named sink
-func (m *Manager) GetSinkConfig(dbName string) (config.DatabaseConfig, bool) {
+func (m *Manager) GetSinkConfig(dbName string) (config.SinkConfig, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	cfg, ok := m.dbConfigs[dbName]
@@ -207,7 +200,7 @@ func (m *Manager) QueryTables(dbName string) ([]string, error) {
 		return nil, fmt.Errorf("QueryTables only supported for sqlite sinks")
 	}
 
-	path := dbConfig.Path
+	path := dbConfig.DSN
 	if path == "" {
 		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
 	}
@@ -255,7 +248,7 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		return nil, nil, fmt.Errorf("Query only supported for sqlite sinks")
 	}
 
-	path := dbConfig.Path
+	path := dbConfig.DSN
 	if path == "" {
 		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
 	}

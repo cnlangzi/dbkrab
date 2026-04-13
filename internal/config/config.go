@@ -48,15 +48,14 @@ type PluginConfig struct {
 	Path    string `yaml:"path"`
 }
 
-// DatabaseConfig contains configuration for a named database
-type DatabaseConfig struct {
+// SinkConfig contains configuration for a business sink
+type SinkConfig struct {
 	Id              string `yaml:"-"`                // Auto-generated 12-char hash ID (not in YAML)
 	Name            string `yaml:"name"`             // Sink name (used as key in array format)
 	Description    string `yaml:"description"`     // Human-readable description
 	Type            string `yaml:"type"`            // sqlite, duckdb, mssql, etc.
-	Path            string `yaml:"path"`             // Path for file-based databases
-	MigrationPath  string `yaml:"migrations"`      // Path to migration SQL files
-	ConnectionString string `yaml:"connection_string"` // Connection string for network databases
+	DSN            string `yaml:"dsn"`             // Data Source Name (file path for sqlite, connection string for others)
+	Migrations  string `yaml:"migrations"`      // Path to migration SQL files
 }
 
 // IsEnabled returns true only if val is explicitly set to true, "on", or "1"
@@ -94,13 +93,13 @@ type AppConfig struct {
 	DLQ    string `yaml:"dlq"` // Path for DLQ DB (dlq_entries)
 }
 
-// SinksConfig is a slice of DatabaseConfig for business sinks.
+// SinksConfig is a slice of SinkConfig for business sinks.
 // It unmarshals directly from a YAML array.
-type SinksConfig []DatabaseConfig
+type SinksConfig []SinkConfig
 
 // ToMap converts to a map keyed by Name (for plugin/API compatibility).
-func (s SinksConfig) ToMap() map[string]DatabaseConfig {
-	m := make(map[string]DatabaseConfig, len(s))
+func (s SinksConfig) ToMap() map[string]SinkConfig {
+	m := make(map[string]SinkConfig, len(s))
 	for _, db := range s {
 		m[db.Name] = db
 	}
@@ -110,10 +109,10 @@ func (s SinksConfig) ToMap() map[string]DatabaseConfig {
 // BasePath returns the parent directory of the first sink's path.
 // Used internally by the API server for file serving.
 func (s SinksConfig) BasePath() string {
-	if len(s) == 0 || s[0].Path == "" {
+	if len(s) == 0 || s[0].DSN == "" {
 		return "./data/sinks"
 	}
-	return filepath.Dir(s[0].Path)
+	return filepath.Dir(s[0].DSN)
 }
 
 // OffsetConfig contains offset storage configuration
@@ -260,7 +259,7 @@ func Load(path string) (*Config, error) {
 	// Generate sink IDs (12-char hash based on name+path)
 	for i := range cfg.Sinks {
 		if cfg.Sinks[i].Id == "" {
-			cfg.Sinks[i].Id = generateSinkId(cfg.Sinks[i].Name, cfg.Sinks[i].Path)
+			cfg.Sinks[i].Id = generateSinkId(cfg.Sinks[i].Name, cfg.Sinks[i].DSN)
 		}
 	}
 
