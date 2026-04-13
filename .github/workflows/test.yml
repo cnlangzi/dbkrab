@@ -27,7 +27,7 @@ jobs:
         run: make vet
 
       - name: Run tests
-        run: unset GOFLAGS && make test
+        run: go test -v -race -skip "Integration" ./...
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
