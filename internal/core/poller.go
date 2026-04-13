@@ -359,7 +359,6 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// P0-6: Use timeout context for CDC queries to prevent blocking
 	const queryTimeout = 10 * time.Second
-	const minLSNTimeout = 5 * time.Second // Separate timeout for GetMinLSN
 	const changesTimeout = 10 * time.Second // Separate timeout for GetChanges
 	
 	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
