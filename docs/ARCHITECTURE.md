@@ -190,6 +190,11 @@ internal/store/migrations/
 -- Migration: 001_initial
 -- Module: dbkrab-store
 -- Description: Create initial schema
+-- Versioning Rules:
+--   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
+--   - Schema table-structure changes: increment minor version (e.g., 1.1.0, 1.2.0)
+--   - Field-only changes (defaults, constraints without structural change): increment patch (e.g., 1.0.1)
+--   - All migrations live under the initial semver folder (1.0.0) per current policy decision
 
 CREATE TABLE IF NOT EXISTS transactions (...);
 CREATE INDEX IF NOT EXISTS idx_xxx ON transactions(...);
@@ -258,14 +263,16 @@ The `transactions` table stores captured CDC changes:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INTEGER | Local autoincrement ID |
-| `transaction_id` | TEXT | MSSQL transaction ID (GUID) |
+| `id` | TEXT | Content-based hash (SHA256 of transaction_id+table_name+data+lsn+operation, first 16 bytes as 32-char hex). Primary key; prevents CDC record loss from LSN advancement skipping rows in same LSN group. |
+| `transaction_id` | TEXT | MSSQL transaction ID (GUID); NOT NULL for transaction boundary safety and diagnostics |
 | `table_name` | TEXT | Source table name |
 | `operation` | TEXT | Operation type (INSERT/DELETE/UPDATE_AFTER) |
 | `data` | TEXT | JSON-encoded row data |
-| `lsn` | TEXT | CDC LSN as hex string (e.g., `0x0000002D00000A760066`), nullable |
+| `lsn` | TEXT | CDC LSN as hex string (e.g., `0x0000002D00000A760066`), retained for tracing/debugging |
 | `changed_at` | TIMESTAMP | Transaction commit time from MSSQL |
 | `pulled_at` | TIMESTAMP | When the change was pulled |
+
+**Content-Based ID**: The `id` column uses SHA256(transaction_id + table_name + data + lsn + operation), truncated to the first 16 bytes (32 hex characters). This is deterministic and unique per change content. Using a content-based primary key instead of an auto-increment integer prevents record loss when LSN advancement skips remaining rows in the same LSN group during CDC pulls. Insert operations use `INSERT OR IGNORE` to silently skip duplicates.
 
 **LSN Semantics**: LSN (Log Sequence Number) is a transaction-level identifier from MSSQL CDC. Multiple row changes in the same transaction share the same LSN. Stored as a `0x`-prefixed hex string for readability and deterministic sorting.
 
