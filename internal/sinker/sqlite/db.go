@@ -20,7 +20,7 @@ import (
 // providing read/write separation and migration support.
 type DB = sqlite.DB
 
-// Config holds SQLite configuration options.
+// Config holds SQLite configuration options for sinker.
 type Config struct {
 	// File is the path to the SQLite file. Use ":memory:" for in-memory database.
 	File string
@@ -75,6 +75,10 @@ func New(ctx context.Context, config Config) (*DB, error) {
 			_ = db.Close()
 			return nil, fmt.Errorf("run migrations: %w", err)
 		}
+	} else {
+		// No migration path provided - fail fast to ensure explicit table creation
+		// This prevents silent creation of tables with incorrect schema via EnsureTable
+		return nil, fmt.Errorf("migration path is required for sinker SQLite databases: please provide migrations in config")
 	}
 
 	return db, nil

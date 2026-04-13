@@ -11,7 +11,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
-	pkgSqlite "github.com/cnlangzi/dbkrab/pkg/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -85,7 +84,7 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.DatabaseConfig
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	cfg := pkgSqlite.Config{
+	cfg := sinkSqlite.Config{
 		File:          path,
 		ModuleName:    "dbkrab",
 		MigrationPath: dbConfig.MigrationPath,
