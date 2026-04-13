@@ -27,8 +27,8 @@ type Config struct {
 	// ModuleName is used for migration discovery.
 	ModuleName string
 
-	// MigrationPath is the directory path for migration files.
-	MigrationPath string
+	// Migrations is the directory path for migration files.
+	Migrations string
 
 	// MaxOpenConns sets maximum open connections for Reader.
 	MaxOpenConnsReader int
@@ -51,13 +51,13 @@ func New(ctx context.Context, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Run migrations if MigrationPath is provided
-	if config.MigrationPath != "" {
+	// Run migrations if Migrations is provided
+	if config.Migrations != "" {
 		// Create sqle.DB from the underlying *sql.DB for migrations
 		sqleDB := sqle.Open(db.Writer.DB)
 
 		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(os.DirFS(config.MigrationPath), migrate.WithModule(config.ModuleName)); err != nil {
+		if err := migrator.Discover(os.DirFS(config.Migrations), migrate.WithModule(config.ModuleName)); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("load migrations: %w", err)
 		}

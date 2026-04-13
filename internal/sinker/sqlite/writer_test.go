@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, sinker)
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          ":memory:",
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -302,7 +302,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("mydb", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -346,7 +346,7 @@ CREATE TABLE IF NOT EXISTS orders (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -394,7 +394,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 
@@ -420,7 +420,7 @@ CREATE TABLE IF NOT EXISTS users (
 	sinker, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: tmpMigrationDir,
+		Migrations: tmpMigrationDir,
 	})
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
@@ -474,7 +474,7 @@ func TestSinker_MissingMigrationPath(t *testing.T) {
 	_, err := NewSinker("test", Config{
 		File:          tmpFile,
 		ModuleName:    "test",
-		MigrationPath: "", // No migration path
+		Migrations: "", // No migration path
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "migration path is required")
