@@ -2,6 +2,7 @@ package sql
 
 import (
 	"database/sql"
+	"strings"
 )
 
 // DriverType represents the type of database driver
@@ -89,10 +90,28 @@ func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, erro
 	}
 	defer func() { _ = rows.Close() }()
 
-	// Get column names
+	// Get column names and types
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
+	}
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
+	}
+
+	// Identify which columns should be converted from []byte to string
+	// By default, convert []byte to string for all types unless explicitly kept as binary
+	byteColumns := make([]bool, len(colTypes))
+	for i, ct := range colTypes {
+		switch strings.ToUpper(ct.DatabaseTypeName()) {
+		case "BINARY", "VARBINARY", "IMAGE":
+			// Keep these as []byte (binary types)
+		default:
+			// Convert other []byte values to string (e.g., DECIMAL, NUMERIC, any unknown)
+			byteColumns[i] = true
+		}
 	}
 
 	// Scan results
@@ -108,6 +127,16 @@ func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, erro
 		if err != nil {
 			return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 		}
+
+		// Convert []byte to string for non-binary types to avoid base64 encoding in JSON
+		for i, v := range values {
+			if byteColumns[i] {
+				if bs, ok := v.([]byte); ok {
+					values[i] = string(bs)
+				}
+			}
+		}
+
 		resultRows = append(resultRows, values)
 	}
 
