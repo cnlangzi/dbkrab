@@ -18,7 +18,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
-	"github.com/cnlangzi/dbkrab/plugin/sql"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
@@ -243,40 +242,8 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	// Skills edit page - SSR with skill data passed to template
-	// Override auto-registered route to pass skill data
-	s.app.Get("/skills/edit/{id}", s.handleSkillsEditPage)
-}
-
-// handleSkillsEditPage handles GET /skills/edit/{id} - SSR page
-func (s *Server) handleSkillsEditPage(c *xun.Context) error {
-	id := c.Request.PathValue("id")
-	if id == "" {
-		return c.View(map[string]any{"error": "Skill ID required"})
-	}
-
-	if s.manager == nil {
-		return c.View(map[string]any{"error": "Plugin manager not initialized"})
-	}
-
-	// Get skill from memory
-	resp := s.manager.HandleAPI("get_skill", map[string]any{"id": id})
-	if !resp.Success {
-		return c.View(map[string]any{"error": resp.Error})
-	}
-
-	skill, ok := resp.Data.(*sql.Skill)
-	if !ok {
-		return c.View(map[string]any{"error": "Invalid skill data"})
-	}
-
-	// Pass skill data to template for SSR
-	return c.View(map[string]any{
-		"id":      skill.Id,
-		"name":    skill.Name,
-		"file":    skill.File,
-		"content": skill.Raw,
-	})
+	// Skills edit page uses JS to load data (same pattern as sinks page)
+	// This is simpler and more reliable with xun's auto-routing
 }
 
 // handlePlugins handles GET /api/plugins
