@@ -2,7 +2,8 @@ package sql
 
 import (
 	"database/sql"
-	"strings"
+
+	"github.com/cnlangzi/dbkrab/internal/scanner"
 )
 
 // DriverType represents the type of database driver
@@ -101,43 +102,28 @@ func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, erro
 		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 	}
 
-	// Identify which columns should be converted from []byte to string
-	// By default, convert []byte to string for all types unless explicitly kept as binary
-	byteColumns := make([]bool, len(colTypes))
-	for i, ct := range colTypes {
-		switch strings.ToUpper(ct.DatabaseTypeName()) {
-		case "BINARY", "VARBINARY", "IMAGE":
-			// Keep these as []byte (binary types)
-		default:
-			// Convert other []byte values to string (e.g., DECIMAL, NUMERIC, any unknown)
-			byteColumns[i] = true
-		}
-	}
+	// Use ScannerFactory to create appropriate scanners for each column
+	factory := scanner.NewScannerFactory()
+	dest := factory.CreateDest(colTypes)
 
 	// Scan results
 	var resultRows [][]interface{}
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		err := rows.Scan(valuePtrs...)
+		err := rows.Scan(dest...)
 		if err != nil {
 			return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 		}
 
-		// Convert []byte to string for non-binary types to avoid base64 encoding in JSON
-		for i, v := range values {
-			if byteColumns[i] {
-				if bs, ok := v.([]byte); ok {
-					values[i] = string(bs)
-				}
+		// Extract values from scanners
+		row := make([]interface{}, len(dest))
+		for i, d := range dest {
+			if s, ok := d.(scanner.Scanner); ok {
+				row[i], _ = s.Value()
+			} else {
+				row[i] = d
 			}
 		}
-
-		resultRows = append(resultRows, values)
+		resultRows = append(resultRows, row)
 	}
 
 	return &DataSet{
