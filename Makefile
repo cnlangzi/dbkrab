@@ -21,7 +21,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build test run clean lint coverage install help
+.PHONY: all build test dev clean lint coverage install help
 
 all: build
 
@@ -49,9 +49,9 @@ coverage:
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
-## run: Run with example config
-run: build
-	@echo "Running $(BINARY_NAME)..."
+## dev: Run from project directory (code/dbkrab)
+dev: build
+	@echo "Running $(BINARY_NAME) from project directory..."
 	./$(BUILD_DIR)/$(BINARY_NAME) -config config.yml
 
 ## run-example: Run with example config
