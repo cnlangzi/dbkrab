@@ -241,15 +241,7 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	
-	// Sinks page auto-registered by xun: pages/sinks.html → GET /sinks
-	
-	// Skills edit page - pass id to template via .Data
-	// Override auto-registered route to pass data
-	s.app.Get("/skills/edit/{id}", func(c *xun.Context) error {
-		id := c.Request.PathValue("id")
-		return c.View(map[string]any{"id": id})
-	})
+	// Skills edit page uses JavaScript to extract ID from URL (see sinks/{id}.html pattern)
 }
 
 // handlePlugins handles GET /api/plugins

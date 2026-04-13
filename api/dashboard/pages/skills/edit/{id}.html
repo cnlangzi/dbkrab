@@ -44,7 +44,7 @@
             <div class="text-sm text-text">
                 <p class="font-medium text-text mb-1">Editing Tips</p>
                 <ul class="text-textMuted space-y-1">
-                    <li>• ID: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-id">{{.Data.Id}}</code></li>
+                    <li>• ID: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-id">-</code></li>
                     <li>• File: <code class="px-1 py-0.5 bg-surfaceHover rounded" id="skill-file">-</code></li>
                     <li>• Plugin will auto-reload after ~1 second</li>
                     <li>• At least one table must be specified in <code class="px-1 py-0.5 bg-surfaceHover rounded">on</code> field</li>
@@ -64,7 +64,7 @@
 
 <script>
 // Skill ID from URL
-const skillId = '{{.Data.Id}}';
+const skillId = window.location.pathname.split('/').pop(); // Extract ID from URL
 
 // Load skill content
 async function loadSkill() {
