@@ -14,7 +14,7 @@ BUILD_DIR := bin
 CMD_DIR := cmd/dbkrab
 GO := go
 # -p 1 limits parallelism to single process (useful for limited memory environments)
-GOFLAGS := -v -p 1
+TEST_PARALLEL ?= -p 1
 
 # Version info
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -35,7 +35,7 @@ build:
 ## test: Run all tests (excluding integration tests)
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race $(GOFLAGS) -skip "Integration|TestMergeSinksOnConflictInconsistent|TestMigration" ./...
+	$(GO) test -v -race -v $(TEST_PARALLEL) -skip "Integration" ./...
 
 ## test-short: Run short tests
 test-short:

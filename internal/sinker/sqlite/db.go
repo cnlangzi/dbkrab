@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 
@@ -20,126 +19,42 @@ import (
 // providing read/write separation and migration support.
 type DB = sqlite.DB
 
-// Config holds SQLite configuration options.
-type Config struct {
-	// File is the path to the SQLite file. Use ":memory:" for in-memory database.
-	File string
-
-	// ModuleName is used for migration discovery.
-	ModuleName string
-
-	// MigrationPath is the directory path for migration files.
-	MigrationPath string
-
-	// InMemory indicates if this is an in-memory database.
-	InMemory bool
-
-	// MaxOpenConns sets maximum open connections for Reader.
-	MaxOpenConnsReader int
-
-	// MaxIdleConns sets maximum idle connections for Reader.
-	MaxIdleConnsReader int
-}
-
-// New creates a new SQLite DB with read/write separation and migration support.
-func New(ctx context.Context, config Config) (*DB, error) {
-	if config.File == "" {
-		config.File = ":memory:"
+// NewSinkerDB creates a new SQLite DB with read/write separation and migration support.
+// ModuleName is hardcoded to "dbkrab".
+func NewSinkerDB(ctx context.Context, dsn string, migrations string) (*DB, error) {
+	if dsn == "" {
+		dsn = ":memory:"
 	}
 
-	inmemory := strings.HasPrefix(config.File, ":memory:")
-	dsn := buildDSN(config.File, inmemory)
+	inmemory := strings.HasPrefix(dsn, ":memory:")
 
 	db, err := sqlite.Open(ctx, dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	// Run migrations if MigrationPath is provided
-	if config.MigrationPath != "" {
-		// Create sqle.DB from the underlying *sql.DB for migrations
+	// Run migrations if Migrations is provided
+	if migrations != "" {
 		sqleDB := sqle.Open(db.Writer.DB)
-
 		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(os.DirFS(config.MigrationPath), migrate.WithModule(config.ModuleName)); err != nil {
+		if err := migrator.Discover(os.DirFS(migrations), migrate.WithModule("dbkrab")); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("load migrations: %w", err)
 		}
-
 		if err := migrator.Init(context.Background()); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("init migrations: %w", err)
 		}
-
 		if err := migrator.Migrate(context.Background()); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("run migrations: %w", err)
 		}
+	} else if !inmemory {
+		// No migration path provided for file-based database - fail fast
+		return nil, fmt.Errorf("migration path is required for sinker SQLite databases: please provide migrations in config")
 	}
 
 	return db, nil
-}
-
-// NewInMemory creates an in-memory SQLite DB with shared cache.
-func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
-	db, err := sqlite.Open(ctx, ":memory:")
-	if err != nil {
-		return nil, err
-	}
-
-	// Run migrations if provided
-	if migrations != nil {
-		// Create sqle.DB from the underlying *sql.DB for migrations
-		sqleDB := sqle.Open(db.Writer.DB)
-
-		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(migrations, migrate.WithModule(moduleName)); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("load migrations: %w", err)
-		}
-
-		if err := migrator.Init(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("init migrations: %w", err)
-		}
-
-		if err := migrator.Migrate(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("run migrations: %w", err)
-		}
-	}
-
-	return db, nil
-}
-
-// NewFile creates a SQLite DB from a file path.
-func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
-	// Ensure file exists
-	_, err := os.Stat(file)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			err = os.WriteFile(file, nil, 0666)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-
-	return New(ctx, Config{
-		File:          file,
-		InMemory:      false,
-		ModuleName:    moduleName,
-		MigrationPath: migrationPath,
-	})
-}
-
-func buildDSN(file string, inmemory bool) string {
-	if inmemory {
-		return ":memory:"
-	}
-	return file
 }
 
 // Execer is an interface for executing queries
