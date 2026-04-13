@@ -924,6 +924,7 @@ func (s *Server) handleSkillSaveHTML(c *xun.Context) error {
 func writeHTML(c *xun.Context, html string) error {
 	c.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response.WriteHeader(http.StatusOK)
+	//nolint:errcheck
 	c.Response.Write([]byte(html))
 	return nil
 }
