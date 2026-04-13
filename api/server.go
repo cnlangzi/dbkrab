@@ -191,6 +191,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/skills/{id}", s.handleSkillGet, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills", s.handleSkillCreate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/{id}/save", s.handleSkillSave, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/skills/{id}/save/html", s.handleSkillSaveHTML) // HTML fragment for htmx
 	api.Delete("/skills/{id}", s.handleSkillDelete, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/skills/validate", s.handleSkillValidate, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/skills/file/{path...}", s.handleSkillFileGet, xun.WithViewer(&xun.JsonViewer{}))
@@ -241,8 +242,8 @@ func (s *Server) registerAPIRoutes() {
 // registerPageRoutes registers page routes
 func (s *Server) registerPageRoutes() {
 	// Pages are auto-registered by xun from pages/ directory
-	
-	// Sinks page auto-registered by xun: pages/sinks.html → GET /sinks
+	// Skills edit page uses JS to load data (same pattern as sinks page)
+	// This is simpler and more reliable with xun's auto-routing
 }
 
 // handlePlugins handles GET /api/plugins

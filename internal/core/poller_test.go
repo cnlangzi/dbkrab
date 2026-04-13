@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 )
 
@@ -82,6 +83,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 		offsets:       offsetStore,
 		handler:       failHandler,
 		metricsWindow: newPollMetricsWindow(60),
+		querier:       &mockQuerier{},
 	}
 
 	// Create test transaction
@@ -330,6 +332,31 @@ func (h *mockHandler) Handle(ctx context.Context, tx *Transaction) error {
 		return errors.New("simulated handler failure")
 	}
 	return nil
+}
+
+type mockQuerier struct{}
+
+func (q *mockQuerier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
+	// Simple mock: just increment the last byte
+	if len(lsn) == 0 {
+		return lsn, nil
+	}
+	result := make([]byte, len(lsn))
+	copy(result, lsn)
+	result[len(result)-1]++
+	return result, nil
+}
+
+func (q *mockQuerier) GetMaxLSN(ctx context.Context) ([]byte, error) {
+	return []byte{0, 0, 0, 0, 0, 0, 0, 0}, nil
+}
+
+func (q *mockQuerier) GetMinLSN(ctx context.Context, captureInstance string) ([]byte, error) {
+	return []byte{0, 0, 0, 0, 0, 0, 0, 0}, nil
+}
+
+func (q *mockQuerier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]cdc.Change, error) {
+	return nil, nil
 }
 
 // TestPollMetricsWindow tests the sliding window functionality
