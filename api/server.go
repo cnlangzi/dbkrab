@@ -1154,12 +1154,12 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 				"id":         dbCfg.Id,
 				"name":       dbCfg.Name,
 				"type":       dbCfg.Type,
-				"file":       dbCfg.Path,
+				"file":       dbCfg.DSN,
 				"configured": true,
 			}
 
 			// Check if database file exists
-			if info, err := os.Stat(dbCfg.Path); err == nil {
+			if info, err := os.Stat(dbCfg.DSN); err == nil {
 				sink["exists"] = true
 				sink["size"] = info.Size()
 				sink["sizeHuman"] = formatFileSize(info.Size())
@@ -1186,7 +1186,7 @@ func (s *Server) handleSinksList(c *xun.Context) error {
 }
 
 // getSinkById finds the sink by ID from config
-func (s *Server) getSinkById(id string) (*config.DatabaseConfig, error) {
+func (s *Server) getSinkById(id string) (*config.SinkConfig, error) {
 	for i := range s.config.Sinks {
 		if s.config.Sinks[i].Id == id {
 			return &s.config.Sinks[i], nil

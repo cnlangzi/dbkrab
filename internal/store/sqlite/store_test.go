@@ -57,6 +57,15 @@ func newTestDB(t *testing.T) (*store.DB, string) {
 	`)
 	require.NoError(t, err)
 
+	// Create users table for WriteOps tests (since EnsureTable was removed)
+	_, err = db.Writer.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id INTEGER PRIMARY KEY,
+			name TEXT
+		)
+	`)
+	require.NoError(t, err)
+
 	// Initialize poller state row
 	_, err = db.Writer.Exec(`
 		INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)

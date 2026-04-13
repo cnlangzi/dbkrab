@@ -1,4 +1,3 @@
-// Package sqliteutil provides shared utilities for SQLite operations.
 package sqliteutil
 
 import (
@@ -8,36 +7,19 @@ import (
 )
 
 // TxExec is the interface for executing statements within a transaction.
-// Both *sql.Tx and pkg/sqlite.TxExec implement this interface.
+// Both *sql.Tx and *DB (from this package) implement this interface.
 type TxExec interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Commit() error
 	Rollback() error
 }
 
-// EnsureTable creates a table with the given columns if it doesn't exist.
-func EnsureTable(tx TxExec, table string, columns []string) error {
-	escapedCols := make([]string, len(columns))
-	for i, col := range columns {
-		escapedCols[i] = fmt.Sprintf("[%s] TEXT", col)
-	}
-
-	sqlStr := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)",
-		table,
-		strings.Join(escapedCols, ", "))
-
-	_, err := tx.Exec(sqlStr)
-	return err
-}
-
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
+// Tables must be created via migrations before calling this function.
+// This function will NOT create tables - it assumes the table already exists.
 func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
-	}
-
-	if err := EnsureTable(tx, config.Output, columns); err != nil {
-		return err
 	}
 
 	for _, row := range rows {
