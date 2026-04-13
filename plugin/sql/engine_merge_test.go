@@ -432,7 +432,7 @@ func TestMergeSinks(t *testing.T) {
 					}
 				}
 			}
-		})
+})
 	}
 }
 
