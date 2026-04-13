@@ -2,7 +2,6 @@ package sql
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/ha1tch/tsqlparser"
@@ -14,6 +13,7 @@ import (
 // - If a column has an AS alias, use the alias
 // - If no alias, strip any table prefix (e.g. o.order_id -> order_id) and use the column name
 // - @variable tokens (e.g. @cdc_lsn) map to the variable name without the @ (e.g. cdc_lsn)
+// Returns an error if tsqlparser fails to parse the SQL.
 func extractOutputFields(sql string) ([]string, error) {
 	program, parseErrors := tsqlparser.Parse(sql)
 	if len(parseErrors) > 0 {
@@ -115,120 +115,6 @@ func extractFieldName(expr ast.Expression) string {
 	return ""
 }
 
-// extractFieldsFallback uses regex-based fallback for edge cases
-// where the parser cannot handle the SQL template.
-func extractFieldsFallback(sql string) []string {
-	var fields []string
-	seen := make(map[string]bool)
-
-	// Pattern to match SELECT columns, handling aliases and table prefixes
-	lines := strings.Split(sql, "\n")
-	inSelect := false
-	selectDepth := 0
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Track SELECT clause
-		if strings.Contains(strings.ToUpper(trimmed), "SELECT") {
-			inSelect = true
-		}
-
-		if inSelect {
-			selectDepth += strings.Count(trimmed, "(")
-			selectDepth -= strings.Count(trimmed, ")")
-
-			// Look for AS aliases
-			asPattern := `(?i)AS\s+([a-zA-Z_][a-zA-Z0-9_]*)`
-			asMatches := regexFindAll(asPattern, trimmed)
-			for _, alias := range asMatches {
-				if !seen[alias] {
-					fields = append(fields, alias)
-					seen[alias] = true
-				}
-			}
-
-			// Look for @variables
-			varPattern := `@([a-zA-Z_][a-zA-Z0-9_]*)`
-			varMatches := regexFindAll(varPattern, trimmed)
-			for _, v := range varMatches {
-				if !seen[v] {
-					fields = append(fields, v)
-					seen[v] = true
-				}
-			}
-
-			// Look for table.column patterns and extract column name
-			// But only if there's no alias (we already handled aliases above)
-			tableColPattern := `([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)`
-			tcMatches := regexFindAll(tableColPattern, trimmed)
-			for i := 0; i < len(tcMatches); i += 2 {
-				col := tcMatches[i+1]
-				if !seen[col] {
-					fields = append(fields, col)
-					seen[col] = true
-				}
-			}
-
-			if selectDepth <= 0 && strings.Contains(trimmed, "FROM") {
-				inSelect = false
-			}
-		}
-	}
-
-	return fields
-}
-
-// regexFindAll finds all matches of a pattern in a string
-func regexFindAll(pattern, s string) []string {
-	var results []string
-	// For @variable pattern
-	if strings.Contains(pattern, `@\([a-zA-Z_]`) {
-		// Looking for @variables
-		start := 0
-		for {
-			idx := strings.Index(s[start:], "@")
-			if idx == -1 {
-				break
-			}
-			idx += start
-			// Find end of variable name
-			end := idx + 1
-			for end < len(s) && (s[end] == '_' || s[end] == '@' || (s[end] >= 'a' && s[end] <= 'z') || (s[end] >= 'A' && s[end] <= 'Z') || (s[end] >= '0' && s[end] <= '9')) {
-				end++
-			}
-			if end > idx+1 {
-				results = append(results, s[idx+1:end])
-			}
-			start = end
-		}
-	}
-
-	return results
-}
-
-// extractFields extracts output fields from SQL using the parser,
-// with fallback to regex-based extraction if parsing fails.
-func extractFields(sql string) []string {
-	fields, err := extractOutputFields(sql)
-	if err != nil {
-		log.Printf("Warning: failed to parse SQL with tsqlparser, using fallback: %v", err)
-		return extractFieldsFallback(sql)
-	}
-
-	// Deduplicate while preserving order (first-seen order)
-	seen := make(map[string]bool)
-	var uniqueFields []string
-	for _, f := range fields {
-		if !seen[f] {
-			seen[f] = true
-			uniqueFields = append(uniqueFields, f)
-		}
-	}
-
-	return uniqueFields
-}
-
 // sinkIsInsertOrUpdate returns true if the sink's When includes insert or update.
 func sinkIsInsertOrUpdate(sink *Sink) bool {
 	for _, w := range sink.When {
@@ -251,7 +137,7 @@ func sinkIsDeleteOnly(sink *Sink) bool {
 
 // populateSkillOutputs populates the Outputs map for a skill by analyzing
 // the SQL from all insert/update sinks.
-func populateSkillOutputs(skill *Skill) {
+func populateSkillOutputs(skill *Skill) error {
 	skill.Outputs = make(map[string][]string)
 
 	// Track fields per output table
@@ -278,7 +164,10 @@ func populateSkillOutputs(skill *Skill) {
 		}
 
 		// Extract fields from the SQL
-		fields := extractFields(sql)
+		fields, err := extractOutputFields(sql)
+		if err != nil {
+			return fmt.Errorf("parse sink SQL for output %q: %w", sink.Output, err)
+		}
 
 		// Merge into output fields
 		if sink.Output == "" {
@@ -300,4 +189,5 @@ func populateSkillOutputs(skill *Skill) {
 	// Deterministic order: first-seen SQL order (which is preserved in the skill.Sinks iteration order)
 	// Fields within each output are already in first-seen order
 	skill.Outputs = outputFields
+	return nil
 }

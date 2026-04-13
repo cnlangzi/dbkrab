@@ -111,7 +111,9 @@ func (l *Loader) Load(file string) (*Skill, error) {
 	}
 
 	// Populate Skill.Outputs by parsing sink SQL
-	populateSkillOutputs(&skill)
+	if err := populateSkillOutputs(&skill); err != nil {
+		return nil, fmt.Errorf("populate skill outputs: %w", err)
+	}
 
 	return &skill, nil
 }
