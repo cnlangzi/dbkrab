@@ -19,12 +19,6 @@ import (
 // providing read/write separation and migration support.
 type DB = sqlite.DB
 
-// config holds SQLite configuration options for internal use.
-type config struct {
-	DSN        string
-	Migrations string
-}
-
 // NewSinkerDB creates a new SQLite DB with read/write separation and migration support.
 // ModuleName is hardcoded to "dbkrab".
 func NewSinkerDB(ctx context.Context, dsn string, migrations string) (*DB, error) {
