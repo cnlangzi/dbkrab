@@ -427,7 +427,11 @@ func (s *Server) handleSkillCreate(c *xun.Context) error {
 	}
 
 	// Check if skill file already exists
-	skillPath := filepath.Join("skills", req.Name+".yml")
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, req.Name+".yml")
 	if _, err := os.Stat(skillPath); err == nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -524,13 +528,19 @@ func (s *Server) handleSkillSave(c *xun.Context) error {
 		})
 	}
 
-	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", filePath)
+	// Security: ensure path is within skills/sql directory
+	// filePath is relative to config.plugins.sql.path (e.g., "cost.yml")
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid path: must be within skills directory",
+			"error":   "Invalid path: must be within skills/sql directory",
 		})
 	}
 
@@ -588,13 +598,18 @@ func (s *Server) handleSkillDelete(c *xun.Context) error {
 
 	filePath := skill.File
 
-	// Security: ensure path is within skills directory
-	skillPath := filepath.Join("skills", filePath)
+	// Security: ensure path is within skills/sql directory
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   "Invalid path: must be within skills directory",
+			"error":   "Invalid path: must be within skills/sql directory",
 		})
 	}
 
@@ -710,8 +725,10 @@ func (s *Server) handleSkillFileGet(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	// filePath should be like "sql/cost.yml" (includes subdirectory)
+	sqlPath := "skills" // base skills directory
+	cleanPath := filepath.Clean(filepath.Join(sqlPath, filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(sqlPath)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -752,8 +769,10 @@ func (s *Server) handleSkillFileSave(c *xun.Context) error {
 	}
 
 	// Security: prevent path traversal
-	cleanPath := filepath.Clean(filepath.Join("skills", filePath))
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	// filePath should be like "sql/cost.yml" (includes subdirectory)
+	skillsDir := "skills" // base skills directory
+	cleanPath := filepath.Clean(filepath.Join(skillsDir, filePath))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(skillsDir)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -810,9 +829,11 @@ func (s *Server) handleFolderCreate(c *xun.Context) error {
 	}
 
 	// Security: ensure path is within skills directory
-	folderPath := filepath.Join("skills", req.Name)
+	// This allows creating subdirectories within skills
+	skillsDir := "skills"
+	folderPath := filepath.Join(skillsDir, req.Name)
 	cleanPath := filepath.Clean(folderPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	if !strings.HasPrefix(cleanPath, filepath.Clean(skillsDir)) {
 		return c.View(map[string]any{
 			"success": false,
 			"error":   "Invalid path: must be within skills directory",
@@ -877,10 +898,15 @@ func (s *Server) handleSkillSaveHTML(c *xun.Context) error {
 		return writeHTML(c, "<p class='text-error'>At least one table required</p>")
 	}
 
-	// Security check
-	skillPath := filepath.Join("skills", filePath)
+	// Security: ensure path is within skills/sql directory
+	sqlPath := "skills/sql" // default
+	if s.config != nil && s.config.Plugins.SQL.Path != "" {
+		sqlPath = s.config.Plugins.SQL.Path
+	}
+	skillPath := filepath.Join(sqlPath, filePath)
 	cleanPath := filepath.Clean(skillPath)
-	if !strings.HasPrefix(cleanPath, filepath.Clean("skills")) {
+	cleanSqlPath := filepath.Clean(sqlPath)
+	if !strings.HasPrefix(cleanPath, cleanSqlPath) {
 		return writeHTML(c, "<p class='text-error'>Invalid path</p>")
 	}
 
