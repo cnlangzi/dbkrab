@@ -110,6 +110,9 @@ func (l *Loader) Load(file string) (*Skill, error) {
 		return nil, fmt.Errorf("validate sinks: %w", err)
 	}
 
+	// Populate Skill.Outputs by parsing sink SQL
+	populateSkillOutputs(&skill)
+
 	return &skill, nil
 }
 
