@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 
@@ -30,9 +29,6 @@ type Config struct {
 
 	// MigrationPath is the directory path for migration files.
 	MigrationPath string
-
-	// InMemory indicates if this is an in-memory database.
-	InMemory bool
 
 	// MaxOpenConns sets maximum open connections for Reader.
 	MaxOpenConnsReader int
@@ -75,68 +71,14 @@ func New(ctx context.Context, config Config) (*DB, error) {
 			_ = db.Close()
 			return nil, fmt.Errorf("run migrations: %w", err)
 		}
-	} else {
-		// No migration path provided - fail fast to ensure explicit table creation
+	} else if !inmemory {
+		// No migration path provided for file-based database - fail fast to ensure explicit table creation
 		// This prevents silent creation of tables with incorrect schema via EnsureTable
+		// In-memory databases (:memory:) can work without migrations as they are ephemeral
 		return nil, fmt.Errorf("migration path is required for sinker SQLite databases: please provide migrations in config")
 	}
 
 	return db, nil
-}
-
-// NewInMemory creates an in-memory SQLite DB with shared cache.
-func NewInMemory(ctx context.Context, moduleName string, migrations fs.FS) (*DB, error) {
-	db, err := sqlite.Open(ctx, ":memory:")
-	if err != nil {
-		return nil, err
-	}
-
-	// Run migrations if provided
-	if migrations != nil {
-		// Create sqle.DB from the underlying *sql.DB for migrations
-		sqleDB := sqle.Open(db.Writer.DB)
-
-		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(migrations, migrate.WithModule(moduleName)); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("load migrations: %w", err)
-		}
-
-		if err := migrator.Init(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("init migrations: %w", err)
-		}
-
-		if err := migrator.Migrate(context.Background()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("run migrations: %w", err)
-		}
-	}
-
-	return db, nil
-}
-
-// NewFile creates a SQLite DB from a file path.
-func NewFile(ctx context.Context, file string, moduleName string, migrationPath string) (*DB, error) {
-	// Ensure file exists
-	_, err := os.Stat(file)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			err = os.WriteFile(file, nil, 0666)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-
-	return New(ctx, Config{
-		File:          file,
-		InMemory:      false,
-		ModuleName:    moduleName,
-		MigrationPath: migrationPath,
-	})
 }
 
 func buildDSN(file string, inmemory bool) string {
