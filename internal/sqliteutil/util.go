@@ -13,7 +13,6 @@ type TxExec interface {
 	Commit() error
 	Rollback() error
 }
-
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
 // Tables must be created via migrations before calling this function.
 // This function will NOT create tables - it assumes the table already exists.

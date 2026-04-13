@@ -36,7 +36,7 @@ func (s *SQLiteSink) Write(ctx context.Context, ops []core.Sink) error {
 		return nil
 	}
 
-	tx, err := s.pool.Write().BeginTx(ctx, nil)
+	tx, err := s.pool.WriteTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -110,8 +110,15 @@ func sampleTypes(columns []string, rows [][]any) []string {
 	return types
 }
 
+// txExecutor allows both *sql.Tx and *sqlite.Tx to be used interchangeably
+type txExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Commit() error
+	Rollback() error
+}
+
 // insertInTx inserts DataSet into table
-func (s *SQLiteSink) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
+func (s *SQLiteSink) insertInTx(tx txExecutor, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -187,7 +194,7 @@ func (s *SQLiteSink) insertInTx(tx *sql.Tx, config core.SinkConfig, ds *core.Dat
 }
 
 // updateInTx updates records in table
-func (s *SQLiteSink) updateInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
+func (s *SQLiteSink) updateInTx(tx txExecutor, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -234,7 +241,7 @@ func (s *SQLiteSink) updateInTx(tx *sql.Tx, config core.SinkConfig, ds *core.Dat
 }
 
 // deleteInTx deletes records from table
-func (s *SQLiteSink) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.DataSet) error {
+func (s *SQLiteSink) deleteInTx(tx txExecutor, config core.SinkConfig, ds *core.DataSet) error {
 	if ds == nil || len(ds.Rows) == 0 {
 		return nil
 	}
@@ -277,7 +284,7 @@ func (s *SQLiteSink) deleteInTx(tx *sql.Tx, config core.SinkConfig, ds *core.Dat
 }
 
 // ensureTable ensures the table exists with the given columns and types
-func (s *SQLiteSink) ensureTable(tx *sql.Tx, table string, columns []string, colTypes []string) error {
+func (s *SQLiteSink) ensureTable(tx txExecutor, table string, columns []string, colTypes []string) error {
 	escapedCols := make([]string, len(columns))
 	for i, col := range columns {
 		escapedCols[i] = fmt.Sprintf("[%s] %s", col, colTypes[i])
@@ -300,8 +307,8 @@ func (s *SQLiteSink) RunMigrations() error {
 		return nil // No migrations directory, skip
 	}
 
-	// Create sqle.DB from the pool's write connection
-	sqleDB := sqle.Open(s.pool.Write())
+	// Create sqle.DB from the pool's underlying write connection
+	sqleDB := sqle.Open(s.pool.Write().Writer.DB)
 
 	migrator := migrate.New(sqleDB)
 	moduleName := "dbkrab-sink-" + s.skill.Name

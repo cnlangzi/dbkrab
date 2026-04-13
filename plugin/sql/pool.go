@@ -1,36 +1,32 @@
 package sql
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/cnlangzi/sqlite"
 )
 
-// Pool manages SQLite connections for a business sink database.
-// It provides read/write separation: writes go through a single connection
-// to avoid SQLITE_BUSY errors, while reads use a pool for concurrent access.
+// Pool wraps a cnlangzi/sqlite.DB for a business sink database.
+// cnlangzi/sqlite provides read/write separation, buffered batch writes,
+// and automatic WAL checkpoint management.
 type Pool struct {
-	name string // sink name, used for directory path
-	path string // resolved base path (e.g., ./data/sinks/business)
-
-	writeDB *sql.DB // single write connection
-	readDB  *sql.DB // read connection pool (WAL concurrent reads)
-	mu      sync.RWMutex
-	closed  atomic.Bool
+	name string    // sink name, used for directory path
+	path string    // resolved base path (e.g., ./data/sinks/business)
+	db   *sqlite.DB
+	mu   sync.RWMutex
+	closed atomic.Bool
 }
 
 // NewPool creates a new SQLite connection pool for a sink.
 // Path normalization: ./data/sinks/business.db -> ./data/sinks/business
 // The actual DB file will be at {path}/{name}.db
-func NewPool(name, sqlitePath string) (*Pool, error) {
+func NewPool(ctx context.Context, name, sqlitePath string) (*Pool, error) {
 	// Normalize path: remove .db extension if present to get directory
 	basePath := sqlitePath
 	if strings.HasSuffix(strings.ToLower(sqlitePath), ".db") {
@@ -55,69 +51,48 @@ func NewPool(name, sqlitePath string) (*Pool, error) {
 
 	dbPath := filepath.Join(basePath, name+".db")
 
+	// Open database using cnlangzi/sqlite
+	db, err := sqlite.Open(ctx, dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite database: %w", err)
+	}
+
 	pool := &Pool{
 		name: name,
 		path: basePath,
+		db:   db,
 	}
-
-	// Initialize write connection with single connection to avoid SQLITE_BUSY
-	writeDSN := buildDSN(dbPath, true)
-	writeDB, err := sql.Open("sqlite", writeDSN)
-	if err != nil {
-		return nil, fmt.Errorf("open write database: %w", err)
-	}
-	writeDB.SetMaxOpenConns(1)
-	writeDB.SetMaxIdleConns(1)
-	pool.writeDB = writeDB
-
-	// Initialize read connection with WAL for concurrent reads
-	readDSN := buildDSN(dbPath, false)
-	readDB, err := sql.Open("sqlite", readDSN)
-	if err != nil {
-		if closeErr := writeDB.Close(); closeErr != nil {
-			slog.Warn("failed to close writeDB", "error", closeErr)
-		}
-		return nil, fmt.Errorf("open read database: %w", err)
-	}
-	// Read pool can have multiple connections for concurrent reads
-	readDB.SetMaxOpenConns(10)
-	readDB.SetMaxIdleConns(5)
-	pool.readDB = readDB
 
 	return pool, nil
 }
 
-// buildDSN builds SQLite DSN with appropriate settings
-func buildDSN(dbPath string, write bool) string {
-	params := url.Values{}
-	params.Add("_journal_mode", "WAL")
-	params.Add("_synchronous", "NORMAL")
-	params.Add("_busy_timeout", "5000")
-	params.Add("_pragma", "temp_store(MEMORY)")
-	params.Add("_pragma", "cache_size(-100000)")
-	params.Add("_pragma", "mmap_size(1000000000)")
-	params.Add("cache", "shared")
-
-	// For write connection, disable WAL checkpointing to avoid busy errors
-	if write {
-		params.Add("_pragma", "wal_checkpoint(TRUNCATE)")
-	}
-
-	return dbPath + "?" + params.Encode()
-}
-
-// Write returns the write database connection (single-threaded)
-func (p *Pool) Write() *sql.DB {
+// DB returns the underlying sqlite.DB for direct access if needed
+func (p *Pool) DB() *sqlite.DB {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.writeDB
+	return p.db
 }
 
-// Read returns the read database connection (concurrent reads)
-func (p *Pool) Read() *sql.DB {
+// Write returns the sqlite.DB for write operations (buffered batch writes)
+func (p *Pool) Write() *sqlite.DB {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.readDB
+	return p.db
+}
+
+// WriteTx starts a buffered transaction for atomic writes.
+// The Tx buffers all statements until Commit is called.
+func (p *Pool) WriteTx(ctx context.Context) (*sqlite.Tx, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.db.Writer.BeginTx(ctx, nil)
+}
+
+// Read returns the sqlite.DB for read operations (direct reads)
+func (p *Pool) Read() *sqlite.DB {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.db
 }
 
 // Path returns the base path for this sink
@@ -141,9 +116,8 @@ func (p *Pool) MigrationsPath() string {
 	return filepath.Join(p.path, "migrations")
 }
 
-// Close closes all database connections
+// Close closes the database connection
 func (p *Pool) Close() error {
-	// Use atomic swap to avoid deadlock with Read/Write using RLock
 	if p.closed.Swap(true) {
 		return nil // already closed
 	}
@@ -151,28 +125,13 @@ func (p *Pool) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var errs []error
-	if p.writeDB != nil {
-		if err := p.writeDB.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close write db: %w", err))
-		}
-	}
-	if p.readDB != nil {
-		if err := p.readDB.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close read db: %w", err))
-		}
-	}
-
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return p.db.Close()
 }
 
 // PoolManager manages multiple sink pools
 type PoolManager struct {
-	pools    map[string]*Pool
-	mu       sync.RWMutex
+	pools     map[string]*Pool
+	mu        sync.RWMutex
 	skillsDir string
 }
 
@@ -185,7 +144,7 @@ func NewPoolManager(skillsDir string) *PoolManager {
 }
 
 // GetPool returns an existing pool or creates a new one for the given skill
-func (m *PoolManager) GetPool(skillName string, sqlitePath string) (*Pool, error) {
+func (m *PoolManager) GetPool(ctx context.Context, skillName string, sqlitePath string) (*Pool, error) {
 	// Normalize path to get consistent key
 	key := normalizePoolKey(skillName, sqlitePath)
 
@@ -204,7 +163,7 @@ func (m *PoolManager) GetPool(skillName string, sqlitePath string) (*Pool, error
 		return pool, nil
 	}
 
-	pool, err := NewPool(skillName, sqlitePath)
+	pool, err := NewPool(ctx, skillName, sqlitePath)
 	if err != nil {
 		return nil, err
 	}
