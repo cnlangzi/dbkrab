@@ -84,13 +84,7 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 		path = fmt.Sprintf("./data/sinks/%s.db", name)
 	}
 
-	cfg := sinkSqlite.Config{
-		File:          path,
-		ModuleName:    "dbkrab",
-		Migrations: dbConfig.Migrations,
-	}
-
-	s, err := sinkSqlite.NewSinker(name, cfg)
+	s, err := sinkSqlite.NewSinker(name, path, dbConfig.Migrations)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite sinker: %w", err)
 	}

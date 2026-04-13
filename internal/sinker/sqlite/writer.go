@@ -19,8 +19,8 @@ type Sinker struct {
 }
 
 // NewSinker creates a new SQLite sinker.
-func NewSinker(name string, cfg Config) (*Sinker, error) {
-	db, err := New(context.Background(), cfg)
+func NewSinker(name string, dsn string, migrations string) (*Sinker, error) {
+	db, err := NewSinkerDB(context.Background(), dsn, migrations)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite db: %w", err)
 	}

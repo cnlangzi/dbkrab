@@ -19,32 +19,20 @@ import (
 // providing read/write separation and migration support.
 type DB = sqlite.DB
 
-// Config holds SQLite configuration options for sinker.
-type Config struct {
-	// File is the path to the SQLite file. Use ":memory:" for in-memory database.
-	File string
-
-	// ModuleName is used for migration discovery.
-	ModuleName string
-
-	// Migrations is the directory path for migration files.
+// config holds SQLite configuration options for internal use.
+type config struct {
+	DSN        string
 	Migrations string
-
-	// MaxOpenConns sets maximum open connections for Reader.
-	MaxOpenConnsReader int
-
-	// MaxIdleConns sets maximum idle connections for Reader.
-	MaxIdleConnsReader int
 }
 
-// New creates a new SQLite DB with read/write separation and migration support.
-func New(ctx context.Context, config Config) (*DB, error) {
-	if config.File == "" {
-		config.File = ":memory:"
+// NewSinkerDB creates a new SQLite DB with read/write separation and migration support.
+// ModuleName is hardcoded to "dbkrab".
+func NewSinkerDB(ctx context.Context, dsn string, migrations string) (*DB, error) {
+	if dsn == "" {
+		dsn = ":memory:"
 	}
 
-	inmemory := strings.HasPrefix(config.File, ":memory:")
-	dsn := buildDSN(config.File, inmemory)
+	inmemory := strings.HasPrefix(dsn, ":memory:")
 
 	db, err := sqlite.Open(ctx, dsn)
 	if err != nil {
@@ -52,40 +40,27 @@ func New(ctx context.Context, config Config) (*DB, error) {
 	}
 
 	// Run migrations if Migrations is provided
-	if config.Migrations != "" {
-		// Create sqle.DB from the underlying *sql.DB for migrations
+	if migrations != "" {
 		sqleDB := sqle.Open(db.Writer.DB)
-
 		migrator := migrate.New(sqleDB)
-		if err := migrator.Discover(os.DirFS(config.Migrations), migrate.WithModule(config.ModuleName)); err != nil {
+		if err := migrator.Discover(os.DirFS(migrations), migrate.WithModule("dbkrab")); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("load migrations: %w", err)
 		}
-
 		if err := migrator.Init(context.Background()); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("init migrations: %w", err)
 		}
-
 		if err := migrator.Migrate(context.Background()); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("run migrations: %w", err)
 		}
 	} else if !inmemory {
-		// No migration path provided for file-based database - fail fast to ensure explicit table creation
-		// This prevents silent creation of tables with incorrect schema via EnsureTable
-		// In-memory databases (:memory:) can work without migrations as they are ephemeral
+		// No migration path provided for file-based database - fail fast
 		return nil, fmt.Errorf("migration path is required for sinker SQLite databases: please provide migrations in config")
 	}
 
 	return db, nil
-}
-
-func buildDSN(file string, inmemory bool) string {
-	if inmemory {
-		return ":memory:"
-	}
-	return file
 }
 
 // Execer is an interface for executing queries
