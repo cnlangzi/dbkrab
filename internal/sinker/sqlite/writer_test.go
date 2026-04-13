@@ -12,7 +12,7 @@ import (
 )
 
 func testMigrationDir(t *testing.T, migrationSQL string) string {
-	tmpMigrationDir := t.TempDir() + "/migrations"
+	tmpMigrationDir := filepath.Join(t.TempDir(), "migrations")
 	require.NoError(t, os.MkdirAll(tmpMigrationDir, 0755))
 
 	// Create a version subdirectory to match sqle migration format
@@ -32,7 +32,7 @@ func testMigrationDir(t *testing.T, migrationSQL string) string {
 }
 
 func TestNewSinker(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_Write(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_Write_Update(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_Write_Delete(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_Write_Empty(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_Write_SkipOnConflict(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_DatabaseName(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_DatabaseType(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS users (
 }
 
 func TestSinker_MultipleTables(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -383,7 +383,7 @@ CREATE TABLE IF NOT EXISTS orders (
 }
 
 func TestSinker_Close(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -409,7 +409,7 @@ CREATE TABLE IF NOT EXISTS users (
 // are logged and dropped gracefully instead of causing errors.
 // This is a defensive measure to prevent DLQ storms from malformed data.
 func TestSinker_UnknownOperationTypeDropped(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 	tmpMigrationDir := testMigrationDir(t, `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -468,7 +468,7 @@ CREATE TABLE IF NOT EXISTS users (
 // TestSinker_MissingMigrationPath verifies that creating a sinker without
 // a migration path fails fast with a clear error.
 func TestSinker_MissingMigrationPath(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
+	tmpFile := filepath.Join(t.TempDir(), "test.db")
 
 	// Creating a sinker without migration path should fail
 	_, err := NewSinker("test", Config{

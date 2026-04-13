@@ -7,7 +7,7 @@ import (
 )
 
 // TxExec is the interface for executing statements within a transaction.
-// Both *sql.Tx and internal/sinker/sqlite.Execer implement this interface.
+// Both *sql.Tx and *DB (from this package) implement this interface.
 type TxExec interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Commit() error
