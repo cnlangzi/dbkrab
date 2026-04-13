@@ -77,6 +77,7 @@ type Skill struct {
 	On          []string    `yaml:"on"`            // Tables to monitor
 	Database    string      `yaml:"database"`      // Target database name (maps to platform-configured storage)
 	Sinks       []Sink      `yaml:"sinks"`
+	Outputs     map[string][]string `yaml:"-"` // key = output table name, value = field names
 
 	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
 	Id   string `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
