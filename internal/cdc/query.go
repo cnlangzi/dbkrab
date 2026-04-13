@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	scannerpkg "github.com/cnlangzi/dbkrab/internal/scanner"
 )
 
 // validCaptureInstance validates capture instance name to prevent SQL injection
@@ -214,8 +216,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract LSN
 		var lsn []byte
 		if idx, ok := colIndex["__$start_lsn"]; ok {
-			if scanner, ok := dest[idx].(Scanner); ok {
-				if val, err := scanner.Value(); err == nil && val != nil {
+			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+				if val, err := s.Value(); err == nil && val != nil {
 					if b, ok := val.([]byte); ok {
 						lsn = b
 					}
@@ -226,13 +228,13 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract transaction ID
 		var txID string
 		if idx, ok := colIndex["__$transaction_id"]; ok {
-			if scanner, ok := dest[idx].(Scanner); ok {
-				if val, err := scanner.Value(); err == nil && val != nil {
+			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+				if val, err := s.Value(); err == nil && val != nil {
 					switch v := val.(type) {
 					case string:
 						txID = v
 					case []byte:
-						txID = FormatMSSQLGUID(v)
+						txID = scannerpkg.FormatMSSQLGUID(v)
 					default:
 						txID = fmt.Sprintf("%v", v)
 					}
@@ -243,8 +245,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract operation
 		var op int64
 		if idx, ok := colIndex["__$operation"]; ok {
-			if scanner, ok := dest[idx].(Scanner); ok {
-				if val, err := scanner.Value(); err == nil && val != nil {
+			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+				if val, err := s.Value(); err == nil && val != nil {
 					switch v := val.(type) {
 					case int64:
 						op = v
@@ -263,8 +265,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract commit time
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
-			if scanner, ok := dest[idx].(Scanner); ok {
-				if val, err := scanner.Value(); err == nil && val != nil {
+			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+				if val, err := s.Value(); err == nil && val != nil {
 					// DateTime.Value returns RFC3339Nano string, handle both string and time.Time
 					switch v := val.(type) {
 					case time.Time:
@@ -286,8 +288,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 				continue
 			}
 
-			if scanner, ok := dest[i].(Scanner); ok {
-				if val, err := scanner.Value(); err == nil {
+			if s, ok := dest[i].(scannerpkg.Scanner); ok {
+				if val, err := s.Value(); err == nil {
 					data[strings.ToLower(col)] = val
 				}
 			}

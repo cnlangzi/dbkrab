@@ -4,6 +4,41 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"github.com/cnlangzi/dbkrab/internal/scanner"
+)
+
+// MSSQL type names - re-export from scanner package for compatibility
+const (
+	TypeBigInt           = scanner.TypeBigInt
+	TypeInt              = scanner.TypeInt
+	TypeSmallInt         = scanner.TypeSmallInt
+	TypeTinyInt          = scanner.TypeTinyInt
+	TypeBit              = scanner.TypeBit
+	TypeFloat            = scanner.TypeFloat
+	TypeReal             = scanner.TypeReal
+	TypeNumeric          = scanner.TypeNumeric
+	TypeDecimal          = scanner.TypeDecimal
+	TypeMoney            = scanner.TypeMoney
+	TypeSmallMoney       = scanner.TypeSmallMoney
+	TypeDateTime         = scanner.TypeDateTime
+	TypeDateTime2        = scanner.TypeDateTime2
+	TypeSmallDateTime    = scanner.TypeSmallDateTime
+	TypeDate             = scanner.TypeDate
+	TypeTime            = scanner.TypeTime
+	TypeDateTimeOffset   = scanner.TypeDateTimeOffset
+	TypeUniqueIdentifier = scanner.TypeUniqueIdentifier
+	TypeChar             = scanner.TypeChar
+	TypeVarchar          = scanner.TypeVarchar
+	TypeNChar            = scanner.TypeNChar
+	TypeNVarchar         = scanner.TypeNVarchar
+	TypeNText            = scanner.TypeNText
+	TypeText             = scanner.TypeText
+	TypeBinary           = scanner.TypeBinary
+	TypeVarBinary        = scanner.TypeVarBinary
+	TypeImage            = scanner.TypeImage
+	TypeXML              = scanner.TypeXML
+	TypeSQLVariant       = scanner.TypeSQLVariant
 )
 
 // ScannerFactory creates typed scanner instances based on MSSQL column types.
@@ -16,66 +51,31 @@ func NewScannerFactory(tz *time.Location) *ScannerFactory {
 	return &ScannerFactory{timezone: tz}
 }
 
-// MSSQL type names from DatabaseTypeName()
-const (
-	TypeBigInt           = "BIGINT"
-	TypeInt              = "INT"
-	TypeSmallInt         = "SMALLINT"
-	TypeTinyInt          = "TINYINT"
-	TypeBit              = "BIT"
-	TypeFloat            = "FLOAT"
-	TypeReal             = "REAL"
-	TypeNumeric          = "NUMERIC"
-	TypeDecimal          = "DECIMAL"
-	TypeMoney            = "MONEY"
-	TypeSmallMoney       = "SMALLMONEY"
-	TypeDateTime         = "DATETIME"
-	TypeDateTime2        = "DATETIME2"
-	TypeSmallDateTime    = "SMALLDATETIME"
-	TypeDate             = "DATE"
-	TypeTime             = "TIME"
-	TypeDateTimeOffset   = "DATETIMEOFFSET"
-	TypeUniqueIdentifier = "UNIQUEIDENTIFIER"
-	TypeChar             = "CHAR"
-	TypeVarchar          = "VARCHAR"
-	TypeNChar            = "NCHAR"
-	TypeNVarchar         = "NVARCHAR"
-	TypeNText            = "NTEXT"
-	TypeText             = "TEXT"
-	TypeBinary           = "BINARY"
-	TypeVarBinary        = "VARBINARY"
-	TypeImage            = "IMAGE"
-	TypeXML              = "XML"
-	TypeSQLVariant       = "SQL_VARIANT"
-)
-
 // createScanner creates a new scanner instance for the given MSSQL type name.
-func (sf *ScannerFactory) createScanner(typeName string) Scanner {
+func (sf *ScannerFactory) createScanner(typeName string) scanner.Scanner {
 	switch strings.ToUpper(typeName) {
 	case TypeBigInt, TypeInt, TypeSmallInt, TypeTinyInt:
-		return &Int64{}
+		return &scanner.Int64{}
 	case TypeFloat, TypeReal, TypeMoney, TypeSmallMoney:
-		return &Float64{}
+		return &scanner.Float64{}
 	case TypeNumeric, TypeDecimal:
-		return &NumericString{}
+		return &scanner.NumericString{}
 	case TypeUniqueIdentifier:
-		return &GUID{}
+		return &scanner.GUID{}
 	case TypeDateTime, TypeDateTime2, TypeSmallDateTime, TypeDate, TypeTime, TypeDateTimeOffset:
 		return NewDateTime(sf.timezone)
 	case TypeBit:
-		return &Bool{}
+		return &scanner.Bool{}
 	case TypeChar, TypeVarchar, TypeNChar, TypeNVarchar, TypeNText, TypeText, TypeXML, TypeSQLVariant:
-		return &String{}
+		return &scanner.String{}
 	case TypeBinary, TypeVarBinary, TypeImage:
-		return &Bytes{}
+		return &scanner.Bytes{}
 	default:
-		// Fallback to String for unknown types
-		return &String{}
+		return &scanner.String{}
 	}
 }
 
 // CreateDest creates a []interface{} of scanner pointers for rows.Scan.
-// columns is the column names, colTypes is the result of rows.ColumnTypes().
 func (sf *ScannerFactory) CreateDest(columns []string, colTypes []*sql.ColumnType) []interface{} {
 	dest := make([]interface{}, len(columns))
 	for i, ct := range colTypes {
@@ -84,3 +84,14 @@ func (sf *ScannerFactory) CreateDest(columns []string, colTypes []*sql.ColumnTyp
 	}
 	return dest
 }
+
+// Re-export scanner types for backward compatibility
+type (
+	Int64         = scanner.Int64
+	Float64       = scanner.Float64
+	NumericString = scanner.NumericString
+	GUID          = scanner.GUID
+	String        = scanner.String
+	Bool          = scanner.Bool
+	Bytes         = scanner.Bytes
+)
