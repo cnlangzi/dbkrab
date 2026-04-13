@@ -72,10 +72,10 @@ func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string
 	}
 
 	// Check cdc.change_tables for supports_net_changes column
-	// 1 = net_changes enabled, 0 = only all_changes available
-	var supportsNetChanges int
+	// MSSQL returns this as bool ("true"/"false") or int (1/0) depending on driver version
+	var rawValue interface{}
 	query := `SELECT ISNULL(supports_net_changes, 0) FROM cdc.change_tables WHERE capture_instance = @p1`
-	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&supportsNetChanges)
+	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&rawValue)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Capture instance not found - might not have CDC enabled
@@ -84,7 +84,23 @@ func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string
 		return false, fmt.Errorf("check net_changes support: %w", err)
 	}
 
-	return supportsNetChanges == 1, nil
+	// Handle different return types: bool (mssql driver) or int (go-mssqldb)
+	switch v := rawValue.(type) {
+	case bool:
+		return v, nil
+	case int:
+		return v == 1, nil
+	case int64:
+		return v == 1, nil
+	default:
+		// Try string representation as fallback
+		switch fmt.Sprintf("%v", v) {
+		case "true", "1":
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
 }
 
 // GetChanges queries CDC changes for a table
