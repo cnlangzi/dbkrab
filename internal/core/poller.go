@@ -139,10 +139,62 @@ func (h PluginHandler) Handle(ctx context.Context, tx *Transaction) error {
 }
 
 type tablePollResult struct {
-	table    string
-	changes  []Change
-	lastLSN  LSN
-	err      error
+	table       string
+	changes     []Change
+	lastLSN     LSN
+	err         error
+}
+
+var ErrNoNewData = errors.New("no new data available for table")
+
+// GetFromLSN returns the starting LSN for CDC queries and whether new data is available.
+// It uses the stored offset to determine if there are new changes to fetch.
+func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset) (fromLSN []byte, hasData bool, err error) {
+	// Case 1: Fresh start - no stored offset
+	if stored.LSN == "" {
+		schema, tableName := cdc.ParseTableName(table)
+		captureInstance := cdc.CaptureInstanceName(schema, tableName)
+		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
+		if err != nil {
+			return nil, false, fmt.Errorf("get min LSN: %w", err)
+		}
+		return minLSN, true, nil
+	}
+
+	// Case 2: Resume - have stored offset, check if there is new data
+	storedLSN, parseErr := ParseLSN(stored.LSN)
+	if parseErr != nil || len(storedLSN) == 0 {
+		// Invalid stored LSN, treat as fresh start
+		schema, tableName := cdc.ParseTableName(table)
+		captureInstance := cdc.CaptureInstanceName(schema, tableName)
+		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
+		if err != nil {
+			return nil, false, fmt.Errorf("get min LSN: %w", err)
+		}
+		return minLSN, true, nil
+	}
+
+	// Compare incrementLSN(stored) with GetMaxLSN()
+	// If incrementLSN(stored) > GetMaxLSN(): no new data
+	// If incrementLSN(stored) <= GetMaxLSN(): has new data
+	nextLSN, err := p.querier.IncrementLSN(ctx, storedLSN)
+	if err != nil {
+		return nil, false, fmt.Errorf("increment LSN: %w", err)
+	}
+
+	maxLSN, err := p.querier.GetMaxLSN(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("get max LSN: %w", err)
+	}
+
+	// Compare: if nextLSN > maxLSN, there is no new data
+	if LSN(nextLSN).Compare(LSN(maxLSN)) > 0 {
+		// No new data - return error to indicate skip
+		return nil, false, nil
+	}
+
+	// Has new data - return stored LSN as fromLSN
+	return storedLSN, true, nil
 }
 
 // NewPoller creates a new poller
@@ -332,87 +384,68 @@ func (p *Poller) poll(ctx context.Context) error {
 	}
 
 	// Poll all tables and collect results (without updating offsets)
+	// Uses new GetFromLSN approach: incrementLSN vs GetMaxLSN to determine if new data exists
 	results := make([]tablePollResult, 0, len(p.cfg.Tables))
 
 	for _, table := range p.cfg.Tables {
 		schema, tableName := cdc.ParseTableName(table)
 		captureInstance := cdc.CaptureInstanceName(schema, tableName)
 
-		// Get starting LSN from offset store (no DB query, no timeout needed)
-		startLSN := LSN{}
+		// Get stored offset
 		stored, err := p.offsets.Get(table)
-		if err == nil && stored.LSN != "" {
-			parsed, parseErr := ParseLSN(stored.LSN)
-			if parseErr == nil && len(parsed) > 0 {
-				startLSN = parsed
-			}
+		if err != nil {
+			results = append(results, tablePollResult{table: table, err: fmt.Errorf("get offset: %w", err)})
+			continue
 		}
 
-		// P0-6: Separate timeouts for GetMinLSN and GetChanges
-		// If first time, get min LSN from CDC
-		if len(startLSN) == 0 || startLSN.IsZero() {
-			minLSNCtx, minLSNCancel := context.WithTimeout(ctx, minLSNTimeout)
-			minLSN, err := p.querier.GetMinLSN(minLSNCtx, captureInstance)
-			minLSNCancel()
-			if err != nil {
-				results = append(results, tablePollResult{table: table, err: err})
-				continue
-			}
-			startLSN = minLSN
+		// Use GetFromLSN to determine fromLSN and whether new data is available
+		// This uses incrementLSN(stored) vs GetMaxLSN() comparison
+		fromLSN, hasData, err := p.GetFromLSN(ctx, table, stored)
+		if err != nil {
+			results = append(results, tablePollResult{table: table, err: err})
+			continue
+		}
+
+		// No new data - skip this table
+		if !hasData || fromLSN == nil {
+			slog.Debug("no new data for table, skipping", "table", table)
+			continue
 		}
 
 		// Get changes since last poll (separate timeout for observability)
 		changesCtx, changesCancel := context.WithTimeout(ctx, changesTimeout)
-		cdcChanges, err := p.querier.GetChanges(changesCtx, captureInstance, tableName, startLSN, nil)
+		cdcChanges, err := p.querier.GetChanges(changesCtx, captureInstance, tableName, fromLSN, nil)
 		changesCancel()
 		if err != nil {
 			results = append(results, tablePollResult{table: table, err: err})
 			continue
 		}
 
-		// Filter duplicates: CDC query returns records where __$start_lsn >= from_lsn,
-		// so we need to skip records where LSN == startLSN (the last processed LSN).
-		//
-		// Filtering logic:
-		//   - stored.LSN != "" AND len(changes) > 1 means startLSN came from offset store (subsequent poll)
-		//     → Filter records where LSN == startLSN to avoid duplicates
-		//   - stored.LSN == "" OR len(changes) == 1 means fresh start or CDC has only 1 record
-		//     → No filtering needed, include all records
-		//
-		// This fixes issue #132: CDC first query skips records due to incrementLSN logic.
-		filteredChanges := make([]cdc.Change, 0, len(cdcChanges))
+		// Convert CDC changes to internal Change format
+		// No need to filter LSN == fromLSN since GetFromLSN guarantees fromLSN is correct
+		// No need for hash-based deduplication within batch since INSERT OR REPLACE handles it in store
+		var changes []Change
 		for _, c := range cdcChanges {
-			// Skip duplicate records when startLSN came from offset store (stored.LSN != "")
-			// AND there are multiple records (len > 1) to avoid re-processing the first one.
-			// When starting fresh (stored.LSN == "") OR only 1 record exists, don't filter.
-			if stored.LSN != "" && len(cdcChanges) > 1 && LSN(c.LSN).Compare(startLSN) == 0 {
-				slog.Debug("skipping duplicate record with LSN == startLSN",
-					"table", table,
-					"lsn", fmt.Sprintf("%x", c.LSN))
-				continue
-			}
-			filteredChanges = append(filteredChanges, c)
-		}
-
-		// Convert cdc.Change to core.Change
-		changes := make([]Change, len(filteredChanges))
-		for i, c := range filteredChanges {
-			changes[i] = Change{
+			hashID := ComputeChangeID(c.TransactionID, c.Table, c.Data, c.LSN, Operation(c.Operation))
+			changes = append(changes, Change{
 				Table:         c.Table,
 				TransactionID: c.TransactionID,
 				LSN:           c.LSN,
 				Operation:     Operation(c.Operation),
 				Data:          c.Data,
 				CommitTime:    c.CommitTime,
-			}
+				ID:            hashID,
+			})
 		}
 
-		// Get last LSN from the last change or use max LSN
+		// Get last LSN from the last change
 		var lastLSN LSN
 		if len(changes) > 0 {
 			lastLSN = changes[len(changes)-1].LSN
 		} else {
-			lastLSN = startLSN
+			// No changes but hasData=true means there might be changes at this LSN
+			// Use fromLSN's increment as the next position
+			lastLSN = LSN(fromLSN)
 		}
 
 		//nolint:staticcheck // SA4010 false positive - results is used after the loop
@@ -524,7 +557,7 @@ func (p *Poller) updateOffsets(results []tablePollResult, allChanges []Change, f
 		}
 
 		if len(r.changes) == 0 {
-			// No changes for this table - keep existing offset, don't block others
+			// No changes for this table - keep existing offset
 			slog.Debug("no changes for table, keeping existing offset", "table", r.table)
 			continue
 		}

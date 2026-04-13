@@ -1,7 +1,11 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +45,7 @@ type Change struct {
 	Operation     Operation              `json:"operation"`
 	Data          map[string]interface{} `json:"data"`
 	CommitTime    time.Time              `json:"commit_time"` // Transaction commit time from source database
+	ID            string                 `json:"id"`         // Content-based hash ID for deduplication
 }
 
 // Transaction represents a group of changes in the same transaction
@@ -74,4 +79,40 @@ func NewTransaction(id string) *Transaction {
 func generateTraceID() string {
 	u := uuid.New()
 	return fmt.Sprintf("%s-%d", u.String()[:8], time.Now().UnixNano())
+}
+
+// ComputeChangeID computes a content-based hash ID for a change.
+// It uses the same algorithm as store/sqlite to ensure consistency.
+// The ID is deterministic: same input always produces the same ID.
+func ComputeChangeID(txID, table string, data map[string]interface{}, lsn []byte, op Operation) string {
+	// Convert LSN bytes to hex string with 0x prefix for deterministic sorting
+	var lsnStr string
+	if len(lsn) > 0 {
+		lsnStr = "0x" + hex.EncodeToString(lsn)
+	}
+
+	// Serialize data map to JSON with sorted keys for deterministic output
+	var dataJSON []byte
+	if len(data) > 0 {
+		// Sort keys for deterministic serialization
+		keys := make([]string, 0, len(data))
+		for k := range data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Build ordered map for JSON serialization
+		orderedData := make(map[string]interface{}, len(data))
+		for _, k := range keys {
+			orderedData[k] = data[k]
+		}
+		dataJSON, _ = json.Marshal(orderedData)
+	} else {
+		dataJSON = []byte("{}")
+	}
+
+	// Compute hash: SHA256(transaction_id + table_name + data + lsn + operation)
+	hashInput := txID + table + string(dataJSON) + lsnStr + op.String()
+	hash := sha256.Sum256([]byte(hashInput))
+	return hex.EncodeToString(hash[:16]) // first 16 bytes = 32 hex chars
 }
