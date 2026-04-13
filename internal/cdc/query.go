@@ -63,6 +63,13 @@ func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	return lsn, err
 }
 
+// IncrementLSN returns the next LSN after the given one
+func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
+	var nextLSN []byte
+	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_increment_lsn(@p1)", lsn).Scan(&nextLSN)
+	return nextLSN, err
+}
+
 // supportsNetChanges checks if a capture instance was created with supports_net_changes = 1.
 // Returns true if net_changes is supported (fn_cdc_get_net_changes_* can be used),
 // false otherwise. This is determined by checking the cdc.change_tables catalog view.
@@ -72,10 +79,11 @@ func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string
 	}
 
 	// Check cdc.change_tables for supports_net_changes column
-	// 1 = net_changes enabled, 0 = only all_changes available
-	var supportsNetChanges int
-	query := `SELECT ISNULL(supports_net_changes, 0) FROM cdc.change_tables WHERE capture_instance = @p1`
-	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&supportsNetChanges)
+	// MSSQL returns this as bool ("true"/"false") or int (1/0) depending on driver version
+	// Use CASE to explicitly convert to int, avoiding driver type confusion
+	var rawValue interface{}
+	query := `SELECT CASE WHEN supports_net_changes = 1 THEN 1 ELSE 0 END FROM cdc.change_tables WHERE capture_instance = @p1`
+	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&rawValue)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Capture instance not found - might not have CDC enabled
@@ -84,7 +92,23 @@ func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string
 		return false, fmt.Errorf("check net_changes support: %w", err)
 	}
 
-	return supportsNetChanges == 1, nil
+	// Handle different return types: bool (mssql driver) or int (go-mssqldb)
+	switch v := rawValue.(type) {
+	case bool:
+		return v, nil
+	case int:
+		return v == 1, nil
+	case int64:
+		return v == 1, nil
+	default:
+		// Try string representation as fallback
+		switch fmt.Sprintf("%v", v) {
+		case "true", "1":
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
 }
 
 // GetChanges queries CDC changes for a table

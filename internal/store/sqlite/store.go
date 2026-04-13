@@ -129,11 +129,15 @@ func (s *Store) Write(tx *core.Transaction) error {
 			lsnStr = "0x" + hex.EncodeToString(change.LSN)
 		}
 
-		// Compute content-based id: SHA256(transaction_id + table_name + data + lsn + operation)
-		// Take first 16 bytes and encode as 32-character hex string (deterministic, unique per change)
-		hashInput := tx.ID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
-		hash := sha256.Sum256([]byte(hashInput))
-		id := hex.EncodeToString(hash[:16]) // first 16 bytes = 32 hex chars
+		// Use pre-computed ID from poller layer (computed using core.ComputeChangeID)
+		// If not available (e.g., changes from other sources), compute it here
+		id := change.ID
+		if id == "" {
+			// Fallback: compute hash (should not happen for CDC-sourced changes)
+			hashInput := tx.ID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
+			hash := sha256.Sum256([]byte(hashInput))
+			id = hex.EncodeToString(hash[:16])
+		}
 
 		_, err = stmt.Exec(
 			id,
