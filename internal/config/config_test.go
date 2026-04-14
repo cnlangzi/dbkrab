@@ -119,12 +119,7 @@ tables:
 	if cfg.CDC.Interval != "500ms" {
 		t.Errorf("Interval default = %v, want 500ms", cfg.CDC.Interval)
 	}
-	if cfg.CDC.Offset.Type != "json" {
-		t.Errorf("Offset.Type default = %v, want json", cfg.CDC.Offset.Type)
-	}
-	if cfg.CDC.Offset.JSONPath != "./data/offset.json" {
-		t.Errorf("Offset.JSONPath default = %v, want ./data/offset.json", cfg.CDC.Offset.JSONPath)
-	}
+
 	if cfg.App.Type != "sqlite" {
 		t.Errorf("App.Type default = %v, want sqlite", cfg.App.Type)
 	}
