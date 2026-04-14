@@ -1,5 +1,5 @@
 # Build output
-dbkrab
+./dbkrab
 dbkrab_test
 dist/
 
