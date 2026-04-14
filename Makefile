@@ -11,7 +11,7 @@
 
 BINARY_NAME := dbkrab
 BUILD_DIR := bin
-CMD_DIR := cmd/dbkrab
+CMD_DIR := cmd/app
 GO := go
 # -p 1 limits parallelism to single process (useful for limited memory environments)
 TEST_PARALLEL ?= -p 1

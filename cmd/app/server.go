@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 	"github.com/yaitoo/xun"
 )
 
-//go:embed all:dashboard
+//go:embed dashboard
 var dashboardFS embed.FS
 
 // getDashboardFS returns a FS with pages/layouts at root for xun
