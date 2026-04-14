@@ -156,7 +156,7 @@ type tablePollResult struct {
 var ErrNoNewData = errors.New("no new data available for table")
 
 // GetFromLSN returns the starting LSN for CDC queries and whether new data is available.
-// It uses the stored offset to determine if there are new changes to fetch.
+// It uses the stored offset and hasNewData flag to determine if there are new changes to fetch.
 func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset) (fromLSN []byte, hasData bool, err error) {
 	// Case 1: Fresh start - no stored offset
 	if stored.LSN == "" {
@@ -169,7 +169,7 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		return minLSN, true, nil
 	}
 
-	// Case 2: Resume - have stored offset, check if there is new data
+	// Case 2: Resume - have stored offset
 	storedLSN, parseErr := ParseLSN(stored.LSN)
 	if parseErr != nil || len(storedLSN) == 0 {
 		// Invalid stored LSN, treat as fresh start
@@ -182,9 +182,14 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		return minLSN, true, nil
 	}
 
-	// Compare incrementLSN(stored) with GetMaxLSN()
-	// If incrementLSN(stored) > GetMaxLSN(): no new data
-	// If incrementLSN(stored) <= GetMaxLSN(): has new data
+	// Case 2a: hasNewData == true (上次有数据，存储的是 incrementLSN(lastLSN))
+	// 存储的是下一个待处理的 LSN，直接用它作为 fromLSN
+	if stored.HasNewData {
+		return storedLSN, true, nil
+	}
+
+	// Case 2b: hasNewData == false (上次无数据，存储的是 lastLSN)
+	// 需要检查是否有新数据
 	nextLSN, err := p.querier.IncrementLSN(ctx, storedLSN)
 	if err != nil {
 		return nil, false, fmt.Errorf("increment LSN: %w", err)
@@ -197,12 +202,12 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 
 	// Compare: if nextLSN > maxLSN, there is no new data
 	if LSN(nextLSN).Compare(LSN(maxLSN)) > 0 {
-		// No new data - return error to indicate skip
-		return nil, false, nil
+		return nil, false, nil // 仍无新数据
 	}
 
-	// Has new data - return stored LSN as fromLSN
-	return storedLSN, true, nil
+	// 有新数据，返回 nextLSN（不是 stored.LSN）
+	// 因为 stored.LSN 是上次无数据时的旧位置
+	return nextLSN, true, nil
 }
 
 // NewPoller creates a new poller
@@ -564,20 +569,28 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		}
 
 		if len(r.changes) == 0 {
-			// No changes for this table - keep existing offset
-			slog.Debug("no changes for table, keeping existing offset", "table", r.table)
+			// No changes for this table - set hasNewData = false to indicate
+			// this LSN position was checked and had no new data.
+			// GetFromLSN will use this to determine if we need to check for new data.
+			slog.Debug("no changes for table, marking hasNewData=false", "table", r.table)
+			// Get current stored offset to preserve LSN
+			currentOffset, _ := p.offsets.Get(r.table)
+			if err := p.offsets.Set(r.table, currentOffset.LSN, false); err != nil {
+				slog.Error("failed to save offset", "table", r.table, "error", err)
+			}
 			continue
 		}
 
 		// Table has changes - advance its offset to the LSN after the last change.
 		// MSSQL CDC functions return rows where __$start_lsn >= from_lsn,
 		// so we must store incrementLSN(lastLSN) to avoid re-fetching the same row.
+		// Also set hasNewData = true to indicate we successfully fetched data.
 		nextLSN, err := p.querier.IncrementLSN(ctx, []byte(r.lastLSN))
 		if err != nil {
 			slog.Error("failed to increment LSN for offset", "table", r.table, "lastLSN", r.lastLSN.String(), "error", err)
 			continue
 		}
-		if err := p.offsets.Set(r.table, LSN(nextLSN).String()); err != nil {
+		if err := p.offsets.Set(r.table, LSN(nextLSN).String(), true); err != nil {
 			slog.Error("failed to save offset", "table", r.table, "error", err)
 			continue
 		}
@@ -590,7 +603,8 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 
 		slog.Debug("advanced table offset",
 			"table", r.table,
-			"lsn", r.lastLSN.String(),
+			"lsn", LSN(nextLSN).String(),
+			"hasNewData", true,
 			"changes", len(r.changes))
 	}
 

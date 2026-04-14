@@ -47,10 +47,11 @@ func (s *memOffsetStore) Get(table string) (offset.Offset, error) {
 	}
 	return offset.Offset{}, nil
 }
-func (s *memOffsetStore) Set(table string, lsn string) error {
+func (s *memOffsetStore) Set(table string, lsn string, hasNewData bool) error {
 	s.offsets[table] = offset.Offset{
-		LSN:       lsn,
-		UpdatedAt: time.Now(),
+		LSN:        lsn,
+		HasNewData: hasNewData,
+		UpdatedAt:  time.Now(),
 	}
 	return nil
 }
@@ -290,7 +291,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
 		}
 	}
 
@@ -388,7 +389,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
 		}
 	}
 
@@ -531,7 +532,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 
 	// Set initial offset
 	//nolint:errcheck
-	h.offsetStore.Set("dbo.orders", "0000000001000000") //nolint:errcheck
+	h.offsetStore.Set("dbo.orders", "0000000001000000", true) //nolint:errcheck
 
 	// Call handler - should fail
 	err := handler.Handle(&tx)
@@ -599,7 +600,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String()) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
 		}
 	}
 
@@ -712,7 +713,7 @@ func TestFlow_InMemoryOffsetStore(t *testing.T) {
 	assert.Empty(t, off.LSN)
 
 	// Set offset
-	err = store.Set("dbo.orders", "0000000001000001")
+	err = store.Set("dbo.orders", "0000000001000001", true)
 	require.NoError(t, err)
 
 	// Get offset
@@ -721,7 +722,7 @@ func TestFlow_InMemoryOffsetStore(t *testing.T) {
 	assert.Equal(t, "0000000001000001", off.LSN)
 
 	// Set another table
-	err = store.Set("dbo.products", "0000000002000000")
+	err = store.Set("dbo.products", "0000000002000000", true)
 	require.NoError(t, err)
 
 	// Get all
