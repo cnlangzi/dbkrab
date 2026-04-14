@@ -6,67 +6,39 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/cnlangzi/sqlite"
 )
 
-// SQLiteStore manages LSN offsets using SQLite database
+// SQLiteStore manages LSN offsets using the unified SQLite database.
+// Reads and writes are immediate (no buffering), so Load/Save are no-ops.
 type SQLiteStore struct {
-	db     *sql.DB
-	mu     sync.RWMutex
-	closed bool
+	db *sqlite.DB
+	mu sync.RWMutex
 }
 
-// NewSQLiteStore creates a new SQLite offset store
-func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create table if not exists
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS offsets (
-			table_name TEXT PRIMARY KEY,
-			lsn TEXT NOT NULL,
-			has_new_data INTEGER NOT NULL DEFAULT 0,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			slog.Warn("db.Close error", "error", closeErr)
-		}
-		return nil, err
-	}
-
+// NewSQLiteStore creates a new SQLite offset store that uses the shared DB.
+func NewSQLiteStore(db *sqlite.DB) *SQLiteStore {
 	return &SQLiteStore{
 		db: db,
-	}, nil
+	}
 }
 
-// Load is a no-op for SQLite (data is always persisted)
-func (s *SQLiteStore) Load() error {
-	return nil
-}
+// Load is a no-op: data is already in the DB.
+func (s *SQLiteStore) Load() error { return nil }
 
-// Save is a no-op for SQLite (writes are immediate)
-func (s *SQLiteStore) Save() error {
-	return nil
-}
+// Save is a no-op: writes are immediate.
+func (s *SQLiteStore) Save() error { return nil }
 
 // Get returns the LSN for a table
 func (s *SQLiteStore) Get(table string) (Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.closed {
-		return Offset{}, ErrStoreClosed
-	}
-
 	var lsn string
 	var hasNewData bool
 	var updatedAt time.Time
 
-	err := s.db.QueryRow(
+	err := s.db.Reader.QueryRow(
 		"SELECT lsn, has_new_data, updated_at FROM offsets WHERE table_name = ?",
 		table,
 	).Scan(&lsn, &hasNewData, &updatedAt)
@@ -90,13 +62,10 @@ func (s *SQLiteStore) Set(table string, lsn string, hasNewData bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.closed {
-		return ErrStoreClosed
-	}
-
-	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO offsets (table_name, lsn, has_new_data, updated_at)
+	_, err := s.db.Writer.Exec(`
+		INSERT INTO offsets (table_name, lsn, has_new_data, updated_at)
 		VALUES (?, ?, ?, ?)
+		ON CONFLICT(table_name) DO UPDATE SET lsn = excluded.lsn, has_new_data = excluded.has_new_data, updated_at = excluded.updated_at
 	`, table, lsn, hasNewData, time.Now())
 
 	return err
@@ -107,18 +76,13 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.closed {
-		return nil, ErrStoreClosed
-	}
-
-	rows, err := s.db.Query("SELECT table_name, lsn, has_new_data, updated_at FROM offsets")
+	rows, err := s.db.Reader.Query("SELECT table_name, lsn, has_new_data, updated_at FROM offsets")
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			// Log but don't return error for Close
-			slog.Warn("rows.Close error", "error", closeErr)
+		if err := rows.Close(); err != nil {
+			slog.Warn("rows.Close error", "error", err)
 		}
 	}()
 
@@ -143,11 +107,10 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	return result, rows.Err()
 }
 
-// Close closes the database connection
+// Close closes the store (no-op for unified store, DB lifecycle managed externally)
 func (s *SQLiteStore) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.closed = true
-	return s.db.Close()
+	return nil
 }
+
+// Ensure SQLiteStore implements StoreInterface
+var _ StoreInterface = (*SQLiteStore)(nil)
