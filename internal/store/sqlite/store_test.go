@@ -120,7 +120,7 @@ func TestStore_Write(t *testing.T) {
 		},
 	}
 
-	err = store.Write(tx)
+	_, err = store.Write(tx)
 	assert.NoError(t, err)
 }
 
@@ -178,7 +178,7 @@ func TestStore_GetChanges(t *testing.T) {
 			},
 		},
 	}
-	err = store.Write(tx)
+	_, err = store.Write(tx)
 	require.NoError(t, err)
 
 	// Get changes
@@ -212,9 +212,9 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 			{Table: "orders", TransactionID: "tx-002", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
 		},
 	}
-	err = store.Write(tx1)
+	_, err = store.Write(tx1)
 	require.NoError(t, err)
-	err = store.Write(tx2)
+	_, err = store.Write(tx2)
 	require.NoError(t, err)
 
 	// Filter by table name
@@ -246,7 +246,7 @@ func TestStore_UpdatePollerState(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
-	err = store.UpdatePollerState("lsn-123", 5)
+	err = store.UpdatePollerState("lsn-123", 5, 5)
 	assert.NoError(t, err)
 
 	// Force commit to make data visible to reader
@@ -274,9 +274,10 @@ func TestStore_GetPollerState(t *testing.T) {
 	state, err := store.GetPollerState()
 	assert.NoError(t, err)
 	assert.Equal(t, 0, state["total_changes"])
+	assert.Equal(t, 0, state["total_inserted"])
 
 	// Update and get again
-	err = store.UpdatePollerState("lsn-456", 10)
+	err = store.UpdatePollerState("lsn-456", 10, 8)
 	require.NoError(t, err)
 
 	// Force commit to make data visible to reader
@@ -286,6 +287,7 @@ func TestStore_GetPollerState(t *testing.T) {
 	state, err = store.GetPollerState()
 	assert.NoError(t, err)
 	assert.Equal(t, 10, state["total_changes"])
+	assert.Equal(t, 8, state["total_inserted"])
 	assert.Equal(t, "lsn-456", state["last_lsn"])
 }
 
@@ -416,11 +418,11 @@ func TestStore_Write_DuplicateIgnored(t *testing.T) {
 		},
 	}
 
-	err = store.Write(tx)
+	_, err = store.Write(tx)
 	require.NoError(t, err)
 
 	// Write the same transaction again - should be ignored (not an error)
-	err = store.Write(tx)
+	_, err = store.Write(tx)
 	require.NoError(t, err) // INSERT OR IGNORE should prevent duplicate
 
 	// Force commit to make data visible to reader
@@ -472,7 +474,7 @@ func TestStore_Write_SameLSNDifferentContent(t *testing.T) {
 		},
 	}
 
-	err = store.Write(tx)
+	_, err = store.Write(tx)
 	require.NoError(t, err)
 
 	// Force commit
@@ -522,9 +524,9 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 		},
 	}
 
-	err = store.Write(tx1)
+	_, err = store.Write(tx1)
 	require.NoError(t, err)
-	err = store.Write(tx2)
+	_, err = store.Write(tx2)
 	require.NoError(t, err) // different LSN -> different hash, should both be stored
 
 	err = db.Flush()

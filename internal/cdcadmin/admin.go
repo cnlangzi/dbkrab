@@ -246,25 +246,52 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 			CaptureInstance: captureInstance,
 		}
 
-		// Check if CDC is enabled for this table
-		query := `
-			SELECT COUNT(*) 
-			FROM cdc.change_tables 
+		// Check if CDC is enabled for this table and whether supports_net_changes = 1
+		checkQuery := `
+			SELECT supports_net_changes
+			FROM cdc.change_tables
 			WHERE capture_instance = @p1
 		`
-		var count int
-		err = db.QueryRow(query, captureInstance).Scan(&count)
-		if err != nil {
-			// Table might not have CDC enabled yet
+		var supportsNetChanges int
+		err = db.QueryRow(checkQuery, captureInstance).Scan(&supportsNetChanges)
+		if err == sql.ErrNoRows {
+			// Capture instance does not exist yet
+			status.CDCEnabled = false
+			status.NeedsEnable = true
+		} else if err != nil {
 			status.CDCEnabled = false
 			status.NeedsEnable = true
 		} else {
-			status.CDCEnabled = count > 0
-			status.NeedsEnable = !status.CDCEnabled
+			status.CDCEnabled = true
+			// Force recreate if supports_net_changes = 0
+			status.NeedsEnable = supportsNetChanges != 1
 		}
 
-		// Enable CDC if needed
+		// Enable (or recreate) CDC if needed
 		if status.NeedsEnable {
+			// If capture instance already exists but has wrong config, disable it first
+			if status.CDCEnabled {
+				slog.Info("recreating CDC capture instance to enable supports_net_changes=1",
+					"table", schema+"."+tableName,
+					"capture_instance", captureInstance)
+				disableQuery := `
+					EXEC sys.sp_cdc_disable_table
+						@source_schema = @schema,
+						@source_name = @table,
+						@capture_instance = @capture_instance
+				`
+				_, disableErr := db.Exec(disableQuery,
+					sql.Named("schema", schema),
+					sql.Named("table", tableName),
+					sql.Named("capture_instance", captureInstance))
+				if disableErr != nil {
+					enableErrors = append(enableErrors, fmt.Sprintf("%s.%s disable: %v", schema, tableName, disableErr))
+					status.EnableError = disableErr.Error()
+					statuses = append(statuses, status)
+					continue
+				}
+			}
+
 			enableQuery := `
 				EXEC sys.sp_cdc_enable_table
 					@source_schema = @schema,

@@ -1,6 +1,6 @@
 -- Migration: 001_initial
 -- Module: dbkrab-store
--- Description: Create initial schema for unified app DB (transactions, poller_state, offsets, dlq_entries)
+-- Description: Create initial schema for unified app DB (changes, poller_state, offsets, dlq_entries)
 -- Versioning Rules:
 --   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
 --   - Schema table-structure changes: increment minor version (e.g., 1.1.0, 1.2.0)
@@ -8,12 +8,12 @@
 --   - All migrations live under the initial semver folder (1.0.0) per current policy decision
 --
 -- =============================================================================
--- transactions: stores CDC transaction changes
+-- changes: stores CDC change events
 -- =============================================================================
 -- id is a deterministic content-based hash: SHA256(transaction_id + table_name + data + lsn + operation)
 -- truncated to first 16 bytes (32 hex chars). This prevents CDC record loss caused by LSN advancement
 -- skipping rows in the same LSN group when using auto-increment primary key.
-CREATE TABLE IF NOT EXISTS transactions (
+CREATE TABLE IF NOT EXISTS changes (
     id TEXT PRIMARY KEY,
     transaction_id TEXT NOT NULL,
     table_name TEXT NOT NULL,
@@ -24,10 +24,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_table_name ON transactions(table_name);
-CREATE INDEX IF NOT EXISTS idx_changed_at ON transactions(changed_at);
-CREATE INDEX IF NOT EXISTS idx_lsn ON transactions(lsn);
+CREATE INDEX IF NOT EXISTS idx_transaction_id ON changes(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_table_name ON changes(table_name);
+CREATE INDEX IF NOT EXISTS idx_changed_at ON changes(changed_at);
+CREATE INDEX IF NOT EXISTS idx_lsn ON changes(lsn);
 
 -- =============================================================================
 -- poller_state: tracks polling progress and metrics
@@ -47,10 +47,14 @@ VALUES (1, NULL, NULL, 0);
 -- =============================================================================
 -- offsets: stores LSN offsets per table
 -- =============================================================================
+-- has_new_data indicates whether new data was found at the stored LSN position.
+-- When true: stored LSN is the next position to query (incrementLSN was stored)
+-- When false: stored LSN was checked and had no new data (GetFromLSN must re-check)
 CREATE TABLE IF NOT EXISTS offsets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL UNIQUE,
     lsn TEXT NOT NULL,
+    has_new_data INTEGER NOT NULL DEFAULT 1,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -37,7 +37,7 @@ func TestStore(t *testing.T) {
 	}
 
 	// Set offset
-	if err := store.Set("dbo_orders", "01020304"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", true); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -84,10 +84,10 @@ func TestStoreGetAll(t *testing.T) {
 	store := NewStore(path)
 
 	// Set multiple offsets
-	if err := store.Set("dbo_orders", "01020304"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", true); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
-	if err := store.Set("dbo_customers", "02030405"); err != nil {
+	if err := store.Set("dbo_customers", "02030405", true); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestSQLiteStore_ErrStoreClosed(t *testing.T) {
 	}
 
 	// Set after Close
-	if err := store.Set("some-key", "01020304"); !errors.Is(err, ErrStoreClosed) {
+	if err := store.Set("some-key", "01020304", true); !errors.Is(err, ErrStoreClosed) {
 		t.Fatalf("Set() after Close: expected ErrStoreClosed, got %v", err)
 	}
 }

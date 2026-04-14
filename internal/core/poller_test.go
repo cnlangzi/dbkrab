@@ -256,13 +256,13 @@ type mockSink struct {
 	mu   sync.Mutex
 }
 
-func (s *mockSink) Write(tx *Transaction) error {
+func (s *mockSink) Write(tx *Transaction) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
-		return errors.New("simulated sink failure")
+		return 0, errors.New("simulated sink failure")
 	}
-	return nil
+	return len(tx.Changes), nil
 }
 
 func (s *mockSink) WriteOps(ops []Sink) error {
@@ -302,11 +302,11 @@ func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
 	return offsetVal, nil
 }
 
-func (s *mockOffsetStore) Set(table string, lsn string) error {
+func (s *mockOffsetStore) Set(table string, lsn string, hasNewData bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.setCalled = true
-	s.data[table] = offset.Offset{LSN: lsn, UpdatedAt: time.Now()}
+	s.data[table] = offset.Offset{LSN: lsn, HasNewData: hasNewData, UpdatedAt: time.Now()}
 	return nil
 }
 
