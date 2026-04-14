@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-"github.com/cnlangzi/dbkrab/internal/cdcadmin"
+	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
