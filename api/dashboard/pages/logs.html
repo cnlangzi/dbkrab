@@ -114,7 +114,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">ID</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Operation</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Transaction ID</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">TX ID</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">LSN <span class="text-[10px] normal-case">(tx-level)</span></th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Changed At</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Pulled At</th>
@@ -193,7 +193,7 @@ function renderDesktopRow(log) {
     
     return `
         <tr class="hover:bg-surfaceHover transition-colors">
-            <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[120px]">${escapeHtml(log.id)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.id)}</td>
             <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(log.table_name)}</td>
             <td class="px-6 py-4">
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
@@ -201,7 +201,7 @@ function renderDesktopRow(log) {
                 </span>
             </td>
             <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono text-[10px] truncate max-w-[180px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</td>
             <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
             <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
             <td class="px-6 py-4 text-xs">
