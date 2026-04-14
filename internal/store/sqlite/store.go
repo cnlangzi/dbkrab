@@ -227,7 +227,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 		args = append(args, txID)
 	}
 
-	query += " ORDER BY id DESC"
+	query += " ORDER BY changed_at DESC"
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
