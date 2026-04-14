@@ -103,18 +103,10 @@ func (s *Store) Write(tx *core.Transaction) (int, error) {
 		}
 	}()
 
-	stmt, err := sqlTx.Prepare(`
+	const insertSQL = `
 		INSERT OR IGNORE INTO changes (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return 0, fmt.Errorf("prepare statement: %w", err)
-	}
-	defer func() {
-		if err := stmt.Close(); err != nil {
-			slog.Warn("stmt.Close error", "error", err)
-		}
-	}()
+	`
 
 	rowsInserted := 0
 	for _, change := range tx.Changes {
@@ -144,7 +136,8 @@ func (s *Store) Write(tx *core.Transaction) (int, error) {
 			id = hex.EncodeToString(hash[:16])
 		}
 
-		res, err := stmt.Exec(
+		res, err := sqlTx.Exec(
+			insertSQL,
 			id,
 			tx.ID,
 			change.Table,

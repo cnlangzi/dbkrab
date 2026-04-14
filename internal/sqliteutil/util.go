@@ -3,6 +3,7 @@ package sqliteutil
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -21,12 +22,37 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 		return nil
 	}
 
+	slog.Debug("sqliteutil.InsertInTx: starting insert",
+		"table", config.Output,
+		"primaryKey", config.PrimaryKey,
+		"columns", columns,
+		"rows", len(rows))
+
 	for _, row := range rows {
 		sqlStr := BuildInsertSQL(config.Output, columns, true)
-		_, err := tx.Exec(sqlStr, row...)
+		slog.Debug("sqliteutil.InsertInTx: executing",
+			"table", config.Output,
+			"sql", sqlStr,
+			"rowLen", len(row))
+
+		result, err := tx.Exec(sqlStr, row...)
 		if err != nil {
+			slog.Error("sqliteutil.InsertInTx: exec failed",
+				"table", config.Output,
+				"sql", sqlStr,
+				"err", err)
 			return fmt.Errorf("execute: %w", err)
 		}
+
+		if result != nil {
+			rowsAffected, _ := result.RowsAffected()
+			slog.Debug("sqliteutil.InsertInTx: rows affected",
+				"table", config.Output,
+				"rowsAffected", rowsAffected)
+		}
+
+		slog.Debug("sqliteutil.InsertInTx: statement buffered",
+			"table", config.Output)
 	}
 
 	return nil
@@ -51,31 +77,101 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
 	}
 
+	slog.Debug("sqliteutil.UpdateInTx: starting update",
+		"table", config.Output,
+		"primaryKey", config.PrimaryKey,
+		"pkIndex", pkIndex,
+		"columns", columns,
+		"rows", len(rows))
+
 	for _, row := range rows {
-		var setClauses []string
+		pkValue := row[pkIndex]
+
+		var sqlStr string
 		var values []any
-		for i, col := range columns {
-			if col == config.PrimaryKey {
-				continue
+
+		// For UPDATE operations:
+		// - "overwrite" (INSERT OR REPLACE): update if exists, insert if not
+		// - "skip" or "" (INSERT OR IGNORE): do nothing if exists, insert if not
+		// - otherwise: plain UPDATE (does nothing if row doesn't exist)
+		if config.OnConflict == "overwrite" {
+			// Use INSERT OR REPLACE: inserts if not exists, replaces if exists
+			var placeholders []string
+			for i := range columns {
+				placeholders = append(placeholders, "?")
+				values = append(values, row[i])
 			}
-			setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
-			values = append(values, row[i])
+			sqlStr = fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+				config.Output,
+				strings.Join(escapedColumns(columns), ", "),
+				strings.Join(placeholders, ", "))
+		} else if config.OnConflict == "skip" || config.OnConflict == "" {
+			// Use INSERT OR IGNORE: does nothing if row with PK already exists
+			var placeholders []string
+			for i := range columns {
+				placeholders = append(placeholders, "?")
+				values = append(values, row[i])
+			}
+			sqlStr = fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
+				config.Output,
+				strings.Join(escapedColumns(columns), ", "),
+				strings.Join(placeholders, ", "))
+		} else {
+			// Plain UPDATE: only updates if row exists
+			var setClauses []string
+			for i, col := range columns {
+				if col == config.PrimaryKey {
+					continue
+				}
+				setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
+				values = append(values, row[i])
+			}
+			sqlStr = fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
+				config.Output,
+				strings.Join(setClauses, ", "),
+				config.PrimaryKey)
+			values = append(values, pkValue)
 		}
 
-		pkValue := row[pkIndex]
-		sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
-			config.Output,
-			strings.Join(setClauses, ", "),
-			config.PrimaryKey)
-		values = append(values, pkValue)
+		slog.Debug("sqliteutil.UpdateInTx: executing",
+			"table", config.Output,
+			"sql", sqlStr,
+			"pkValue", pkValue,
+			"valuesCount", len(values))
 
-		_, err := tx.Exec(sqlStr, values...)
+		result, err := tx.Exec(sqlStr, values...)
 		if err != nil {
+			slog.Error("sqliteutil.UpdateInTx: exec failed",
+				"table", config.Output,
+				"sql", sqlStr,
+				"pkValue", pkValue,
+				"err", err)
 			return fmt.Errorf("execute: %w", err)
 		}
+
+		if result != nil {
+			rowsAffected, _ := result.RowsAffected()
+			slog.Debug("sqliteutil.UpdateInTx: rows affected",
+				"table", config.Output,
+				"pkValue", pkValue,
+				"rowsAffected", rowsAffected)
+		}
+
+		slog.Debug("sqliteutil.UpdateInTx: statement buffered",
+			"table", config.Output,
+			"pkValue", pkValue)
 	}
 
 	return nil
+}
+
+// escapedColumns returns column names properly escaped for SQL
+func escapedColumns(columns []string) []string {
+	escaped := make([]string, len(columns))
+	for i, col := range columns {
+		escaped[i] = fmt.Sprintf("[%s]", col)
+	}
+	return escaped
 }
 
 // DeleteInTx deletes records from table.
