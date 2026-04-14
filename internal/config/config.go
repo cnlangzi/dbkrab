@@ -32,7 +32,7 @@ type Config struct {
 // CDCConfig aggregates all CDC-related configuration
 type CDCConfig struct {
 	Interval        string                 `yaml:"interval"`
-	Offset          OffsetConfig           `yaml:"offset"`
+
 	Gap            CDCProtectionConfig    `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
 }
@@ -115,12 +115,7 @@ func (s SinksConfig) BasePath() string {
 	return filepath.Dir(s[0].DSN)
 }
 
-// OffsetConfig contains offset storage configuration
-type OffsetConfig struct {
-	Type       string `yaml:"type"`         // json or sqlite
-	JSONPath   string `yaml:"json_path"`    // path to JSON file (for json type)
-	SQLitePath string `yaml:"sqlite_path"`  // path to SQLite file (for sqlite type)
-}
+
 
 // CDCProtectionConfig contains CDC gap protection settings
 type CDCProtectionConfig struct {
@@ -162,15 +157,7 @@ func Load(path string) (*Config, error) {
 	if cfg.CDC.Interval == "" {
 		cfg.CDC.Interval = "500ms"
 	}
-	if cfg.CDC.Offset.Type == "" {
-		cfg.CDC.Offset.Type = "json"
-	}
-	if cfg.CDC.Offset.JSONPath == "" {
-		cfg.CDC.Offset.JSONPath = "./data/offset.json"
-	}
-	if cfg.CDC.Offset.SQLitePath == "" {
-		cfg.CDC.Offset.SQLitePath = "./data/offset.db"
-	}
+
 	if cfg.App.Type == "" {
 		cfg.App.Type = "sqlite"
 	}
