@@ -198,26 +198,20 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		return storedLSN, true, nil
 	}
 
-	// Case 2b: hasNewData == false (上次无数据，存储的是 lastLSN)
-	// 需要检查是否有新数据
-	nextLSN, err := p.querier.IncrementLSN(ctx, storedLSN)
-	if err != nil {
-		return nil, false, fmt.Errorf("increment LSN: %w", err)
-	}
-
+	// Case 2b: hasNewData == false (上次查询返回0行，存储的是 上次使用的LSN)
+	// 不要increment！直接用stored LSN查询，看是否有新数据
 	maxLSN, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("get max LSN: %w", err)
 	}
 
-	// Compare: if nextLSN > maxLSN, there is no new data
-	if LSN(nextLSN).Compare(LSN(maxLSN)) > 0 {
-		return nil, false, nil // 仍无新数据
+	// 如果 stored LSN 已经超过 max LSN，说明没有新数据
+	if LSN(storedLSN).Compare(LSN(maxLSN)) > 0 {
+		return nil, false, nil // LSN已超过max，无需查询
 	}
 
-	// 有新数据，返回 nextLSN（不是 stored.LSN）
-	// 因为 stored.LSN 是上次无数据时的旧位置
-	return nextLSN, true, nil
+	// 有数据，使用stored LSN作为起始点查询
+	return storedLSN, true, nil
 }
 
 // NewPoller creates a new poller

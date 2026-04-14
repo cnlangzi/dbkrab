@@ -77,6 +77,15 @@ func (s *Sinker) writeOp(ctx context.Context, tx sqliteutil.TxExec, op core.Sink
 		OnConflict: op.Config.OnConflict,
 	}
 
+	slog.Debug("SQLiteSinker.writeOp: processing",
+		"database", s.name,
+		"output", op.Config.Output,
+		"opType", op.OpType,
+		"opTypeName", op.OpType.String(),
+		"primaryKey", op.Config.PrimaryKey,
+		"columns", len(op.DataSet.Columns),
+		"rows", len(op.DataSet.Rows))
+
 	switch op.OpType {
 	case core.OpInsert:
 		return sqliteutil.InsertInTx(tx, config, op.DataSet.Columns, op.DataSet.Rows)
@@ -86,12 +95,15 @@ func (s *Sinker) writeOp(ctx context.Context, tx sqliteutil.TxExec, op core.Sink
 		return sqliteutil.DeleteInTx(tx, config, op.DataSet.Columns, op.DataSet.Rows)
 	default:
 		// Defensively handle unknown operations by logging and dropping.
-		// This should not happen once upstream filtering and mapping are fixed,
-		// but we keep this to prevent DLQ storms from malformed data.
-		slog.Warn("SQLiteSinker.writeOp: unknown operation type, dropping",
-			"operation", op.OpType,
+		slog.Error("SQLiteSinker.writeOp: unsupported operation type, dropping",
+			"database", s.name,
 			"output", op.Config.Output,
-			"database", s.name)
+			"opType", op.OpType,
+			"opTypeName", op.OpType.String(),
+			"primaryKey", op.Config.PrimaryKey,
+			"columns", len(op.DataSet.Columns),
+			"rows", len(op.DataSet.Rows),
+			"hint", "supported types are: OpInsert(2), OpUpdateAfter(4), OpDelete(1)")
 		return nil
 	}
 }
