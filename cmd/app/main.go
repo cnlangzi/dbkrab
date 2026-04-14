@@ -129,7 +129,7 @@ func main() {
 	}
 
 	// Create offset store using the unified DB
-	offsetStore := offset.NewUnifiedStore(appDB)
+	offsetStore := offset.NewSQLiteStore(appDB)
 	slog.Info("offset store initialized", "type", "sqlite")
 
 	// Create DLQ with its own separate DB
