@@ -117,7 +117,7 @@ CDC Change (single row)
 
 ```
 dbkrab/
-├── cmd/dbkrab/           # CLI entry point
+├── cmd/app/           # CLI entry point
 ├── internal/
 │   ├── core/             # CDC poller, LSN handling
 │   ├── cdc/              # CDC query functions

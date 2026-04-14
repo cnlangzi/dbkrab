@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/api"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -211,7 +210,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := api.NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
+	apiServer := NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {
