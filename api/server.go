@@ -213,13 +213,13 @@ func (s *Server) registerAPIRoutes() {
 		api.Post("/cdc/config", s.handleCDCConfig, xun.WithViewer(&xun.JsonViewer{}))
 	}
 
-	// CDC logs routes
+	// CDC changes routes
 	if s.store != nil {
-		api.Get("/cdc/logs", s.handleCDCLogs, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/cdc/changes", s.handleCDCChanges, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
-		slog.Info("CDC logs/status routes registered")
+		slog.Info("CDC changes/status routes registered")
 	} else {
-		slog.Warn("CDC logs/status routes skipped - store is nil")
+		slog.Warn("CDC changes/status routes skipped - store is nil")
 	}
 
 	// CDC gap monitoring routes
@@ -521,9 +521,9 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 	})
 }
 
-// handleCDCLogs handles GET /api/cdc/logs
+// handleCDCChanges handles GET /api/cdc/changes
 // Query params: limit (default 100), table, operation, transaction_id
-func (s *Server) handleCDCLogs(c *xun.Context) error {
+func (s *Server) handleCDCChanges(c *xun.Context) error {
 	limit := 100
 	if l := c.Request.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {

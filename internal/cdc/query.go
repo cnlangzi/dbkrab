@@ -168,16 +168,19 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 	// to be fetched when starting fresh (fromLSN = min_lsn).
 	// Duplicate filtering is handled by the caller (poller) which skips records
 	// where __$start_lsn == lastProcessedLSN.
+	//
+	// IMPORTANT: MSSQL CDC functions (fn_cdc_get_net_changes_*, fn_cdc_get_all_changes_*)
+	// require POSITIONAL parameters, not named parameters. Named parameters with
+	// sql.Named don't work correctly with these functions.
+	fromLSNSqlStr := fmt.Sprintf("%v", fromLSN)
+	toLSNSqlStr := fmt.Sprintf("%v", toLSN)
 	query := fmt.Sprintf(`
 		SELECT *, sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS __$commit_time
-		FROM %s(@from_lsn, @to_lsn, N'%s')
+		FROM %s(0x%s, 0x%s, N'%s')
 		ORDER BY __$start_lsn
-	`, fnName, rowFilterOption)
+	`, fnName, fromLSNSqlStr[2:], toLSNSqlStr[2:], rowFilterOption)
 
-	rows, err := q.db.QueryContext(ctx, query,
-		sql.Named("from_lsn", fromLSN),
-		sql.Named("to_lsn", toLSN),
-	)
+	rows, err := q.db.QueryContext(ctx, query)
 	if err != nil {
 		slog.Error("GetChanges query error", "captureInstance", captureInstance, "error", err)
 		return nil, fmt.Errorf("query CDC: %w", err)

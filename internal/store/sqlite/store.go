@@ -100,7 +100,7 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT OR IGNORE INTO transactions (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
+		INSERT OR IGNORE INTO changes (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -211,7 +211,7 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM transactions WHERE 1=1`
+	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
 	args := []interface{}{}
 
 	if tableName != "" {
