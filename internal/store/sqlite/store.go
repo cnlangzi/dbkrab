@@ -28,37 +28,40 @@ func New(db *store.DB) (*Store, error) {
 	return s, nil
 }
 
-// UpdatePollerState updates the poller state after successful poll
-func (s *Store) UpdatePollerState(lastLSN string, changeCount int) error {
+// UpdatePollerState updates the poller state after successful poll.
+// fetchedCount is total CDC rows fetched; insertedCount is rows actually written (after dedup).
+func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {
 	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
-		UPDATE poller_state 
+		UPDATE poller_state
 		SET last_poll_time = CURRENT_TIMESTAMP,
 			last_lsn = COALESCE(NULLIF(?, ''), last_lsn),
 			total_changes = total_changes + ?,
+			total_inserted = total_inserted + ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = 1
-	`, lastLSN, changeCount)
+	`, lastLSN, fetchedCount, insertedCount)
 	return err
 }
 
 // GetPollerState returns the current poller state
 func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	row := s.db.QueryRow(`
-		SELECT last_poll_time, last_lsn, total_changes, updated_at
+		SELECT last_poll_time, last_lsn, total_changes, total_inserted, updated_at
 		FROM poller_state
 		WHERE id = 1
 	`)
 
 	var lastPollTime, lastLSN, updatedAt sql.NullString
-	var totalChanges int
+	var totalChanges, totalInserted int
 
-	if err := row.Scan(&lastPollTime, &lastLSN, &totalChanges, &updatedAt); err != nil {
+	if err := row.Scan(&lastPollTime, &lastLSN, &totalChanges, &totalInserted, &updatedAt); err != nil {
 		return nil, err
 	}
 
 	state := map[string]interface{}{
-		"total_changes": totalChanges,
+		"total_changes":  totalChanges,
+		"total_inserted": totalInserted,
 	}
 
 	if lastPollTime.Valid {
@@ -82,11 +85,12 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	return state, nil
 }
 
-// Write writes a transaction to SQLite
-func (s *Store) Write(tx *core.Transaction) error {
+// Write writes a transaction to SQLite.
+// Returns the number of rows actually inserted (0 for rows skipped by INSERT OR IGNORE dedup).
+func (s *Store) Write(tx *core.Transaction) (int, error) {
 	sqlTx, err := s.db.Writer.Begin()
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return 0, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		if err := sqlTx.Rollback(); err != nil {
@@ -100,11 +104,11 @@ func (s *Store) Write(tx *core.Transaction) error {
 	}()
 
 	stmt, err := sqlTx.Prepare(`
-		INSERT OR IGNORE INTO transactions (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
+		INSERT OR IGNORE INTO changes (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
-		return fmt.Errorf("prepare statement: %w", err)
+		return 0, fmt.Errorf("prepare statement: %w", err)
 	}
 	defer func() {
 		if err := stmt.Close(); err != nil {
@@ -112,6 +116,7 @@ func (s *Store) Write(tx *core.Transaction) error {
 		}
 	}()
 
+	rowsInserted := 0
 	for _, change := range tx.Changes {
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
@@ -139,7 +144,7 @@ func (s *Store) Write(tx *core.Transaction) error {
 			id = hex.EncodeToString(hash[:16])
 		}
 
-		_, err = stmt.Exec(
+		res, err := stmt.Exec(
 			id,
 			tx.ID,
 			change.Table,
@@ -150,11 +155,17 @@ func (s *Store) Write(tx *core.Transaction) error {
 			time.Now().UTC(), // pulled_at - store in UTC for consistency
 		)
 		if err != nil {
-			return fmt.Errorf("insert change: %w", err)
+			return 0, fmt.Errorf("insert change: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			rowsInserted++
 		}
 	}
 
-	return sqlTx.Commit()
+	if err := sqlTx.Commit(); err != nil {
+		return 0, err
+	}
+	return rowsInserted, nil
 }
 
 // WriteOps writes transformed DataSets from SQL plugins to SQLite
@@ -211,7 +222,7 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM transactions WHERE 1=1`
+	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
 	args := []interface{}{}
 
 	if tableName != "" {
