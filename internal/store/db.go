@@ -15,7 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-//go:embed migrations
+//go:embed sqlite/migrations
 var migrationsFS embed.FS
 
 // DB is a wrapper around github.com/cnlangzi/sqlite.DB

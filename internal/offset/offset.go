@@ -14,8 +14,9 @@ var ErrStoreClosed = errors.New("offset store is closed")
 
 // Offset stores the LSN position for each table
 type Offset struct {
-	LSN       string    `json:"lsn"`
-	UpdatedAt time.Time `json:"updated_at"`
+	LSN        string    `json:"lsn"`
+	HasNewData bool      `json:"has_new_data"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // StoreInterface defines the interface for offset storage
@@ -23,7 +24,7 @@ type StoreInterface interface {
 	Load() error
 	Save() error
 	Get(table string) (Offset, error)
-	Set(table string, lsn string) error
+	Set(table string, lsn string, hasNewData bool) error
 	GetAll() (map[string]Offset, error)
 }
 
@@ -97,13 +98,14 @@ func (s *Store) Get(table string) (Offset, error) {
 }
 
 // Set updates the LSN for a table
-func (s *Store) Set(table string, lsn string) error {
+func (s *Store) Set(table string, lsn string, hasNewData bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.offsets[table] = Offset{
-		LSN:       lsn,
-		UpdatedAt: time.Now(),
+		LSN:        lsn,
+		HasNewData: hasNewData,
+		UpdatedAt:  time.Now(),
 	}
 
 	// Auto-save (caller already holds lock, use saveWithoutLock)

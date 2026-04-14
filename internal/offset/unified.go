@@ -35,12 +35,13 @@ func (s *UnifiedStore) Get(table string) (Offset, error) {
 	defer s.mu.RUnlock()
 
 	var lsn string
+	var hasNewData bool
 	var updatedAt time.Time
 
 	err := s.db.Reader.QueryRow(
-		"SELECT lsn, updated_at FROM offsets WHERE table_name = ?",
+		"SELECT lsn, has_new_data, updated_at FROM offsets WHERE table_name = ?",
 		table,
-	).Scan(&lsn, &updatedAt)
+	).Scan(&lsn, &hasNewData, &updatedAt)
 
 	if err == sql.ErrNoRows {
 		return Offset{}, nil
@@ -50,21 +51,22 @@ func (s *UnifiedStore) Get(table string) (Offset, error) {
 	}
 
 	return Offset{
-		LSN:       lsn,
-		UpdatedAt: updatedAt,
+		LSN:        lsn,
+		HasNewData: hasNewData,
+		UpdatedAt:  updatedAt,
 	}, nil
 }
 
 // Set updates the LSN for a table
-func (s *UnifiedStore) Set(table string, lsn string) error {
+func (s *UnifiedStore) Set(table string, lsn string, hasNewData bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	_, err := s.db.Writer.Exec(`
-		INSERT INTO offsets (table_name, lsn, updated_at)
-		VALUES (?, ?, ?)
-		ON CONFLICT(table_name) DO UPDATE SET lsn = excluded.lsn, updated_at = excluded.updated_at
-	`, table, lsn, time.Now())
+		INSERT INTO offsets (table_name, lsn, has_new_data, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(table_name) DO UPDATE SET lsn = excluded.lsn, has_new_data = excluded.has_new_data, updated_at = excluded.updated_at
+	`, table, lsn, hasNewData, time.Now())
 
 	return err
 }
@@ -74,7 +76,7 @@ func (s *UnifiedStore) GetAll() (map[string]Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Reader.Query("SELECT table_name, lsn, updated_at FROM offsets")
+	rows, err := s.db.Reader.Query("SELECT table_name, lsn, has_new_data, updated_at FROM offsets")
 	if err != nil {
 		return nil, err
 	}
@@ -88,15 +90,17 @@ func (s *UnifiedStore) GetAll() (map[string]Offset, error) {
 	for rows.Next() {
 		var table string
 		var lsn string
+		var hasNewData bool
 		var updatedAt time.Time
 
-		if err := rows.Scan(&table, &lsn, &updatedAt); err != nil {
+		if err := rows.Scan(&table, &lsn, &hasNewData, &updatedAt); err != nil {
 			return nil, err
 		}
 
 		result[table] = Offset{
-			LSN:       lsn,
-			UpdatedAt: updatedAt,
+			LSN:        lsn,
+			HasNewData: hasNewData,
+			UpdatedAt:  updatedAt,
 		}
 	}
 
