@@ -83,8 +83,10 @@
                 <p id="last-lsn" class="text-sm sm:text-lg font-bold text-success font-mono truncate">-</p>
             </div>
             <div class="p-3 sm:p-4 rounded-xl bg-warning/10 border border-warning/20">
-                <p class="text-textMuted text-xs sm:text-sm mb-1">Total Changes</p>
-                <p id="total-changes" class="text-base sm:text-lg font-bold text-warning">0</p>
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Changes (inserted / fetched)</p>
+                <p class="text-base sm:text-lg font-bold text-warning">
+                    <span id="total-inserted">0</span><span class="text-textMuted font-normal"> / </span><span id="total-changes">0</span>
+                </p>
             </div>
         </div>
     </div>
@@ -304,6 +306,7 @@ function loadPollerStatus() {
                 document.getElementById('last-poll-time').textContent = formatLocalTime(state.last_poll_time);
                 document.getElementById('last-lsn').textContent = state.last_lsn || '-';
                 document.getElementById('total-changes').textContent = state.total_changes || 0;
+                document.getElementById('total-inserted').textContent = state.total_inserted || 0;
             }
         })
         .catch(err => {

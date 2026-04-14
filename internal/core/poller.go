@@ -120,7 +120,8 @@ type Poller struct {
 
 // Store interface for storing changes
 type Store interface {
-	Write(tx *Transaction) error
+	// Write writes a transaction and returns the number of rows actually inserted.
+	Write(tx *Transaction) (int, error)
 	Close() error
 }
 
@@ -493,7 +494,7 @@ func (p *Poller) poll(ctx context.Context) error {
 		return p.processDirect(ctx, allChanges, results, fetchTime)
 	}
 	// No changes but still update offsets for observability
-	return p.updateOffsets(ctx, results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0)
+	return p.updateOffsets(ctx, results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0, 0)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
@@ -503,8 +504,9 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Group by transaction ID and deliver
 	txs := p.groupByTransaction(allChanges)
 
-	// Track DLQ count and store duration
+	// Track DLQ count, store duration, and actual rows inserted
 	dlqCount := 0
+	actualInserted := 0
 	var totalStoreDuration time.Duration
 
 	// Process all transactions
@@ -530,8 +532,11 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		// Store processing with retry (blocking: must succeed for offset advancement)
 		if p.store != nil {
 			storeStart := time.Now()
+			var inserted int
 			err := retry.DoWithName(ctx, func() error {
-				return p.store.Write(&tx)
+				var writeErr error
+				inserted, writeErr = p.store.Write(&tx)
+				return writeErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
 			storeDuration := time.Since(storeStart)
 			totalStoreDuration += storeDuration
@@ -542,6 +547,8 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 				p.writeToDLQ(&tx, err, "store")
 				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
 				dlqCount++
+			} else {
+				actualInserted += inserted
 			}
 		}
 	}
@@ -555,14 +562,14 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	syncDuration := syncEndTime.Sub(syncStartTime)
 
 	// All transactions successfully written - now update offsets
-	return p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs))
+	return p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted)
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables
 // Each table maintains its own independent LSN offset.
 // Only tables with changes have their offsets advanced.
 // Tables with no changes keep their existing offset.
-func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int) error {
+func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int, actualInserted int) error {
 	// Track the maximum LSN across all tables for observability/metrics
 	var maxLSN LSN
 	tablesUpdated := 0
@@ -630,9 +637,9 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	}
 
 	// Always update poller state for observability
-	if sqliteStore, ok := p.store.(interface{ UpdatePollerState(string, int) error }); ok {
-		slog.Debug("updating poller state", "lastLSN", lastLSN, "changes", len(allChanges))
-		if err := sqliteStore.UpdatePollerState(lastLSN, len(allChanges)); err != nil {
+	if sqliteStore, ok := p.store.(interface{ UpdatePollerState(string, int, int) error }); ok {
+		slog.Debug("updating poller state", "lastLSN", lastLSN, "fetched", len(allChanges), "inserted", actualInserted)
+		if err := sqliteStore.UpdatePollerState(lastLSN, len(allChanges), actualInserted); err != nil {
 			slog.Warn("failed to update poller state", "error", err)
 		}
 	} else {
@@ -672,6 +679,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		// Emit structured INFO summary log for non-empty polls
 		slog.Info("[poll cycle]",
 			"cdc_fetched", len(allChanges),
+			"inserted", actualInserted,
 			"tx_count", txCount,
 			"sync_tps", fmt.Sprintf("%.1f", syncTPS),
 			"sync_ms", syncDuration.Milliseconds(),

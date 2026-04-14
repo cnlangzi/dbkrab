@@ -73,86 +73,28 @@ func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) 
 	return nextLSN, err
 }
 
-// supportsNetChanges checks if a capture instance was created with supports_net_changes = 1.
-// Returns true if net_changes is supported (fn_cdc_get_net_changes_* can be used),
-// false otherwise. This is determined by checking the cdc.change_tables catalog view.
-func (q *Querier) supportsNetChanges(ctx context.Context, captureInstance string) (bool, error) {
-	if !validCaptureInstance.MatchString(captureInstance) {
-		return false, fmt.Errorf("invalid capture instance name: %s", captureInstance)
-	}
-
-	// Check cdc.change_tables for supports_net_changes column
-	// MSSQL returns this as bool ("true"/"false") or int (1/0) depending on driver version
-	// Use CASE to explicitly convert to int, avoiding driver type confusion
-	var rawValue interface{}
-	query := `SELECT CASE WHEN supports_net_changes = 1 THEN 1 ELSE 0 END FROM cdc.change_tables WHERE capture_instance = @p1`
-	err := q.db.QueryRowContext(ctx, query, captureInstance).Scan(&rawValue)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			// Capture instance not found - might not have CDC enabled
-			return false, nil
-		}
-		return false, fmt.Errorf("check net_changes support: %w", err)
-	}
-
-	// Handle different return types: bool (mssql driver) or int (go-mssqldb)
-	switch v := rawValue.(type) {
-	case bool:
-		return v, nil
-	case int:
-		return v == 1, nil
-	case int64:
-		return v == 1, nil
-	default:
-		// Try string representation as fallback
-		switch fmt.Sprintf("%v", v) {
-		case "true", "1":
-			return true, nil
-		default:
-			return false, nil
-		}
-	}
-}
-
-// GetChanges queries CDC changes for a table
+// GetChanges queries CDC changes for a table using fn_cdc_get_net_changes_*.
 // captureInstance is used for MSSQL CDC queries (must include schema prefix)
 // tableName is the original table name used for returned Change.Table (without schema prefix)
 //
-// IMPORTANT: MSSQL CDC function cdc.fn_cdc_get_all_changes_* returns rows where
+// All capture instances are created with supports_net_changes = 1 (enforced by CheckAndEnableCDC),
+// so we always use fn_cdc_get_net_changes_* which returns only the final row state per transaction,
+// eliminating UPDATE_BEFORE rows.
+//
+// IMPORTANT: MSSQL CDC function cdc.fn_cdc_get_net_changes_* returns rows where
 // __$start_lsn >= @from_lsn. We query with the raw fromLSN (no increment) to include
 // the first record when starting fresh. Duplicate filtering is handled at the
 // application level (caller filters records where __$start_lsn == lastProcessedLSN).
-//
-// When supports_net_changes is enabled for the capture instance, we use
-// fn_cdc_get_net_changes_* which returns only the final row state, eliminating
-// UPDATE_BEFORE rows and preventing "unknown operation type: UPDATE_BEFORE" errors.
 func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN, toLSN []byte) ([]Change, error) {
 	// Validate capture instance to prevent SQL injection
 	if !validCaptureInstance.MatchString(captureInstance) {
 		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
 	}
 
-	// Check if net_changes is enabled for this capture instance
-	useNetChanges, err := q.supportsNetChanges(ctx, captureInstance)
-	if err != nil {
-		slog.Warn("failed to check net_changes support, falling back to all_changes",
-			"captureInstance", captureInstance, "error", err)
-		useNetChanges = false
-	}
-
-	// Build the CDC function name based on net_changes support
-	var fnName string
-	var rowFilterOption string
-	if useNetChanges {
-		fnName = fmt.Sprintf("cdc.fn_cdc_get_net_changes_%s", captureInstance)
-		// net_changes functions only support 'all' row filter option
-		rowFilterOption = "all"
-		slog.Debug("using net_changes CDC function", "fnName", fnName)
-	} else {
-		fnName = fmt.Sprintf("cdc.fn_cdc_get_all_changes_%s", captureInstance)
-		rowFilterOption = "all"
-		slog.Debug("using all_changes CDC function", "fnName", fnName)
-	}
+	// Always use net_changes - capture instances are always created with supports_net_changes = 1
+	fnName := fmt.Sprintf("cdc.fn_cdc_get_net_changes_%s", captureInstance)
+	rowFilterOption := "all"
+	slog.Debug("using net_changes CDC function", "fnName", fnName)
 
 	// Get max LSN if toLSN is not provided
 	if len(toLSN) == 0 {
