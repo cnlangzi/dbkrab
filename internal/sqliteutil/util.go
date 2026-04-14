@@ -94,7 +94,8 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 		// - "overwrite" (INSERT OR REPLACE): update if exists, insert if not
 		// - "skip" or "" (INSERT OR IGNORE): do nothing if exists, insert if not
 		// - otherwise: plain UPDATE (does nothing if row doesn't exist)
-		if config.OnConflict == "overwrite" {
+		switch config.OnConflict {
+		case "overwrite":
 			// Use INSERT OR REPLACE: inserts if not exists, replaces if exists
 			var placeholders []string
 			for i := range columns {
@@ -105,7 +106,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				config.Output,
 				strings.Join(escapedColumns(columns), ", "),
 				strings.Join(placeholders, ", "))
-		} else if config.OnConflict == "skip" || config.OnConflict == "" {
+		case "skip", "":
 			// Use INSERT OR IGNORE: does nothing if row with PK already exists
 			var placeholders []string
 			for i := range columns {
@@ -116,7 +117,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				config.Output,
 				strings.Join(escapedColumns(columns), ", "),
 				strings.Join(placeholders, ", "))
-		} else {
+		default:
 			// Plain UPDATE: only updates if row exists
 			var setClauses []string
 			for i, col := range columns {
