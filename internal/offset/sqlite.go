@@ -28,6 +28,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		CREATE TABLE IF NOT EXISTS offsets (
 			table_name TEXT PRIMARY KEY,
 			lsn TEXT NOT NULL,
+			has_new_data INTEGER NOT NULL DEFAULT 0,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`); err != nil {
@@ -62,12 +63,13 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	}
 
 	var lsn string
+	var hasNewData bool
 	var updatedAt time.Time
 
 	err := s.db.QueryRow(
-		"SELECT lsn, updated_at FROM offsets WHERE table_name = ?",
+		"SELECT lsn, has_new_data, updated_at FROM offsets WHERE table_name = ?",
 		table,
-	).Scan(&lsn, &updatedAt)
+	).Scan(&lsn, &hasNewData, &updatedAt)
 
 	if err == sql.ErrNoRows {
 		return Offset{}, nil
@@ -77,13 +79,14 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	}
 
 	return Offset{
-		LSN:       lsn,
-		UpdatedAt: updatedAt,
+		LSN:        lsn,
+		HasNewData: hasNewData,
+		UpdatedAt:  updatedAt,
 	}, nil
 }
 
 // Set updates the LSN for a table
-func (s *SQLiteStore) Set(table string, lsn string) error {
+func (s *SQLiteStore) Set(table string, lsn string, hasNewData bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -92,9 +95,9 @@ func (s *SQLiteStore) Set(table string, lsn string) error {
 	}
 
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO offsets (table_name, lsn, updated_at)
-		VALUES (?, ?, ?)
-	`, table, lsn, time.Now())
+		INSERT OR REPLACE INTO offsets (table_name, lsn, has_new_data, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, table, lsn, hasNewData, time.Now())
 
 	return err
 }
@@ -108,7 +111,7 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 		return nil, ErrStoreClosed
 	}
 
-	rows, err := s.db.Query("SELECT table_name, lsn, updated_at FROM offsets")
+	rows, err := s.db.Query("SELECT table_name, lsn, has_new_data, updated_at FROM offsets")
 	if err != nil {
 		return nil, err
 	}
@@ -123,15 +126,17 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	for rows.Next() {
 		var table string
 		var lsn string
+		var hasNewData bool
 		var updatedAt time.Time
 
-		if err := rows.Scan(&table, &lsn, &updatedAt); err != nil {
+		if err := rows.Scan(&table, &lsn, &hasNewData, &updatedAt); err != nil {
 			return nil, err
 		}
 
 		result[table] = Offset{
-			LSN:       lsn,
-			UpdatedAt: updatedAt,
+			LSN:        lsn,
+			HasNewData: hasNewData,
+			UpdatedAt:  updatedAt,
 		}
 	}
 
