@@ -149,6 +149,8 @@ reset:
 	@sleep 2
 	@echo "Deleting app data files..."
 	@rm -rf /opt/dbkrab/data/app/*
+	@echo "Deleting sinks data files..."
+	@rm -rf /opt/dbkrab/data/sinks/*/*.db /opt/dbkrab/data/sinks/*/*.db-shm /opt/dbkrab/data/sinks/*/*.db-wal
 	@echo "Deleting logs..."
 	@rm -rf /opt/dbkrab/logs/*
 	@mkdir -p /opt/dbkrab/logs
