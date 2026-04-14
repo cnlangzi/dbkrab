@@ -3,6 +3,7 @@ package cdc
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -169,16 +170,18 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 	// Duplicate filtering is handled by the caller (poller) which skips records
 	// where __$start_lsn == lastProcessedLSN.
 	//
-	// IMPORTANT: MSSQL CDC functions (fn_cdc_get_net_changes_*, fn_cdc_get_all_changes_*)
-	// require POSITIONAL parameters, not named parameters. Named parameters with
-	// sql.Named don't work correctly with these functions.
-	fromLSNSqlStr := fmt.Sprintf("%v", fromLSN)
-	toLSNSqlStr := fmt.Sprintf("%v", toLSN)
+	// IMPORTANT: MSSQL CDC functions require binary(10) LSN values and nvarchar row_filter.
+	// Use string interpolation for LSN values since they're validated as hex.
+	// Row filter must be passed as a parameter to prevent SQL injection.
+	fromLSNSql := hex.EncodeToString(fromLSN)
+	toLSNSql := hex.EncodeToString(toLSN)
 	query := fmt.Sprintf(`
 		SELECT *, sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS __$commit_time
 		FROM %s(0x%s, 0x%s, N'%s')
 		ORDER BY __$start_lsn
-	`, fnName, fromLSNSqlStr[2:], toLSNSqlStr[2:], rowFilterOption)
+	`, fnName, fromLSNSql, toLSNSql, rowFilterOption)
+
+	slog.Debug("GetChanges executing query", "captureInstance", captureInstance, "query", query)
 
 	rows, err := q.db.QueryContext(ctx, query)
 	if err != nil {

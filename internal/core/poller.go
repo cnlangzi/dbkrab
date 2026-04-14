@@ -184,7 +184,16 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 
 	// Case 2a: hasNewData == true (上次有数据，存储的是 incrementLSN(lastLSN))
 	// 存储的是下一个待处理的 LSN，直接用它作为 fromLSN
+	// 但需要验证它没有超过 max LSN（可能 MSSQL 没有新数据）
 	if stored.HasNewData {
+		maxLSN, err := p.querier.GetMaxLSN(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("get max LSN: %w", err)
+		}
+		// 如果 stored LSN 已经超过 max LSN，说明没有新数据
+		if LSN(storedLSN).Compare(LSN(maxLSN)) > 0 {
+			return nil, false, nil
+		}
 		return storedLSN, true, nil
 	}
 
