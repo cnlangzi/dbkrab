@@ -2,20 +2,25 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
+	"github.com/yaitoo/sqle"
+	"github.com/yaitoo/sqle/migrate"
 )
 
 // Sinker implements sinker.Sinker for SQLite.
 type Sinker struct {
-	name   string
-	db     *DB
-	mu     sync.Mutex
-	closed bool
+	name       string
+	db         *DB
+	migrations string // path to migration SQL files
+	mu         sync.Mutex
+	closed     bool
 }
 
 // NewSinker creates a new SQLite sinker.
@@ -26,8 +31,9 @@ func NewSinker(name string, dsn string, migrations string) (*Sinker, error) {
 	}
 
 	return &Sinker{
-		name: name,
-		db:   db,
+		name:       name,
+		db:         db,
+		migrations: migrations,
 	}, nil
 }
 
@@ -119,4 +125,36 @@ func (s *Sinker) Close() error {
 	s.closed = true
 
 	return s.db.Close()
+}
+
+// Migrate runs the migration for this sinker's database.
+// It re-discovers and re-applies migrations from the configured migrations path.
+func (s *Sinker) Migrate(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.migrations == "" {
+		return errors.New("no migrations path configured")
+	}
+
+	slog.Info("SQLiteSinker.Migrate: starting migration",
+		"database", s.name,
+		"migrations", s.migrations)
+
+	sqleDB := sqle.Open(s.db.Writer.DB)
+	migrator := migrate.New(sqleDB)
+	if err := migrator.Discover(os.DirFS(s.migrations), migrate.WithModule("dbkrab")); err != nil {
+		return fmt.Errorf("load migrations: %w", err)
+	}
+	if err := migrator.Init(ctx); err != nil {
+		return fmt.Errorf("init migrations: %w", err)
+	}
+	if err := migrator.Migrate(ctx); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
+	slog.Info("SQLiteSinker.Migrate: migration completed",
+		"database", s.name)
+
+	return nil
 }

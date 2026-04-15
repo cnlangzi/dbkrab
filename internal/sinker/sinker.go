@@ -18,6 +18,10 @@ type Sinker interface {
 	// Write writes a batch of sink operations to the sink with context for timeout/cancellation
 	Write(ctx context.Context, ops []core.Sink) error
 
+	// Migrate runs the migration for this sinker's database.
+	// It re-discovers and re-applies migrations from the configured migrations path.
+	Migrate(ctx context.Context) error
+
 	// Close closes the sinker and releases resources
 	Close() error
 }
