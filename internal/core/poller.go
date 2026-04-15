@@ -163,29 +163,29 @@ var ErrNoNewData = errors.New("no new data available for table")
 //   3. If last_lsn == max_lsn → re-fetch max_lsn:
 //      a. If new_max > last_lsn → use next_lsn (data arrived between save and query)
 //      b. If new_max == last_lsn → no new data
-func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset) (fromLSN []byte, hasData bool, err error) {
-	// Case 1: Fresh start - no stored last_lsn
+func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset) ([]byte, error) {
+	// Case 1: Cold start - no stored last_lsn
 	if stored.LastLSN == "" {
 		schema, tableName := cdc.ParseTableName(table)
 		captureInstance := cdc.CaptureInstanceName(schema, tableName)
 		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
 		if err != nil {
-			return nil, false, fmt.Errorf("get min LSN: %w", err)
+			return nil, fmt.Errorf("get min LSN: %w", err)
 		}
-		return minLSN, true, nil
+		return minLSN, nil
 	}
 
 	// Parse stored LSNs
 	lastLSNBytes, parseErr := ParseLSN(stored.LastLSN)
 	if parseErr != nil || len(lastLSNBytes) == 0 {
-		// Invalid stored LSN, treat as fresh start
+		// Invalid stored LSN, treat as cold start
 		schema, tableName := cdc.ParseTableName(table)
 		captureInstance := cdc.CaptureInstanceName(schema, tableName)
 		minLSN, err := p.querier.GetMinLSN(ctx, captureInstance)
 		if err != nil {
-			return nil, false, fmt.Errorf("get min LSN: %w", err)
+			return nil, fmt.Errorf("get min LSN: %w", err)
 		}
-		return minLSN, true, nil
+		return minLSN, nil
 	}
 
 	// Case 2: Have stored offset with max_lsn
@@ -193,20 +193,20 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 	if stored.MaxLSN == "" {
 		maxLSN, err := p.querier.GetMaxLSN(ctx)
 		if err != nil {
-			return nil, false, fmt.Errorf("get max LSN: %w", err)
+			return nil, fmt.Errorf("get max LSN: %w", err)
 		}
 		// Compare last_lsn with fetched max_lsn
 		if LSN(lastLSNBytes).Compare(LSN(maxLSN)) < 0 {
 			// last_lsn < max_lsn → use next_lsn if available, otherwise increment last_lsn
 			if stored.NextLSN != "" {
 				nextLSNBytes, _ := ParseLSN(stored.NextLSN)
-				return nextLSNBytes, true, nil
+				return nextLSNBytes, nil
 			}
 			nextLSN, _ := p.querier.IncrementLSN(ctx, lastLSNBytes)
-			return nextLSN, true, nil
+			return nextLSN, nil
 		}
 		// last_lsn >= max_lsn → no new data
-		return nil, false, nil
+		return nil, nil
 	}
 
 	maxLSNBytes, maxParseErr := ParseLSN(stored.MaxLSN)
@@ -214,48 +214,48 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		// Invalid max_lsn, fetch fresh
 		maxLSN, err := p.querier.GetMaxLSN(ctx)
 		if err != nil {
-			return nil, false, fmt.Errorf("get max LSN: %w", err)
+			return nil, fmt.Errorf("get max LSN: %w", err)
 		}
 		if LSN(lastLSNBytes).Compare(LSN(maxLSN)) < 0 {
 			if stored.NextLSN != "" {
 				nextLSNBytes, _ := ParseLSN(stored.NextLSN)
-				return nextLSNBytes, true, nil
+				return nextLSNBytes, nil
 			}
 			nextLSN, _ := p.querier.IncrementLSN(ctx, lastLSNBytes)
-			return nextLSN, true, nil
+			return nextLSN, nil
 		}
-		return nil, false, nil
+		return nil, nil
 	}
 
 	// Case 2a: last_lsn < max_lsn → new data available, use next_lsn
 	if LSN(lastLSNBytes).Compare(LSN(maxLSNBytes)) < 0 {
 		if stored.NextLSN != "" {
 			nextLSNBytes, _ := ParseLSN(stored.NextLSN)
-			return nextLSNBytes, true, nil
+			return nextLSNBytes, nil
 		}
 		// Compute next_lsn if missing
 		nextLSN, _ := p.querier.IncrementLSN(ctx, lastLSNBytes)
-		return nextLSN, true, nil
+		return nextLSN, nil
 	}
 
 	// Case 2b: last_lsn == max_lsn → re-fetch max_lsn to check for new data
 	newMaxLSN, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("get max LSN: %w", err)
+		return nil, fmt.Errorf("get max LSN: %w", err)
 	}
 
 	// If new_max > last_lsn → data arrived between save and query
 	if LSN(newMaxLSN).Compare(LSN(lastLSNBytes)) > 0 {
 		if stored.NextLSN != "" {
 			nextLSNBytes, _ := ParseLSN(stored.NextLSN)
-			return nextLSNBytes, true, nil
+			return nextLSNBytes, nil
 		}
 		nextLSN, _ := p.querier.IncrementLSN(ctx, lastLSNBytes)
-		return nextLSN, true, nil
+		return nextLSN, nil
 	}
 
 	// new_max == last_lsn → no new data
-	return nil, false, nil
+	return nil, nil
 }
 
 // NewPoller creates a new poller
@@ -458,16 +458,16 @@ func (p *Poller) poll(ctx context.Context) error {
 			continue
 		}
 
-		// Use GetFromLSN to determine fromLSN and whether new data is available
+		// Use GetFromLSN to determine fromLSN
 		// This uses incrementLSN(stored) vs GetMaxLSN() comparison
-		fromLSN, hasData, err := p.GetFromLSN(ctx, table, stored)
+		fromLSN, err := p.GetFromLSN(ctx, table, stored)
 		if err != nil {
 			results = append(results, tablePollResult{table: table, err: err})
 			continue
 		}
 
 		// No new data - skip this table
-		if !hasData || fromLSN == nil {
+		if fromLSN == nil {
 			slog.Debug("no new data for table, skipping", "table", table)
 			continue
 		}
