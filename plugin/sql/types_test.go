@@ -213,6 +213,42 @@ func TestSkillFilterByOperation(t *testing.T) {
 	}
 }
 
+func TestSkillFilterByOperation_InsertOnly(t *testing.T) {
+	skill := &Skill{
+		Name: "test",
+		On:   []string{"dbo.orders"},
+		Sinks: []Sink{
+			{SinkConfig: SinkConfig{Name: "insert_only"}, When: []string{"insert"}},
+			{SinkConfig: SinkConfig{Name: "update_only"}, When: []string{"update"}},
+			{SinkConfig: SinkConfig{Name: "delete_only"}, When: []string{"delete"}},
+		},
+	}
+
+	insertSinks := skill.FilterByOperation(Insert)
+	if len(insertSinks) != 1 {
+		t.Errorf("expected 1 insert sink, got %d", len(insertSinks))
+	}
+	if insertSinks[0].Name != "insert_only" {
+		t.Errorf("expected insert sink name 'insert_only', got '%s'", insertSinks[0].Name)
+	}
+
+	updateSinks := skill.FilterByOperation(Update)
+	if len(updateSinks) != 1 {
+		t.Errorf("expected 1 update sink, got %d", len(updateSinks))
+	}
+	if updateSinks[0].Name != "update_only" {
+		t.Errorf("expected update sink name 'update_only', got '%s'", updateSinks[0].Name)
+	}
+
+	deleteSinks := skill.FilterByOperation(Delete)
+	if len(deleteSinks) != 1 {
+		t.Errorf("expected 1 delete sink, got %d", len(deleteSinks))
+	}
+	if deleteSinks[0].Name != "delete_only" {
+		t.Errorf("expected delete sink name 'delete_only', got '%s'", deleteSinks[0].Name)
+	}
+}
+
 func TestFilterSinks(t *testing.T) {
 	sinks := []SinkConfig{
 		{Name: "sink1", On: "dbo.orders"},
