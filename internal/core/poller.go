@@ -189,30 +189,26 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		return minLSN, nil
 	}
 
-	// Case 2: last_lsn != max_lsn → new data available
-	if stored.MaxLSN != "" {
-		maxLSNBytes, maxParseErr := ParseLSN(stored.MaxLSN)
-		if maxParseErr == nil && len(maxLSNBytes) > 0 {
-			if LSN(lastLSNBytes).Compare(LSN(maxLSNBytes)) != 0 {
-				// last_lsn != max_lsn → use next_lsn as fromLSN
-				if stored.NextLSN != "" {
-					nextLSNBytes, nextParseErr := ParseLSN(stored.NextLSN)
-					if nextParseErr == nil && len(nextLSNBytes) > 0 {
-						return nextLSNBytes, nil
-					}
-					// Invalid stored NextLSN, fall back to incrementing last_lsn
-					slog.Warn("invalid stored next_lsn, falling back to increment", "table", table, "next_lsn", stored.NextLSN)
-				}
-				nextLSN, incErr := p.querier.IncrementLSN(ctx, lastLSNBytes)
-				if incErr != nil {
-					return nil, fmt.Errorf("increment LSN: %w", incErr)
-				}
-				return nextLSN, nil
+	// Case 2: last_lsn != globalMaxLSN → new data available
+	// Use the globalMaxLSN snapshot from poll start, not the stored max_lsn
+	if len(globalMaxLSN) > 0 && LSN(lastLSNBytes).Compare(globalMaxLSN) != 0 {
+		// last_lsn != globalMaxLSN → use next_lsn as fromLSN
+		if stored.NextLSN != "" {
+			nextLSNBytes, nextParseErr := ParseLSN(stored.NextLSN)
+			if nextParseErr == nil && len(nextLSNBytes) > 0 {
+				return nextLSNBytes, nil
 			}
+			// Invalid stored NextLSN, fall back to incrementing last_lsn
+			slog.Warn("invalid stored next_lsn, falling back to increment", "table", table, "next_lsn", stored.NextLSN)
 		}
+		nextLSN, incErr := p.querier.IncrementLSN(ctx, lastLSNBytes)
+		if incErr != nil {
+			return nil, fmt.Errorf("increment LSN: %w", incErr)
+		}
+		return nextLSN, nil
 	}
 
-	// Case 3: last_lsn == max_lsn → no new data
+	// Case 3: last_lsn == globalMaxLSN → no new data
 	return nil, nil
 }
 

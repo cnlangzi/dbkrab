@@ -46,16 +46,18 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 Case 1: Fresh Start (stored.last_lsn == "")
     return GetMinLSN(table), nil
 
-Case 2: last_lsn != max_lsn → New data available
+Case 2: last_lsn != globalMaxLSN → New data available
     return stored.next_lsn (as cached fromLSN)
 
-Case 3: last_lsn == max_lsn → No new data
+Case 3: last_lsn == globalMaxLSN → No new data
     return nil
 ```
 
 ### Why globalMaxLSN?
 
 `globalMaxLSN` is fetched once at the start of each poll cycle as a consistent snapshot. This ensures all tables see the same max LSN boundary, maintaining cross-table transaction consistency.
+
+The stored `max_lsn` is no longer used for comparison - only `globalMaxLSN` (the snapshot from poll start) is used.
 
 ## Offset Storage Schema
 
@@ -109,9 +111,9 @@ CREATE TABLE offsets (
 
 ## Scenarios
 
-| Scenario | last_lsn | max_lsn | next_lsn | Result |
-|----------|----------|---------|----------|--------|
-| Fresh start | "" | "" | "" | getMinLSN() |
+| Scenario | last_lsn | globalMaxLSN | next_lsn | Result |
+|----------|----------|--------------|----------|--------|
+| Fresh start | "" | any | "" | getMinLSN() |
 | Has new data | 0x64 | 0x70 | 0x65 | Return 0x65 |
 | No new data | 0x70 | 0x70 | 0x71 | Return nil |
 | Data just arrived | 0x64 | 0x70 | 0x65 | Return 0x65 |
