@@ -14,17 +14,18 @@ MSSQL CDC functions `fn_cdc_get_all_changes_*` and `fn_cdc_get_net_changes_*` re
 - We process up to `0x66`, then store `next_lsn = incrementLSN(0x66) = 0x67`
 - Next query with `from_lsn = 0x67` starts after what we've processed
 
-## Solution: last_lsn vs max_lsn Comparison
+## Solution: last_lsn vs globalMaxLSN Comparison
 
-We store three pieces of information per table:
+We store two pieces of information per table:
 1. `last_lsn`: The LSN of the last processed row
 2. `next_lsn`: incrementLSN(last_lsn), cached for convenience
-3. `max_lsn`: The max LSN in the database when this offset was saved
 
 ### Key Insight
 
-- `last_lsn != max_lsn` → New data exists (max has advanced)
-- `last_lsn == max_lsn` → No new data (we've caught up)
+- `last_lsn != globalMaxLSN` → New data exists (globalMaxLSN has advanced)
+- `last_lsn == globalMaxLSN` → No new data (we've caught up)
+
+`globalMaxLSN` is fetched once at the start of each poll cycle as a consistent snapshot.
 
 ## MSSQL CDC LSN Functions
 
@@ -57,8 +58,6 @@ Case 3: last_lsn == globalMaxLSN → No new data
 
 `globalMaxLSN` is fetched once at the start of each poll cycle as a consistent snapshot. This ensures all tables see the same max LSN boundary, maintaining cross-table transaction consistency.
 
-Note: The `max_lsn` column was removed from the offset schema (it was stored but never used for comparison after the change to use `globalMaxLSN`).
-
 ## Offset Storage Schema
 
 ```sql
@@ -89,8 +88,8 @@ CREATE TABLE offsets (
    a. stored = offsets.Get(table)
    b. fromLSN, err := GetFromLSN(table, stored, globalMaxLSN)
       - If last_lsn empty → getMinLSN()
-      - If last_lsn != max_lsn → use next_lsn
-      - If last_lsn == max_lsn → skip (no data)
+      - If last_lsn != globalMaxLSN → use next_lsn
+      - If last_lsn == globalMaxLSN → skip (no data)
    c. If fromLSN == nil, continue to next table
    
    d. changes = GetChanges(fromLSN, nil)
@@ -98,13 +97,10 @@ CREATE TABLE offsets (
    e. If changes > 0:
       - last_lsn = last change's LSN
       - next_lsn = incrementLSN(last_lsn)
-      - max_lsn = globalMaxLSN
-      - offsets.Set(table, last_lsn, next_lsn, max_lsn)
+      - offsets.Set(table, last_lsn, next_lsn)
       
       Else (no changes):
-      - Keep existing last_lsn, next_lsn
-      - max_lsn = globalMaxLSN (updated for next comparison)
-      - offsets.Set(table, last_lsn, next_lsn, max_lsn)
+      - Nothing to update, keep existing offset
 ```
 
 ## Scenarios
@@ -116,17 +112,9 @@ CREATE TABLE offsets (
 | No new data | 0x70 | 0x70 | 0x71 | Return nil |
 | Data just arrived | 0x64 | 0x70 | 0x65 | Return 0x65 |
 
-## Why Store max_lsn?
-
-`max_lsn` enables the `last_lsn != max_lsn` comparison:
-
-- When we save an offset after processing, we capture `max_lsn` at that moment
-- On next poll, if `max_lsn` has advanced beyond `last_lsn`, we know new data exists
-- This works because MSSQL LSN is monotonically increasing database-wide
-
 ## Benefits
 
-1. **Simple comparison**: `last_lsn != max_lsn` is O(1) and exact
+1. **Simple comparison**: `last_lsn != globalMaxLSN` is O(1) and exact
 2. **Efficient**: No need to call `incrementLSN` + `GetMaxLSN` on every poll when `hasNewData=true`
 3. **Cache friendly**: `next_lsn` pre-computed to avoid repeated `incrementLSN` calls
 4. **Consistent snapshot**: `globalMaxLSN` ensures cross-table transaction boundaries are consistent
