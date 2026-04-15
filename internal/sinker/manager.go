@@ -102,14 +102,14 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
 	slog.Info("SinkerManager.Write: routing sinks",
 		"total_sinks", len(sinks))
 
-	// Group sinks by database
+	// Group sinks by database; skip sinks with missing database config instead of aborting
 	sinksByDB := make(map[string][]core.Sink)
 	for _, sink := range sinks {
 		dbName := sink.Config.Database
 		if dbName == "" {
-			slog.Error("SinkerManager.Write: sink has no database configured",
+			slog.Warn("SinkerManager.Write: sink has no database configured, skipping",
 				"sink_name", sink.Config.Name)
-			return fmt.Errorf("sink %s has no database configured", sink.Config.Name)
+			continue
 		}
 		sinksByDB[dbName] = append(sinksByDB[dbName], sink)
 	}
@@ -125,17 +125,17 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
 
 		sinker, err := m.GetSinker(dbName)
 		if err != nil {
-			slog.Error("SinkerManager.Write: failed to get sinker",
+			slog.Warn("SinkerManager.Write: failed to get sinker, skipping database",
 				"database", dbName,
 				"error", err)
-			return fmt.Errorf("get sinker for %s: %w", dbName, err)
+			continue
 		}
 
 		if err := sinker.Write(ctx, dbSinks); err != nil {
-			slog.Error("SinkerManager.Write: write failed",
+			slog.Error("SinkerManager.Write: write failed for database, skipping",
 				"database", dbName,
 				"error", err)
-			return fmt.Errorf("write to %s: %w", dbName, err)
+			continue
 		}
 
 		slog.Debug("SinkerManager.Write: write completed",

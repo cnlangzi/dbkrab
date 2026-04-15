@@ -395,10 +395,10 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 		sinks, err := p.engine.HandleWithSkill(tx, skill)
 		if err != nil {
-			slog.Error("Plugin.Handle: skill execution failed",
+			slog.Error("Plugin.Handle: skill execution failed, skipping skill",
 				"skill", skill.Name,
 				"error", err)
-			return nil, fmt.Errorf("skill %s handle: %w", skill.Name, err)
+			continue
 		}
 
 		slog.Debug("Plugin.Handle: skill execution completed",
