@@ -34,14 +34,13 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var lsn string
-	var hasNewData bool
+	var lastLSN, nextLSN string
 	var updatedAt time.Time
 
 	err := s.db.Reader.QueryRow(
-		"SELECT lsn, has_new_data, updated_at FROM offsets WHERE table_name = ?",
+		"SELECT last_lsn, next_lsn, updated_at FROM offsets WHERE table_name = ?",
 		table,
-	).Scan(&lsn, &hasNewData, &updatedAt)
+	).Scan(&lastLSN, &nextLSN, &updatedAt)
 
 	if err == sql.ErrNoRows {
 		return Offset{}, nil
@@ -51,22 +50,27 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	}
 
 	return Offset{
-		LSN:        lsn,
-		HasNewData: hasNewData,
-		UpdatedAt:  updatedAt,
+		LastLSN:   lastLSN,
+		NextLSN:   nextLSN,
+		UpdatedAt: updatedAt,
 	}, nil
 }
 
 // Set updates the LSN for a table
-func (s *SQLiteStore) Set(table string, lsn string, hasNewData bool) error {
+// lastLSN: last LSN from fetched data
+// nextLSN: incrementLSN(lastLSN) - cached next start point
+func (s *SQLiteStore) Set(table string, lastLSN string, nextLSN string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	_, err := s.db.Writer.Exec(`
-		INSERT INTO offsets (table_name, lsn, has_new_data, updated_at)
+		INSERT INTO offsets (table_name, last_lsn, next_lsn, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(table_name) DO UPDATE SET lsn = excluded.lsn, has_new_data = excluded.has_new_data, updated_at = excluded.updated_at
-	`, table, lsn, hasNewData, time.Now())
+		ON CONFLICT(table_name) DO UPDATE SET 
+			last_lsn = excluded.last_lsn, 
+			next_lsn = excluded.next_lsn, 
+			updated_at = excluded.updated_at
+	`, table, lastLSN, nextLSN, time.Now())
 
 	return err
 }
@@ -76,7 +80,7 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Reader.Query("SELECT table_name, lsn, has_new_data, updated_at FROM offsets")
+	rows, err := s.db.Reader.Query("SELECT table_name, last_lsn, next_lsn, updated_at FROM offsets")
 	if err != nil {
 		return nil, err
 	}
@@ -89,18 +93,17 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	result := make(map[string]Offset)
 	for rows.Next() {
 		var table string
-		var lsn string
-		var hasNewData bool
+		var lastLSN, nextLSN string
 		var updatedAt time.Time
 
-		if err := rows.Scan(&table, &lsn, &hasNewData, &updatedAt); err != nil {
+		if err := rows.Scan(&table, &lastLSN, &nextLSN, &updatedAt); err != nil {
 			return nil, err
 		}
 
 		result[table] = Offset{
-			LSN:        lsn,
-			HasNewData: hasNewData,
-			UpdatedAt:  updatedAt,
+			LastLSN:   lastLSN,
+			NextLSN:   nextLSN,
+			UpdatedAt: updatedAt,
 		}
 	}
 
