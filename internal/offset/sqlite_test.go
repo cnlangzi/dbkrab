@@ -19,7 +19,7 @@ func newTestDB(t *testing.T) *sqlite.DB {
 		t.Fatalf("sqlite.New() error = %v", err)
 	}
 
-	// Create the offsets table with three-value LSN schema
+	// Create the offsets table with two-value LSN schema
 	_, err = db.Writer.Exec(`
 		CREATE TABLE IF NOT EXISTS offsets (
 			table_name TEXT PRIMARY KEY,
