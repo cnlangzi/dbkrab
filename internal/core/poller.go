@@ -123,6 +123,8 @@ type Poller struct {
 type Store interface {
 	// Write writes a transaction and returns the number of rows actually inserted.
 	Write(tx *Transaction) (int, error)
+	// Flush ensures all buffered writes are committed to durable storage.
+	Flush() error
 	Close() error
 }
 
@@ -565,8 +567,19 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	syncEndTime := time.Now()
 	syncDuration := syncEndTime.Sub(syncStartTime)
 
-	// All transactions successfully written - now update offsets
-	return p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted)
+	// All transactions successfully written - update offsets first
+	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted); err != nil {
+		return err
+	}
+
+	// Then flush store to ensure all writes including offset checkpoint are durable
+	if p.store != nil {
+		if err := p.store.Flush(); err != nil {
+			return fmt.Errorf("store flush: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // updateOffsets updates offset checkpoints for successfully polled tables

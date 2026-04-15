@@ -27,6 +27,9 @@ type Store interface {
 	// GetPollerState returns the current poller state
 	GetPollerState() (map[string]interface{}, error)
 
+	// Flush ensures all buffered writes are committed to the underlying database.
+	Flush() error
+
 	// Close closes the store and releases resources
 	Close() error
 }
