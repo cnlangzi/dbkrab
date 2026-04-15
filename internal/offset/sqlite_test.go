@@ -3,38 +3,11 @@ package offset
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/cnlangzi/sqlite"
 )
-
-// newTestDB creates an in-memory SQLite DB for testing
-func newTestDB(t *testing.T) *sqlite.DB {
-	t.Helper()
-
-	ctx := context.Background()
-	db, err := sqlite.New(ctx, ":memory:")
-	if err != nil {
-		t.Fatalf("sqlite.New() error = %v", err)
-	}
-
-	// Create the offsets table with two-value LSN schema
-	_, err = db.Writer.Exec(`
-		CREATE TABLE IF NOT EXISTS offsets (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			table_name TEXT NOT NULL UNIQUE,
-			last_lsn TEXT NOT NULL,
-			next_lsn TEXT NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		t.Fatalf("create table error = %v", err)
-	}
-
-	return db
-}
 
 // newStandaloneTestStore creates a standalone offset store for testing
 func newStandaloneTestStore(t *testing.T) *SQLiteStore {
@@ -209,30 +182,44 @@ func TestSQLiteStore_NonExistentKey(t *testing.T) {
 
 func TestSQLiteStore_Persistence(t *testing.T) {
 	// For standalone store, persistence is tested via file-based DB
-	// In-memory DB doesn't persist, so we test with NewWithDB approach
-	
-	db := newTestDB(t)
+	// Use temp file to test that data persists across store instances
+	testDB, err := os.MkdirTemp("", "dbkrab-offset-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := os.RemoveAll(testDB); err != nil {
+			t.Logf("RemoveAll() error = %v", err)
 		}
 	}()
+	dbPath := filepath.Join(testDB, "offset.db")
 
-	store1, err := NewWithDB(db)
+	ctx := context.Background()
+
+	// Create first store instance
+	store1, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("NewWithDB() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	// Set offset with first store instance
 	if err := store1.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
-
-	// Create another store instance with the same DB
-	store2, err := NewWithDB(db)
-	if err != nil {
-		t.Fatalf("NewWithDB() for store2 error = %v", err)
+	if err := store1.Close(); err != nil {
+		t.Errorf("store1.Close() error = %v", err)
 	}
+
+	// Create second store instance with the same DB file
+	store2, err := New(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("New() for store2 error = %v", err)
+	}
+	defer func() {
+		if err := store2.Close(); err != nil {
+			t.Logf("store2.Close() error = %v", err)
+		}
+	}()
 
 	// Verify offset is persisted
 	offset, err := store2.Get("dbo_orders")

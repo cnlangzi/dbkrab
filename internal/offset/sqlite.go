@@ -48,19 +48,6 @@ func New(ctx context.Context, dbPath string) (*SQLiteStore, error) {
 	}, nil
 }
 
-// NewWithDB creates a new offset store using an existing *sqlite.DB.
-// Migrations are run on the given DB. The caller manages the DB lifecycle.
-// Use this for testing or when the DB connection is shared.
-func NewWithDB(db *sqlite.DB) (*SQLiteStore, error) {
-	if err := runMigrations(db); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-
-	return &SQLiteStore{
-		db: db,
-	}, nil
-}
-
 // runMigrations discovers and applies offset schema migrations using sqle/migrate.
 func runMigrations(db *sqlite.DB) error {
 	sqleDB := sqle.Open(db.Writer.DB)
@@ -189,7 +176,6 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 }
 
 // Close closes the store and the underlying database connection.
-// This should be called when the offset store owns its DB (created via New, not NewWithDB).
 func (s *SQLiteStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
