@@ -25,7 +25,9 @@ type PollMetrics struct {
 	FetchedChanges    int           // total CDC changes fetched this poll
 	ProcessedTx       int           // number of transactions processed
 	SyncDurationMs    int64         // time spent in sync (handler + store) in milliseconds
-	StoreDurationMs   int64         // time spent in store write in milliseconds
+	PullDurationMs    int64         // time spent pulling changes from CDC source (GetChanges loop)
+	StoreDurationMs   int64         // time spent in store write in milliseconds (write_ms)
+	FlushDurationMs   int64         // time spent in store flush in milliseconds
 	DLQCount          int           // number of transactions sent to DLQ
 	LastPollTime      time.Time     // when the poll cycle started (fetch time)
 	LastFetchTime     time.Time     // when changes were fetched (same as LastPollTime)
@@ -412,6 +414,8 @@ func (p *Poller) poll(ctx context.Context) error {
 
 	// Poll all tables and collect results (without updating offsets)
 	// Uses new GetFromLSN approach: incrementLSN vs GetMaxLSN to determine if new data exists
+	// Measure pull time: cumulative time spent in GetChanges across all tables
+	pullStartTime := time.Now()
 	results := make([]tablePollResult, 0, len(p.cfg.Tables))
 
 	for _, table := range p.cfg.Tables {
@@ -485,6 +489,9 @@ func (p *Poller) poll(ctx context.Context) error {
 		})
 	}
 
+	// Calculate total pull duration (cumulative time in GetChanges loop)
+	pullDuration := time.Since(pullStartTime)
+
 	// Collect all changes from successful polls
 	// Collect all changes from successful polls
 	var allChanges []Change
@@ -497,14 +504,14 @@ func (p *Poller) poll(ctx context.Context) error {
 	// Always use processDirect - no transaction buffer needed
 	// All changes from the same poll cycle arrive together, simplifying cross-table handling
 	if len(allChanges) > 0 {
-		return p.processDirect(ctx, allChanges, results, fetchTime)
+		return p.processDirect(ctx, allChanges, results, fetchTime, pullDuration)
 	}
-	// No changes but still update offsets for observability
-	return p.updateOffsets(ctx, results, allChanges, fetchTime, time.Duration(0), time.Duration(0), 0, 0, 0)
+	// No changes but still update offsets for observability (zero durations for empty poll)
+	return p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, time.Duration(0), time.Duration(0), time.Duration(0), 0, 0, 0)
 }
 
 // processDirect processes changes without transaction buffer (legacy behavior)
-func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time) error {
+func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
 	syncStartTime := time.Now()
 
 	// Group by transaction ID and deliver
@@ -570,14 +577,17 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// First: flush store to ensure all writes are durable before updating offsets
 	// Operational transaction order: pull → store.Write → store.Flush → offset.Set
 	// Offsets may be lost without data loss (if offset update fails after flush, next poll can recover)
+	var flushDuration time.Duration
 	if p.store != nil {
+		flushStartTime := time.Now()
 		if err := p.store.Flush(); err != nil {
 			return fmt.Errorf("store flush: %w", err)
 		}
+		flushDuration = time.Since(flushStartTime)
 	}
 
 	// Then: update offsets after successful flush
-	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted); err != nil {
+	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, len(txs), actualInserted); err != nil {
 		return err
 	}
 
@@ -588,7 +598,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 // Each table maintains its own independent LSN offset.
 // Only tables with changes have their offsets advanced.
 // Tables with no changes keep their existing offset.
-func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, allChanges []Change, fetchTime time.Time, syncDuration time.Duration, storeDuration time.Duration, dlqCount int, txCount int, actualInserted int) error {
+func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, allChanges []Change, fetchTime time.Time, pullDuration time.Duration, syncDuration time.Duration, storeDuration time.Duration, flushDuration time.Duration, dlqCount int, txCount int, actualInserted int) error {
 	// Track the maximum LSN across all tables for observability/metrics
 	var maxLSN LSN
 	tablesUpdated := 0
@@ -682,7 +692,9 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 			FetchedChanges:    len(allChanges),
 			ProcessedTx:       txCount,
 			SyncDurationMs:    syncDuration.Milliseconds(),
+			PullDurationMs:    pullDuration.Milliseconds(),
 			StoreDurationMs:   storeDuration.Milliseconds(),
+			FlushDurationMs:   flushDuration.Milliseconds(),
 			DLQCount:          dlqCount,
 			LastPollTime:      fetchTime,
 			LastFetchTime:     fetchTime,
@@ -697,13 +709,14 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		p.metricsMu.Unlock()
 
 		// Emit structured INFO summary log for non-empty polls
+		// Includes pull_ms, write_ms (store_ms), and flush_ms for bottleneck analysis
 		slog.Info("[poll cycle]",
 			"cdc_fetched", len(allChanges),
 			"inserted", actualInserted,
 			"tx_count", txCount,
-			"sync_tps", fmt.Sprintf("%.1f", syncTPS),
-			"sync_ms", syncDuration.Milliseconds(),
-			"store_ms", storeDuration.Milliseconds(),
+			"pull_ms", pullDuration.Milliseconds(),
+			"write_ms", storeDuration.Milliseconds(),
+			"flush_ms", flushDuration.Milliseconds(),
 			"dlq", dlqCount,
 			"lsn", lastLSN,
 		)
@@ -1132,14 +1145,17 @@ func (p *Poller) GetMetrics() map[string]interface{} {
 	avgLatency := p.metricsWindow.avgLatencyMs()
 	
 	return map[string]interface{}{
-		"last_fetched":        m.FetchedChanges,
-		"last_processed_tx":   m.ProcessedTx,
-		"last_sync_tps":       m.SyncTPS,
+		"last_fetched":          m.FetchedChanges,
+		"last_processed_tx":     m.ProcessedTx,
+		"last_sync_tps":         m.SyncTPS,
 		"last_sync_duration_ms": m.SyncDurationMs,
-		"last_dlq_count":      m.DLQCount,
-		"avg_tps_1m":          avgTPS,
-		"avg_latency_1m_ms":   avgLatency,
-		"last_poll_time":      m.LastPollTime,
-		"last_lsn":            m.LastLSN,
+		"last_pull_ms":          m.PullDurationMs,
+		"last_write_ms":         m.StoreDurationMs,
+		"last_flush_ms":         m.FlushDurationMs,
+		"last_dlq_count":        m.DLQCount,
+		"avg_tps_1m":            avgTPS,
+		"avg_latency_1m_ms":     avgLatency,
+		"last_poll_time":        m.LastPollTime,
+		"last_lsn":              m.LastLSN,
 	}
 }
