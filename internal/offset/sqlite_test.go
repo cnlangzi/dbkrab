@@ -25,7 +25,6 @@ func newTestDB(t *testing.T) *sqlite.DB {
 			table_name TEXT PRIMARY KEY,
 			last_lsn TEXT,
 			next_lsn TEXT,
-			max_lsn TEXT,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
