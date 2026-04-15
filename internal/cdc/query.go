@@ -259,6 +259,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		})
 	}
 
+	slog.Debug("GetChanges completed", "table", tableName, "from_lsn", hex.EncodeToString(fromLSN), "to_lsn", hex.EncodeToString(toLSN), "changes", len(changes))
 	return changes, rows.Err()
 }
 
