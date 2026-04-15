@@ -645,6 +645,11 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 			"max_lsn", maxLSN.String())
 	}
 
+	// Flush offsets to ensure they are persisted
+	if err := p.offsets.Flush(); err != nil {
+		slog.Warn("failed to flush offsets", "error", err)
+	}
+
 	// Use max LSN for observability state (not for checkpointing)
 	lastLSN := ""
 	if !maxLSN.IsZero() {

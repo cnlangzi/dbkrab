@@ -296,6 +296,10 @@ func (s *mockOffsetStore) Save() error {
 	return nil
 }
 
+func (s *mockOffsetStore) Flush() error {
+	return nil
+}
+
 func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
