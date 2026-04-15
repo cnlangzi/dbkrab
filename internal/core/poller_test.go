@@ -278,6 +278,10 @@ func (s *mockSink) Close() error {
 	return nil
 }
 
+func (s *mockSink) Flush() error {
+	return nil
+}
+
 type mockOffsetStore struct {
 	data      map[string]offset.Offset
 	setCalled bool
