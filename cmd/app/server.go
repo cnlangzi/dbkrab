@@ -234,6 +234,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/sinks/list", s.handleSinksList, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/sinks/{id}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/sinks/{id}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/sinks/{id}/migrate", s.handleSinkMigrate, xun.WithViewer(&xun.JsonViewer{}))
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
@@ -1308,6 +1309,48 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		"columns": columns,
 		"rows":    queryResults,
 		"count":   len(queryResults),
+	})
+}
+
+// handleSinkMigrate handles POST /api/sinks/{id}/migrate
+func (s *Server) handleSinkMigrate(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink id is required",
+		})
+	}
+
+	// Find sink by ID
+	sinkCfg, err := s.getSinkById(id)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Get sinker instance
+	sinker, err := s.sinkerManager.GetSinker(sinkCfg.Name)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("failed to get sinker: %v", err),
+		})
+	}
+
+	// Run migration
+	if err := sinker.Migrate(context.Background()); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("migration failed: %v", err),
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": "migration completed successfully",
 	})
 }
 
