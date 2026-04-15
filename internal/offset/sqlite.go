@@ -71,7 +71,7 @@ func (s *SQLiteStore) Set(table string, lastLSN string, nextLSN string, maxLSN s
 		ON CONFLICT(table_name) DO UPDATE SET 
 			last_lsn = excluded.last_lsn, 
 			next_lsn = excluded.next_lsn, 
-			max_lsn = excluded.max_lsn, 
+			max_lsn = COALESCE(NULLIF(excluded.max_lsn, ''), offsets.max_lsn), 
 			updated_at = excluded.updated_at
 	`, table, lastLSN, nextLSN, maxLSN, time.Now())
 

@@ -639,10 +639,10 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	tablesUpdated := 0
 
 	// Get current max LSN from MSSQL (single call, not per-table)
+	// If this fails, we return error rather than degrading offset state.
 	currentMaxLSN, err := p.querier.GetMaxLSN(ctx)
 	if err != nil {
-		slog.Error("failed to get max LSN for offset update", "error", err)
-		// Continue anyway - we'll update offsets without max_lsn
+		return fmt.Errorf("get max LSN for offset cache: %w", err)
 	}
 
 	// Update each table's offset independently based on its own lastLSN
@@ -658,10 +658,14 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		if len(r.changes) == 0 {
 			// No changes for this table - keep existing last_lsn and next_lsn
 			// but update max_lsn to current value
-			currentOffset, _ := p.offsets.Get(r.table)
+			currentOffset, err := p.offsets.Get(r.table)
+			if err != nil {
+				slog.Error("failed to get current offset for table, skipping", "table", r.table, "error", err)
+				continue
+			}
 			lastLSN := currentOffset.LastLSN
 			nextLSN := currentOffset.NextLSN
-			maxLSNStr := ""
+			maxLSNStr := currentOffset.MaxLSN // preserve existing max_lsn by default
 			if currentMaxLSN != nil {
 				maxLSNStr = LSN(currentMaxLSN).String()
 			}
