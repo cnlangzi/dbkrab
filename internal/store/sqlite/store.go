@@ -203,6 +203,11 @@ func (s *Store) WriteOps(ops []core.Sink) error {
 	return nil
 }
 
+// Flush ensures all buffered writes are committed to the underlying database.
+func (s *Store) Flush() error {
+	return s.db.Flush()
+}
+
 // Close closes the database connection
 func (s *Store) Close() error {
 	return s.db.Close()
