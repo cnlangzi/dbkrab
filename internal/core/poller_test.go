@@ -293,32 +293,32 @@ func (s *mockOffsetStore) Save() error {
 }
 
 func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	offsetVal, ok := s.data[table]
-	if !ok {
-		return offset.Offset{}, nil
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		offsetVal, ok := s.data[table]
+		if !ok {
+			return offset.Offset{}, nil
+		}
+		return offsetVal, nil
 	}
-	return offsetVal, nil
-}
 
-func (s *mockOffsetStore) Set(table string, lsn string, hasNewData bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.setCalled = true
-	s.data[table] = offset.Offset{LSN: lsn, HasNewData: hasNewData, UpdatedAt: time.Now()}
-	return nil
-}
+func (s *mockOffsetStore) Set(table string, lastLSN string, nextLSN string, maxLSN string) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.setCalled = true
+		s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, MaxLSN: maxLSN, UpdatedAt: time.Now()}
+		return nil
+	}
 
 func (s *mockOffsetStore) GetAll() (map[string]offset.Offset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make(map[string]offset.Offset)
-	for k, v := range s.data {
-		result[k] = v
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		result := make(map[string]offset.Offset)
+		for k, v := range s.data {
+			result[k] = v
+		}
+		return result, nil
 	}
-	return result, nil
-}
 
 type mockHandler struct {
 	fail bool
