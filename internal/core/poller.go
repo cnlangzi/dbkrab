@@ -100,6 +100,7 @@ type Poller struct {
 	stopOnce      sync.Once
 	paused        bool
 	pausedMu      sync.RWMutex
+	polling       bool  // true when poll is running, prevents overlapping polls
 	lastGapCheck  time.Time
 	gapCheckMu    sync.RWMutex
 	txBuffer      *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
@@ -314,6 +315,12 @@ func (p *Poller) Start(ctx context.Context) error {
 			p.pendingCfg = newCfg
 			slog.Info("config reload pending, will apply at next poll cycle")
 		case <-ticker.C:
+			if p.polling {
+				// Skip if previous poll is still running
+				continue
+			}
+			p.polling = true
+
 			if p.pendingCfg != nil {
 				if err := p.checkAndApplyConfig(ticker); err != nil {
 					slog.Error("failed to apply config", "error", err)
@@ -328,6 +335,7 @@ func (p *Poller) Start(ctx context.Context) error {
 					if handled := p.handleDisconnection(ctx, err, reconnectDelay); handled {
 						// Reset reconnect delay on success
 						reconnectDelay = p.cfg.ReconnectBaseDelay()
+						p.polling = false
 						continue
 					}
 					// Exponential backoff for next retry
@@ -343,6 +351,8 @@ func (p *Poller) Start(ctx context.Context) error {
 					slog.Error("failed to apply config", "error", err)
 				}
 			}
+
+			p.polling = false
 		}
 	}
 }
