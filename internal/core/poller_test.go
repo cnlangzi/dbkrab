@@ -482,14 +482,6 @@ func TestPollCycleDurations(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Verify metrics were recorded
-	metrics := poller.GetMetrics()
-
-	// PullDurationMs should reflect the passed pull duration
-	if metrics["last_pull_ms"] != nil {
-		// Check if it's in the metrics - we need to add it to GetMetrics first
-	}
-
 	// Get the last metrics directly
 	poller.metricsMu.RLock()
 	lastMetrics := poller.metrics
