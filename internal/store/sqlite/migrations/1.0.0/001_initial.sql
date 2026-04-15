@@ -1,6 +1,11 @@
 -- Migration: 001_initial
 -- Module: dbkrab-store
--- Description: Create initial schema for unified app DB (changes, poller_state, offsets, dlq_entries)
+-- Description: Create complete initial schema for dbkrab unified app DB
+--   - changes: CDC change events
+--   - poller_state: polling progress and metrics
+--   - offsets: LSN offsets per table (three-value approach)
+--   - dlq_entries: dead letter queue for failed transactions
+--
 -- Versioning Rules:
 --   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
 --   - Schema table-structure changes: increment minor version (e.g., 1.1.0, 1.2.0)
@@ -32,29 +37,37 @@ CREATE INDEX IF NOT EXISTS idx_lsn ON changes(lsn);
 -- =============================================================================
 -- poller_state: tracks polling progress and metrics
 -- =============================================================================
+-- total_changes = total CDC rows fetched from MSSQL
+-- total_inserted = total rows actually written to changes table (after INSERT OR IGNORE dedup)
+-- Comparing the two reveals duplicate fetches or filtered rows (e.g., UPDATE_BEFORE in all_changes mode)
 CREATE TABLE IF NOT EXISTS poller_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_poll_time TIMESTAMP,
     last_lsn TEXT,
     total_changes INTEGER DEFAULT 0,
+    total_inserted INTEGER DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Initialize poller state row (idempotent)
-INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes)
-VALUES (1, NULL, NULL, 0);
+INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes, total_inserted)
+VALUES (1, NULL, NULL, 0, 0);
 
 -- =============================================================================
 -- offsets: stores LSN offsets per table
 -- =============================================================================
--- has_new_data indicates whether new data was found at the stored LSN position.
--- When true: stored LSN is the next position to query (incrementLSN was stored)
--- When false: stored LSN was checked and had no new data (GetFromLSN must re-check)
+-- last_lsn: the last LSN from fetched data (tracks progress)
+-- next_lsn: incrementLSN(last) - pre-computed next start point for querying
+--
+-- GetFromLSN logic (uses globalMaxLSN from poll start, not stored max_lsn):
+--   1. If last_lsn is empty → getMinLSN() (cold start)
+--   2. If last_lsn != globalMaxLSN → new data available, use next_lsn as fromLSN
+--   3. If last_lsn == globalMaxLSN → no new data
 CREATE TABLE IF NOT EXISTS offsets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL UNIQUE,
-    lsn TEXT NOT NULL,
-    has_new_data INTEGER NOT NULL DEFAULT 1,
+    last_lsn TEXT NOT NULL,
+    next_lsn TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

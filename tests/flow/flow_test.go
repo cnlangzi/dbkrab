@@ -47,11 +47,11 @@ func (s *memOffsetStore) Get(table string) (offset.Offset, error) {
 	}
 	return offset.Offset{}, nil
 }
-func (s *memOffsetStore) Set(table string, lsn string, hasNewData bool) error {
+func (s *memOffsetStore) Set(table string, lastLSN string, nextLSN string) error {
 	s.offsets[table] = offset.Offset{
-		LSN:        lsn,
-		HasNewData: hasNewData,
-		UpdatedAt:  time.Now(),
+		LastLSN:   lastLSN,
+		NextLSN:   nextLSN,
+		UpdatedAt: time.Now(),
 	}
 	return nil
 }
@@ -291,14 +291,14 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), "") //nolint:errcheck
 		}
 	}
 
 	// Verify offset was advanced
 	off, err := h.offsetStore.Get("dbo.orders")
 	require.NoError(t, err)
-	assert.NotEmpty(t, off.LSN, "offset should be set")
+	assert.NotEmpty(t, off.LastLSN, "offset should be set")
 }
 
 // TestFlow_SingleTable_MultipleOperations tests INSERT+UPDATE+DELETE in single transaction
@@ -389,7 +389,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	for _, r := range results {
 		if r.err == nil {
 			//nolint:errcheck
-			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), "") //nolint:errcheck
 		}
 	}
 
@@ -400,7 +400,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	// Verify offset advanced
 	off, err := h.offsetStore.Get("dbo.orders")
 	require.NoError(t, err)
-	assert.Equal(t, "0000000001000003", off.LSN, "offset should be at last LSN")
+	assert.Equal(t, "0000000001000003", off.LastLSN, "offset should be at last LSN")
 }
 
 // TestFlow_CrossTableTransaction tests one transaction spanning three tables
@@ -532,7 +532,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 
 	// Set initial offset
 	//nolint:errcheck
-	h.offsetStore.Set("dbo.orders", "0000000001000000", true) //nolint:errcheck
+	h.offsetStore.Set("dbo.orders", "0000000001000000", "") //nolint:errcheck
 
 	// Call handler - should fail
 	err := handler.Handle(&tx)
@@ -543,7 +543,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 
 	// Verify offset was NOT advanced
 	off, _ := h.offsetStore.Get("dbo.orders")
-	assert.Equal(t, "0000000001000000", off.LSN, "offset should NOT be advanced after handler failure")
+	assert.Equal(t, "0000000001000000", off.LastLSN, "offset should NOT be advanced after handler failure")
 }
 
 // TestFlow_HandlerFailure_NonBlocking tests that store/offsets still advance after handler failure scenario
@@ -600,13 +600,13 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// Update offsets
 	for _, r := range results {
 		if r.err == nil {
-			h.offsetStore.Set(r.table, r.lastLSN.String(), true) //nolint:errcheck
+			h.offsetStore.Set(r.table, r.lastLSN.String(), "") //nolint:errcheck
 		}
 	}
 
 	// Verify offset was advanced
 	off, _ := h.offsetStore.Get("dbo.orders")
-	assert.Equal(t, "0000000001000001", off.LSN, "offset should be advanced")
+	assert.Equal(t, "0000000001000001", off.LastLSN, "offset should be advanced")
 
 	assert.Len(t, h.store.writes, 1)
 }
@@ -710,19 +710,19 @@ func TestFlow_InMemoryOffsetStore(t *testing.T) {
 	// Initial state
 	off, err := store.Get("dbo.orders")
 	require.NoError(t, err)
-	assert.Empty(t, off.LSN)
+	assert.Empty(t, off.LastLSN)
 
 	// Set offset
-	err = store.Set("dbo.orders", "0000000001000001", true)
+	err = store.Set("dbo.orders", "0000000001000001", "")
 	require.NoError(t, err)
 
 	// Get offset
 	off, err = store.Get("dbo.orders")
 	require.NoError(t, err)
-	assert.Equal(t, "0000000001000001", off.LSN)
+	assert.Equal(t, "0000000001000001", off.LastLSN)
 
 	// Set another table
-	err = store.Set("dbo.products", "0000000002000000", true)
+	err = store.Set("dbo.products", "0000000002000000", "")
 	require.NoError(t, err)
 
 	// Get all

@@ -19,12 +19,12 @@ func newTestDB(t *testing.T) *sqlite.DB {
 		t.Fatalf("sqlite.New() error = %v", err)
 	}
 
-	// Create the offsets table
+	// Create the offsets table with two-value LSN schema
 	_, err = db.Writer.Exec(`
 		CREATE TABLE IF NOT EXISTS offsets (
 			table_name TEXT PRIMARY KEY,
-			lsn TEXT NOT NULL,
-			has_new_data INTEGER NOT NULL DEFAULT 0,
+			last_lsn TEXT,
+			next_lsn TEXT,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
@@ -60,12 +60,12 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	if err != nil {
 		t.Errorf("Get() unexpected error = %v", err)
 	}
-	if offset.LSN != "" {
-		t.Error("Expected empty LSN for non-existent offset")
+	if offset.LastLSN != "" {
+		t.Error("Expected empty LastLSN for non-existent offset")
 	}
 
 	// Set offset
-	if err := store.Set("dbo_orders", "01020304", true); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -74,18 +74,18 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if offset.LSN != "01020304" {
-		t.Errorf("LSN = %v, want 01020304", offset.LSN)
+	if offset.LastLSN != "01020304" {
+		t.Errorf("LastLSN = %v, want 01020304", offset.LastLSN)
 	}
-	if !offset.HasNewData {
-		t.Error("HasNewData should be true")
+	if offset.NextLSN != "01020305" {
+		t.Errorf("NextLSN = %v, want 01020305", offset.NextLSN)
 	}
 	if offset.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt should not be zero")
 	}
 
 	// Update offset
-	if err := store.Set("dbo_orders", "02030405", false); err != nil {
+	if err := store.Set("dbo_orders", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() update error = %v", err)
 	}
 
@@ -93,11 +93,11 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() after update error = %v", err)
 	}
-	if offset.LSN != "02030405" {
-		t.Errorf("LSN after update = %v, want 02030405", offset.LSN)
+	if offset.LastLSN != "02030405" {
+		t.Errorf("LastLSN after update = %v, want 02030405", offset.LastLSN)
 	}
-	if offset.HasNewData {
-		t.Error("HasNewData should be false after update")
+	if offset.NextLSN != "02030406" {
+		t.Errorf("NextLSN after update = %v, want 02030406", offset.NextLSN)
 	}
 }
 
@@ -112,10 +112,10 @@ func TestSQLiteStore_GetAll(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set multiple offsets
-	if err := store.Set("dbo_orders", "01020304", true); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() orders error = %v", err)
 	}
-	if err := store.Set("dbo_customers", "02030405", false); err != nil {
+	if err := store.Set("dbo_customers", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() customers error = %v", err)
 	}
 
@@ -129,12 +129,12 @@ func TestSQLiteStore_GetAll(t *testing.T) {
 		t.Errorf("GetAll() returned %d items, want 2", len(all))
 	}
 
-	if all["dbo_orders"].LSN != "01020304" {
-		t.Errorf("dbo_orders LSN = %v, want 01020304", all["dbo_orders"].LSN)
+	if all["dbo_orders"].LastLSN != "01020304" {
+		t.Errorf("dbo_orders LastLSN = %v, want 01020304", all["dbo_orders"].LastLSN)
 	}
 
-	if all["dbo_customers"].LSN != "02030405" {
-		t.Errorf("dbo_customers LSN = %v, want 02030405", all["dbo_customers"].LSN)
+	if all["dbo_customers"].LastLSN != "02030405" {
+		t.Errorf("dbo_customers LastLSN = %v, want 02030405", all["dbo_customers"].LastLSN)
 	}
 }
 
@@ -187,8 +187,8 @@ func TestSQLiteStore_NonExistentKey(t *testing.T) {
 	}
 
 	// Expect zero Offset for non-existent keys
-	if offset.LSN != "" {
-		t.Fatalf("Get() for non-existent key: expected empty LSN, got %+v", offset)
+	if offset.LastLSN != "" {
+		t.Fatalf("Get() for non-existent key: expected empty LastLSN, got %+v", offset)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 	store1 := NewSQLiteStore(db)
 
 	// Set offset with first store instance
-	if err := store1.Set("dbo_orders", "01020304", true); err != nil {
+	if err := store1.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -215,8 +215,8 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if offset.LSN != "01020304" {
-		t.Errorf("LSN from second store = %v, want 01020304", offset.LSN)
+	if offset.LastLSN != "01020304" {
+		t.Errorf("LastLSN from second store = %v, want 01020304", offset.LastLSN)
 	}
 }
 
@@ -252,7 +252,7 @@ func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set initial offset
-	if err := store.Set("dbo_orders", "01020304", true); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -264,7 +264,7 @@ func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
 
 	// Wait a bit and update
 	time.Sleep(10 * time.Millisecond)
-	if err := store.Set("dbo_orders", "02030405", false); err != nil {
+	if err := store.Set("dbo_orders", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() update error = %v", err)
 	}
 
@@ -291,17 +291,16 @@ func TestSQLiteStore_DirectDBAccess(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set offset via store
-	if err := store.Set("dbo_orders", "01020304", true); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
 	// Verify directly in DB
-	var lsn string
-	var hasNewData bool
+	var lastLSN, nextLSN string
 	err := db.Reader.QueryRow(
-		"SELECT lsn, has_new_data FROM offsets WHERE table_name = ?",
+		"SELECT last_lsn, next_lsn FROM offsets WHERE table_name = ?",
 		"dbo_orders",
-	).Scan(&lsn, &hasNewData)
+	).Scan(&lastLSN, &nextLSN)
 
 	if err == sql.ErrNoRows {
 		t.Fatal("offset not found in DB")
@@ -310,10 +309,65 @@ func TestSQLiteStore_DirectDBAccess(t *testing.T) {
 		t.Fatalf("direct DB query error = %v", err)
 	}
 
-	if lsn != "01020304" {
-		t.Errorf("direct DB LSN = %v, want 01020304", lsn)
+	if lastLSN != "01020304" {
+		t.Errorf("direct DB lastLSN = %v, want 01020304", lastLSN)
 	}
-	if !hasNewData {
-		t.Errorf("direct DB hasNewData = %v, want true", hasNewData)
+	if nextLSN != "01020305" {
+		t.Errorf("direct DB nextLSN = %v, want 01020305", nextLSN)
+	}
+}
+
+// TestSQLiteStore_GetFromLSN_ColdStart tests GetFromLSN with empty last_lsn (cold start)
+func TestSQLiteStore_GetFromLSN_ColdStart(t *testing.T) {
+	db := newTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("db.Close error = %v", err)
+		}
+	}()
+
+	store := NewSQLiteStore(db)
+
+	// Get offset for non-existent table (cold start case)
+	offset, err := store.Get("new_table")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Should return empty offset for cold start
+	if offset.LastLSN != "" {
+		t.Errorf("LastLSN should be empty for cold start, got %v", offset.LastLSN)
+	}
+	if offset.NextLSN != "" {
+		t.Errorf("NextLSN should be empty for cold start, got %v", offset.NextLSN)
+	}
+}
+
+// TestSQLiteStore_SetWithEmptyValues tests setting offsets with empty values
+func TestSQLiteStore_SetWithEmptyValues(t *testing.T) {
+	db := newTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("db.Close error = %v", err)
+		}
+	}()
+
+	store := NewSQLiteStore(db)
+
+	// Set offset with some empty values (e.g., only last_lsn after poll with no changes)
+	if err := store.Set("dbo_orders", "01020304", ""); err != nil {
+		t.Errorf("Set() error = %v", err)
+	}
+
+	offset, err := store.Get("dbo_orders")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if offset.LastLSN != "01020304" {
+		t.Errorf("LastLSN = %v, want 01020304", offset.LastLSN)
+	}
+	if offset.NextLSN != "" {
+		t.Errorf("NextLSN should be empty, got %v", offset.NextLSN)
 	}
 }
