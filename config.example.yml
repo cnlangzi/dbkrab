@@ -68,8 +68,10 @@ app:
   listen: 9020        # HTTP API listen port
   host: localhost      # HTTP API bind address
   type: sqlite
-  db: ./data/app/dbkrab.db    # Store DB: transactions, poller_state, offsets
-  dlq: ./data/app/dlq.db      # DLQ DB: dlq_entries
+  db:                  # Database paths (separate DBs for transactional safety)
+    cdc: ./data/app/cdc.db      # CDC store: transactions, poller_state (buffered writer)
+    offset: ./data/app/offset.db # Offset store: LSN offsets per table
+    dlq: ./data/app/dlq.db       # DLQ: dlq_entries
 
 # -----------------------------------------------------------------------------
 # Business Sinks (data output targets)

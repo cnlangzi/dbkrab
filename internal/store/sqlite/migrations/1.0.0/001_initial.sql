@@ -1,10 +1,11 @@
 -- Migration: 001_initial
 -- Module: dbkrab-store
--- Description: Create complete initial schema for dbkrab unified app DB
+-- Description: Create initial schema for dbkrab CDC store DB
 --   - changes: CDC change events
 --   - poller_state: polling progress and metrics
---   - offsets: LSN offsets per table (three-value approach)
---   - dlq_entries: dead letter queue for failed transactions
+--
+-- Note: offsets table moved to separate offset DB (internal/offset/migrations)
+-- Note: dlq_entries table moved to separate DLQ DB (internal/dlq/migrations)
 --
 -- Versioning Rules:
 --   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
@@ -52,49 +53,3 @@ CREATE TABLE IF NOT EXISTS poller_state (
 -- Initialize poller state row (idempotent)
 INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes, total_inserted)
 VALUES (1, NULL, NULL, 0, 0);
-
--- =============================================================================
--- offsets: stores LSN offsets per table
--- =============================================================================
--- last_lsn: the last LSN from fetched data (tracks progress)
--- next_lsn: incrementLSN(last) - pre-computed next start point for querying
---
--- GetFromLSN logic (uses globalMaxLSN from poll start, not stored max_lsn):
---   1. If last_lsn is empty → getMinLSN() (cold start)
---   2. If last_lsn != globalMaxLSN → new data available, use next_lsn as fromLSN
---   3. If last_lsn == globalMaxLSN → no new data
-CREATE TABLE IF NOT EXISTS offsets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    table_name TEXT NOT NULL UNIQUE,
-    last_lsn TEXT NOT NULL,
-    next_lsn TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_offsets_table_name ON offsets(table_name);
-
--- =============================================================================
--- dlq_entries: dead letter queue for failed transactions
--- =============================================================================
-CREATE TABLE IF NOT EXISTS dlq_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id TEXT,
-    source TEXT,
-    lsn TEXT NOT NULL,
-    table_name TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    change_data TEXT NOT NULL,
-    error_message TEXT NOT NULL,
-    retry_count INTEGER DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    resolved_by TEXT,
-    resolved_at DATETIME,
-    resolved_note TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_dlq_status ON dlq_entries(status);
-CREATE INDEX IF NOT EXISTS idx_dlq_table ON dlq_entries(table_name);
-CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON dlq_entries(created_at);
-CREATE INDEX IF NOT EXISTS idx_dlq_lsn ON dlq_entries(lsn);

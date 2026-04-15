@@ -89,30 +89,31 @@ func main() {
 		"pool_max_lifetime", "30m",
 		"pool_max_idle_time", "5m")
 
-	// Create unified app DB with migrations
+	// Create CDC store DB and Offset DB as separate databases
 	ctx := context.Background()
 
-	var appDB *internal_store.DB
+	var cdcDB *internal_store.DB
 	var appStore internal_store.Store
 
 	switch cfg.App.Type {
 	case "sqlite":
-		appDB, err = internal_store.New(ctx, internal_store.Config{
-			File:       cfg.App.DB,
+		// Create CDC store DB (changes, poller_state) with buffered writer
+		cdcDB, err = internal_store.New(ctx, internal_store.Config{
+			File:       cfg.App.DB.CDC,
 			ModuleName: "dbkrab-store",
 		})
 		if err != nil {
-			slog.Error("failed to create store SQLite DB", "error", err)
+			slog.Error("failed to create CDC store SQLite DB", "error", err)
 			os.Exit(1)
 		}
 		defer func() {
-			if err := appDB.Close(); err != nil {
-				slog.Warn("appDB.Close error", "error", err)
+			if err := cdcDB.Close(); err != nil {
+				slog.Warn("cdcDB.Close error", "error", err)
 			}
 		}()
 
-		// Create store using the unified DB
-		appStore, err = storeSQLite.New(appDB)
+		// Create store using the CDC DB
+		appStore, err = storeSQLite.New(cdcDB)
 		if err != nil {
 			slog.Error("failed to create SQLite store", "error", err)
 			os.Exit(1)
@@ -122,18 +123,27 @@ func main() {
 				slog.Warn("appStore.Close error", "error", err)
 			}
 		}()
-		slog.Info("SQLite store initialized", "path", cfg.App.DB)
+		slog.Info("CDC store initialized", "path", cfg.App.DB.CDC)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
 	}
 
-	// Create offset store using the unified DB
-	offsetStore := offset.NewSQLiteStore(appDB)
-	slog.Info("offset store initialized", "type", "sqlite")
+	// Create offset store with its own separate DB
+	offsetStore, err := offset.New(ctx, cfg.App.DB.Offset)
+	if err != nil {
+		slog.Error("failed to create offset store", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := offsetStore.Close(); err != nil {
+			slog.Warn("offsetStore.Close error", "error", err)
+		}
+	}()
+	slog.Info("offset store initialized", "path", cfg.App.DB.Offset)
 
 	// Create DLQ with its own separate DB
-	dlqStore, err := dlq.New(ctx, cfg.App.DLQ)
+	dlqStore, err := dlq.New(ctx, cfg.App.DB.DLQ)
 	if err != nil {
 		slog.Error("failed to create DLQ", "error", err)
 		os.Exit(1)
@@ -143,7 +153,7 @@ func main() {
 			slog.Warn("dlqStore.Close error", "error", err)
 		}
 	}()
-	slog.Info("dead letter queue initialized", "path", cfg.App.DLQ)
+	slog.Info("dead letter queue initialized", "path", cfg.App.DB.DLQ)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()

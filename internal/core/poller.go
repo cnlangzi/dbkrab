@@ -559,7 +559,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		}
 	}
 
-	// P0 fix: Only update offsets after successful store write
+	// P0 fix: Only flush store and update offsets after successful store write
 	if len(processErrors) > 0 {
 		return fmt.Errorf("store errors: %v", processErrors)
 	}
@@ -567,16 +567,18 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	syncEndTime := time.Now()
 	syncDuration := syncEndTime.Sub(syncStartTime)
 
-	// All transactions successfully written - update offsets first
-	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted); err != nil {
-		return err
-	}
-
-	// Then flush store to ensure all writes including offset checkpoint are durable
+	// First: flush store to ensure all writes are durable before updating offsets
+	// Operational transaction order: pull → store.Write → store.Flush → offset.Set
+	// Offsets may be lost without data loss (if offset update fails after flush, next poll can recover)
 	if p.store != nil {
 		if err := p.store.Flush(); err != nil {
 			return fmt.Errorf("store flush: %w", err)
 		}
+	}
+
+	// Then: update offsets after successful flush
+	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, syncDuration, totalStoreDuration, dlqCount, len(txs), actualInserted); err != nil {
+		return err
 	}
 
 	return nil

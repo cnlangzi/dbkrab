@@ -22,9 +22,10 @@ func newTestDB(t *testing.T) *sqlite.DB {
 	// Create the offsets table with two-value LSN schema
 	_, err = db.Writer.Exec(`
 		CREATE TABLE IF NOT EXISTS offsets (
-			table_name TEXT PRIMARY KEY,
-			last_lsn TEXT,
-			next_lsn TEXT,
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			table_name TEXT NOT NULL UNIQUE,
+			last_lsn TEXT NOT NULL,
+			next_lsn TEXT NOT NULL,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
@@ -35,15 +36,25 @@ func newTestDB(t *testing.T) *sqlite.DB {
 	return db
 }
 
+// newStandaloneTestStore creates a standalone offset store for testing
+func newStandaloneTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+
+	ctx := context.Background()
+	store, err := New(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return store
+}
+
 func TestSQLiteStore_GetSet(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Load should be a no-op
 	if err := store.Load(); err != nil {
@@ -53,6 +64,11 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	// Save should be a no-op
 	if err := store.Save(); err != nil {
 		t.Errorf("Save() error = %v", err)
+	}
+
+	// Flush should work (for interface compatibility)
+	if err := store.Flush(); err != nil {
+		t.Errorf("Flush() error = %v", err)
 	}
 
 	// Get non-existent offset
@@ -102,14 +118,12 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 }
 
 func TestSQLiteStore_GetAll(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Set multiple offsets
 	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
@@ -139,42 +153,43 @@ func TestSQLiteStore_GetAll(t *testing.T) {
 }
 
 func TestSQLiteStore_Close(t *testing.T) {
-	db := newTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
-		}
-	}()
+	store := newStandaloneTestStore(t)
 
-	store := NewSQLiteStore(db)
-
-	// Close should be a no-op for SQLiteStore (DB lifecycle managed externally)
+	// Close should work for standalone store
 	if err := store.Close(); err != nil {
 		t.Errorf("Close() error = %v", err)
+	}
+
+	// Second close should return nil (already closed)
+	if err := store.Close(); err != nil {
+		t.Errorf("Second Close() error = %v", err)
+	}
+
+	// Operations on closed store should return error
+	if err := store.Set("test", "lsn", "next"); err != ErrStoreClosed {
+		t.Errorf("Set() on closed store should return ErrStoreClosed, got %v", err)
 	}
 }
 
 func TestSQLiteStore_Interface(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
 
 	// Verify SQLiteStore implements StoreInterface
-	var _ StoreInterface = NewSQLiteStore(db)
+	var _ StoreInterface = store
 }
 
 func TestSQLiteStore_NonExistentKey(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Load (no-op for SQLite)
 	if err := store.Load(); err != nil {
@@ -193,6 +208,9 @@ func TestSQLiteStore_NonExistentKey(t *testing.T) {
 }
 
 func TestSQLiteStore_Persistence(t *testing.T) {
+	// For standalone store, persistence is tested via file-based DB
+	// In-memory DB doesn't persist, so we test with NewWithDB approach
+	
 	db := newTestDB(t)
 	defer func() {
 		if err := db.Close(); err != nil {
@@ -200,7 +218,10 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 		}
 	}()
 
-	store1 := NewSQLiteStore(db)
+	store1, err := NewWithDB(db)
+	if err != nil {
+		t.Fatalf("NewWithDB() error = %v", err)
+	}
 
 	// Set offset with first store instance
 	if err := store1.Set("dbo_orders", "01020304", "01020305"); err != nil {
@@ -208,7 +229,10 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 	}
 
 	// Create another store instance with the same DB
-	store2 := NewSQLiteStore(db)
+	store2, err := NewWithDB(db)
+	if err != nil {
+		t.Fatalf("NewWithDB() for store2 error = %v", err)
+	}
 
 	// Verify offset is persisted
 	offset, err := store2.Get("dbo_orders")
@@ -221,14 +245,12 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 }
 
 func TestSQLiteStore_EmptyGetAll(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// GetAll on empty store
 	all, err := store.GetAll()
@@ -242,14 +264,12 @@ func TestSQLiteStore_EmptyGetAll(t *testing.T) {
 }
 
 func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Set initial offset
 	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
@@ -281,23 +301,26 @@ func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
 
 // TestSQLiteStore_DirectDBAccess tests that we can verify data directly in the DB
 func TestSQLiteStore_DirectDBAccess(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Set offset via store
 	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
-	// Verify directly in DB
+	// Flush to ensure data is written
+	if err := store.Flush(); err != nil {
+		t.Errorf("Flush() error = %v", err)
+	}
+
+	// Verify directly in DB via the underlying db.Reader
 	var lastLSN, nextLSN string
-	err := db.Reader.QueryRow(
+	err := store.db.Reader.QueryRow(
 		"SELECT last_lsn, next_lsn FROM offsets WHERE table_name = ?",
 		"dbo_orders",
 	).Scan(&lastLSN, &nextLSN)
@@ -319,14 +342,12 @@ func TestSQLiteStore_DirectDBAccess(t *testing.T) {
 
 // TestSQLiteStore_GetFromLSN_ColdStart tests GetFromLSN with empty last_lsn (cold start)
 func TestSQLiteStore_GetFromLSN_ColdStart(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Get offset for non-existent table (cold start case)
 	offset, err := store.Get("new_table")
@@ -345,14 +366,12 @@ func TestSQLiteStore_GetFromLSN_ColdStart(t *testing.T) {
 
 // TestSQLiteStore_SetWithEmptyValues tests setting offsets with empty values
 func TestSQLiteStore_SetWithEmptyValues(t *testing.T) {
-	db := newTestDB(t)
+	store := newStandaloneTestStore(t)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Logf("db.Close error = %v", err)
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
 		}
 	}()
-
-	store := NewSQLiteStore(db)
 
 	// Set offset with some empty values (e.g., only last_lsn after poll with no changes)
 	if err := store.Set("dbo_orders", "01020304", ""); err != nil {
@@ -369,5 +388,88 @@ func TestSQLiteStore_SetWithEmptyValues(t *testing.T) {
 	}
 	if offset.NextLSN != "" {
 		t.Errorf("NextLSN should be empty, got %v", offset.NextLSN)
+	}
+}
+
+// TestSQLiteStore_NewWithMigrations tests that New creates the DB with migrations
+func TestSQLiteStore_NewWithMigrations(t *testing.T) {
+	store := newStandaloneTestStore(t)
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
+		}
+	}()
+
+	// Verify the offsets table was created by migrations
+	var tableName string
+	err := store.db.Reader.QueryRow(
+		"SELECT name FROM sqlite_master WHERE type='table' AND name='offsets'",
+	).Scan(&tableName)
+
+	if err == sql.ErrNoRows {
+		t.Fatal("offsets table was not created by migrations")
+	}
+	if err != nil {
+		t.Fatalf("query sqlite_master error = %v", err)
+	}
+
+	if tableName != "offsets" {
+		t.Errorf("table name = %v, want 'offsets'", tableName)
+	}
+}
+
+// TestSQLiteStore_Flush tests the Flush method
+func TestSQLiteStore_Flush(t *testing.T) {
+	store := newStandaloneTestStore(t)
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Logf("store.Close error = %v", err)
+		}
+	}()
+
+	// Set offset
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
+		t.Errorf("Set() error = %v", err)
+	}
+
+	// Flush should succeed
+	if err := store.Flush(); err != nil {
+		t.Errorf("Flush() error = %v", err)
+	}
+
+	// Verify data is still there after flush
+	offset, err := store.Get("dbo_orders")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if offset.LastLSN != "01020304" {
+		t.Errorf("LastLSN after flush = %v, want 01020304", offset.LastLSN)
+	}
+}
+
+// TestSQLiteStore_OperationsAfterClose tests that operations fail after close
+func TestSQLiteStore_OperationsAfterClose(t *testing.T) {
+	store := newStandaloneTestStore(t)
+
+	// Close the store
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// All operations should return ErrStoreClosed
+	if _, err := store.Get("test"); err != ErrStoreClosed {
+		t.Errorf("Get() should return ErrStoreClosed, got %v", err)
+	}
+
+	if err := store.Set("test", "lsn", "next"); err != ErrStoreClosed {
+		t.Errorf("Set() should return ErrStoreClosed, got %v", err)
+	}
+
+	if _, err := store.GetAll(); err != ErrStoreClosed {
+		t.Errorf("GetAll() should return ErrStoreClosed, got %v", err)
+	}
+
+	if err := store.Flush(); err != ErrStoreClosed {
+		t.Errorf("Flush() should return ErrStoreClosed, got %v", err)
 	}
 }

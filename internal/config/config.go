@@ -84,13 +84,19 @@ type GracefulDegradationConfig struct {
 	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
 }
 
+// DBConfig contains database paths for each component
+type DBConfig struct {
+	CDC    string `yaml:"cdc"`    // Path for CDC store DB (changes, poller_state)
+	Offset string `yaml:"offset"` // Path for offset DB (offsets table only)
+	DLQ    string `yaml:"dlq"`    // Path for DLQ DB (dlq_entries)
+}
+
 // AppConfig contains the app-level database storage configuration
 type AppConfig struct {
-	Listen int    `yaml:"listen"`
-	Host   string `yaml:"host"`
-	Type   string `yaml:"type"`
-	DB     string `yaml:"db"`  // Path for store/offset DB (transactions, poller_state, offsets)
-	DLQ    string `yaml:"dlq"` // Path for DLQ DB (dlq_entries)
+	Listen int       `yaml:"listen"`
+	Host   string    `yaml:"host"`
+	Type   string    `yaml:"type"`
+	DB     DBConfig  `yaml:"db"` // Database paths for CDC, Offset, and DLQ
 }
 
 // SinksConfig is a slice of SinkConfig for business sinks.
@@ -161,11 +167,14 @@ func Load(path string) (*Config, error) {
 	if cfg.App.Type == "" {
 		cfg.App.Type = "sqlite"
 	}
-	if cfg.App.DB == "" {
-		cfg.App.DB = "./data/app/dbkrab.db"
+	if cfg.App.DB.CDC == "" {
+		cfg.App.DB.CDC = "./data/app/cdc.db"
 	}
-	if cfg.App.DLQ == "" {
-		cfg.App.DLQ = "./data/app/dlq.db"
+	if cfg.App.DB.Offset == "" {
+		cfg.App.DB.Offset = "./data/app/offset.db"
+	}
+	if cfg.App.DB.DLQ == "" {
+		cfg.App.DB.DLQ = "./data/app/dlq.db"
 	}
 	if cfg.App.Listen == 0 {
 		cfg.App.Listen = 9020
