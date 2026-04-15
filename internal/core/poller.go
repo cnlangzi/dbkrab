@@ -160,10 +160,10 @@ var ErrNoNewData = errors.New("no new data available for table")
 // globalMaxLSN is the consistent max LSN snapshot from the start of the poll cycle,
 // ensuring all tables see the same boundary for cross-table transaction consistency.
 //
-// Logic (using next_lsn vs globalMaxLSN):
+// Logic:
 //   1. If last_lsn is empty → getMinLSN() as cold start
-//   2. If next_lsn < globalMaxLSN → use next_lsn (new data available)
-//   3. If next_lsn >= globalMaxLSN → no new data
+//   2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
+//   3. If last_lsn == max_lsn → no new data
 func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset, globalMaxLSN LSN) ([]byte, error) {
 	// Case 1: Cold start - no stored last_lsn
 	if stored.LastLSN == "" {
@@ -189,34 +189,30 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 		return minLSN, nil
 	}
 
-	// Case 2: Determine next_lsn to use for comparison with globalMaxLSN
-	var nextLSNToUse []byte
-
-	if stored.NextLSN != "" {
-		nextLSNBytes, parseErr := ParseLSN(stored.NextLSN)
-		if parseErr == nil && len(nextLSNBytes) > 0 {
-			nextLSNToUse = nextLSNBytes
+	// Case 2: last_lsn != max_lsn → new data available
+	if stored.MaxLSN != "" {
+		maxLSNBytes, maxParseErr := ParseLSN(stored.MaxLSN)
+		if maxParseErr == nil && len(maxLSNBytes) > 0 {
+			if LSN(lastLSNBytes).Compare(LSN(maxLSNBytes)) != 0 {
+				// last_lsn != max_lsn → use next_lsn as fromLSN
+				if stored.NextLSN != "" {
+					nextLSNBytes, nextParseErr := ParseLSN(stored.NextLSN)
+					if nextParseErr == nil && len(nextLSNBytes) > 0 {
+						return nextLSNBytes, nil
+					}
+					// Invalid stored NextLSN, fall back to incrementing last_lsn
+					slog.Warn("invalid stored next_lsn, falling back to increment", "table", table, "next_lsn", stored.NextLSN)
+				}
+				nextLSN, incErr := p.querier.IncrementLSN(ctx, lastLSNBytes)
+				if incErr != nil {
+					return nil, fmt.Errorf("increment LSN: %w", incErr)
+				}
+				return nextLSN, nil
+			}
 		}
 	}
 
-	// If next_lsn is empty/invalid, compute it from last_lsn
-	if nextLSNToUse == nil {
-		nextLSN, incErr := p.querier.IncrementLSN(ctx, lastLSNBytes)
-		if incErr != nil {
-			return nil, fmt.Errorf("increment LSN: %w", incErr)
-		}
-		nextLSNToUse = nextLSN
-		slog.Warn("stored next_lsn was invalid, recomputed from last_lsn",
-			"table", table,
-			"last_lsn", stored.LastLSN)
-	}
-
-	// Case 2a: next_lsn < globalMaxLSN → new data available, use next_lsn
-	if globalMaxLSN != nil && LSN(nextLSNToUse).Compare(LSN(globalMaxLSN)) < 0 {
-		return nextLSNToUse, nil
-	}
-
-	// Case 2b: next_lsn >= globalMaxLSN (or globalMaxLSN unavailable) → no new data
+	// Case 3: last_lsn == max_lsn → no new data
 	return nil, nil
 }
 
@@ -576,7 +572,12 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	var maxLSN LSN
 	tablesUpdated := 0
 
-
+	// Get current max LSN from MSSQL (single call, not per-table)
+	// Used to store in max_lsn column of each offset
+	currentMaxLSN, err := p.querier.GetMaxLSN(ctx)
+	if err != nil {
+		return fmt.Errorf("get max LSN for offset cache: %w", err)
+	}
 
 	// Update each table's offset independently based on its own lastLSN
 	for _, r := range results {
@@ -589,7 +590,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		}
 
 		if len(r.changes) == 0 {
-			// No changes for this table - keep existing last_lsn and next_lsn
+			// No changes for this table - keep existing last_lsn and next_lsn, update max_lsn
 			currentOffset, err := p.offsets.Get(r.table)
 			if err != nil {
 				slog.Error("failed to get current offset for table, skipping", "table", r.table, "error", err)
@@ -597,7 +598,11 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 			}
 			lastLSN := currentOffset.LastLSN
 			nextLSN := currentOffset.NextLSN
-			if err := p.offsets.Set(r.table, lastLSN, nextLSN); err != nil {
+			maxLSNStr := currentOffset.MaxLSN
+			if currentMaxLSN != nil {
+				maxLSNStr = LSN(currentMaxLSN).String()
+			}
+			if err := p.offsets.Set(r.table, lastLSN, nextLSN, maxLSNStr); err != nil {
 				slog.Error("failed to save offset", "table", r.table, "error", err)
 			}
 			continue
@@ -615,13 +620,19 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		}
 		nextLSNStr := LSN(nextLSNBytes).String()
 
-		if err := p.offsets.Set(r.table, lastLSNStr, nextLSNStr); err != nil {
+		// 3. max_lsn = GetMaxLSN() at save time
+		maxLSNStr := ""
+		if currentMaxLSN != nil {
+			maxLSNStr = LSN(currentMaxLSN).String()
+		}
+
+		if err := p.offsets.Set(r.table, lastLSNStr, nextLSNStr, maxLSNStr); err != nil {
 			slog.Error("failed to save offset", "table", r.table, "error", err)
 			continue
 		}
 		tablesUpdated++
 
-		// Track max LSN for observability only (not stored in offsets)
+		// Track max LSN for observability
 		if maxLSN.IsZero() || r.lastLSN.Compare(maxLSN) > 0 {
 			maxLSN = r.lastLSN
 		}
@@ -630,6 +641,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 			"table", r.table,
 			"last_lsn", lastLSNStr,
 			"next_lsn", nextLSNStr,
+			"max_lsn", maxLSNStr,
 			"changes", len(r.changes))
 	}
 
