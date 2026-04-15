@@ -58,18 +58,16 @@ VALUES (1, NULL, NULL, 0, 0);
 -- =============================================================================
 -- last_lsn: the last LSN from fetched data (tracks progress)
 -- next_lsn: incrementLSN(last) - pre-computed next start point for querying
--- max_lsn: GetMaxLSN() at save time - used to determine if new data exists
 --
--- GetFromLSN logic:
+-- GetFromLSN logic (uses globalMaxLSN from poll start, not stored max_lsn):
 --   1. If last_lsn is empty → getMinLSN() (cold start)
---   2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
---   3. If last_lsn == max_lsn → no new data
+--   2. If last_lsn != globalMaxLSN → new data available, use next_lsn as fromLSN
+--   3. If last_lsn == globalMaxLSN → no new data
 CREATE TABLE IF NOT EXISTS offsets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL UNIQUE,
     last_lsn TEXT NOT NULL,
     next_lsn TEXT NOT NULL,
-    max_lsn TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

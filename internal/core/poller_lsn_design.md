@@ -57,7 +57,7 @@ Case 3: last_lsn == globalMaxLSN → No new data
 
 `globalMaxLSN` is fetched once at the start of each poll cycle as a consistent snapshot. This ensures all tables see the same max LSN boundary, maintaining cross-table transaction consistency.
 
-The stored `max_lsn` is no longer used for comparison - only `globalMaxLSN` (the snapshot from poll start) is used.
+Note: The `max_lsn` column was removed from the offset schema (it was stored but never used for comparison after the change to use `globalMaxLSN`).
 
 ## Offset Storage Schema
 
@@ -66,7 +66,6 @@ CREATE TABLE offsets (
     table_name TEXT PRIMARY KEY,
     last_lsn TEXT,
     next_lsn TEXT,
-    max_lsn TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 ```
@@ -77,7 +76,6 @@ CREATE TABLE offsets (
 {
   "last_lsn": "000235d200001f370004",
   "next_lsn": "000235d200001f370005",
-  "max_lsn": "000235d200001f3700ff",
   "updated_at": "2026-04-14T08:00:00Z"
 }
 ```
@@ -139,9 +137,8 @@ CREATE TABLE offsets (
 
 ```go
 type Offset struct {
-    LastLSN  string    `json:"last_lsn"`
-    NextLSN  string    `json:"next_lsn"`
-    MaxLSN   string    `json:"max_lsn"`
+    LastLSN   string    `json:"last_lsn"`
+    NextLSN   string    `json:"next_lsn"`
     UpdatedAt time.Time `json:"updated_at"`
 }
 ```
@@ -151,7 +148,7 @@ type Offset struct {
 ```go
 type StoreInterface interface {
     Get(table string) (Offset, error)
-    Set(table, lastLSN, nextLSN, maxLSN string) error
+    Set(table, lastLSN, nextLSN string) error
     GetAll() (map[string]Offset, error)
     Load() error
 }

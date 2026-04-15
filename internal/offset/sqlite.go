@@ -34,13 +34,13 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var lastLSN, nextLSN, maxLSN string
+	var lastLSN, nextLSN string
 	var updatedAt time.Time
 
 	err := s.db.Reader.QueryRow(
-		"SELECT last_lsn, next_lsn, max_lsn, updated_at FROM offsets WHERE table_name = ?",
+		"SELECT last_lsn, next_lsn, updated_at FROM offsets WHERE table_name = ?",
 		table,
-	).Scan(&lastLSN, &nextLSN, &maxLSN, &updatedAt)
+	).Scan(&lastLSN, &nextLSN, &updatedAt)
 
 	if err == sql.ErrNoRows {
 		return Offset{}, nil
@@ -52,7 +52,6 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 	return Offset{
 		LastLSN:   lastLSN,
 		NextLSN:   nextLSN,
-		MaxLSN:    maxLSN,
 		UpdatedAt: updatedAt,
 	}, nil
 }
@@ -60,20 +59,18 @@ func (s *SQLiteStore) Get(table string) (Offset, error) {
 // Set updates the LSN for a table
 // lastLSN: last LSN from fetched data
 // nextLSN: incrementLSN(lastLSN) - cached next start point
-// maxLSN: GetMaxLSN() at save time
-func (s *SQLiteStore) Set(table string, lastLSN string, nextLSN string, maxLSN string) error {
+func (s *SQLiteStore) Set(table string, lastLSN string, nextLSN string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	_, err := s.db.Writer.Exec(`
-		INSERT INTO offsets (table_name, last_lsn, next_lsn, max_lsn, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO offsets (table_name, last_lsn, next_lsn, updated_at)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(table_name) DO UPDATE SET 
 			last_lsn = excluded.last_lsn, 
 			next_lsn = excluded.next_lsn, 
-			max_lsn = COALESCE(NULLIF(excluded.max_lsn, ''), offsets.max_lsn), 
 			updated_at = excluded.updated_at
-	`, table, lastLSN, nextLSN, maxLSN, time.Now())
+	`, table, lastLSN, nextLSN, time.Now())
 
 	return err
 }
@@ -83,7 +80,7 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Reader.Query("SELECT table_name, last_lsn, next_lsn, max_lsn, updated_at FROM offsets")
+	rows, err := s.db.Reader.Query("SELECT table_name, last_lsn, next_lsn, updated_at FROM offsets")
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +93,16 @@ func (s *SQLiteStore) GetAll() (map[string]Offset, error) {
 	result := make(map[string]Offset)
 	for rows.Next() {
 		var table string
-		var lastLSN, nextLSN, maxLSN string
+		var lastLSN, nextLSN string
 		var updatedAt time.Time
 
-		if err := rows.Scan(&table, &lastLSN, &nextLSN, &maxLSN, &updatedAt); err != nil {
+		if err := rows.Scan(&table, &lastLSN, &nextLSN, &updatedAt); err != nil {
 			return nil, err
 		}
 
 		result[table] = Offset{
 			LastLSN:   lastLSN,
 			NextLSN:   nextLSN,
-			MaxLSN:    maxLSN,
 			UpdatedAt: updatedAt,
 		}
 	}

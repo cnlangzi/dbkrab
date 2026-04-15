@@ -66,7 +66,7 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	}
 
 	// Set offset
-	if err := store.Set("dbo_orders", "01020304", "01020305", "02030405"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestSQLiteStore_GetSet(t *testing.T) {
 	}
 
 	// Update offset
-	if err := store.Set("dbo_orders", "02030405", "02030406", "03040506"); err != nil {
+	if err := store.Set("dbo_orders", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() update error = %v", err)
 	}
 
@@ -113,10 +113,10 @@ func TestSQLiteStore_GetAll(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set multiple offsets
-	if err := store.Set("dbo_orders", "01020304", "01020305", "02030405"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() orders error = %v", err)
 	}
-	if err := store.Set("dbo_customers", "02030405", "02030406", "03040506"); err != nil {
+	if err := store.Set("dbo_customers", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() customers error = %v", err)
 	}
 
@@ -204,7 +204,7 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 	store1 := NewSQLiteStore(db)
 
 	// Set offset with first store instance
-	if err := store1.Set("dbo_orders", "01020304", "01020305", "02030405"); err != nil {
+	if err := store1.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set initial offset
-	if err := store.Set("dbo_orders", "01020304", "01020305", "02030405"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestSQLiteStore_UpdateTimestamp(t *testing.T) {
 
 	// Wait a bit and update
 	time.Sleep(10 * time.Millisecond)
-	if err := store.Set("dbo_orders", "02030405", "02030406", "03040506"); err != nil {
+	if err := store.Set("dbo_orders", "02030405", "02030406"); err != nil {
 		t.Errorf("Set() update error = %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestSQLiteStore_DirectDBAccess(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set offset via store
-	if err := store.Set("dbo_orders", "01020304", "01020305", "02030405"); err != nil {
+	if err := store.Set("dbo_orders", "01020304", "01020305"); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 
@@ -356,7 +356,7 @@ func TestSQLiteStore_SetWithEmptyValues(t *testing.T) {
 	store := NewSQLiteStore(db)
 
 	// Set offset with some empty values (e.g., only last_lsn after poll with no changes)
-	if err := store.Set("dbo_orders", "01020304", "", ""); err != nil {
+	if err := store.Set("dbo_orders", "01020304", ""); err != nil {
 		t.Errorf("Set() error = %v", err)
 	}
 

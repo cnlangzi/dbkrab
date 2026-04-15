@@ -568,13 +568,6 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	var maxLSN LSN
 	tablesUpdated := 0
 
-	// Get current max LSN from MSSQL (single call, not per-table)
-	// Used to store in max_lsn column of each offset
-	currentMaxLSN, err := p.querier.GetMaxLSN(ctx)
-	if err != nil {
-		return fmt.Errorf("get max LSN for offset cache: %w", err)
-	}
-
 	// Update each table's offset independently based on its own lastLSN
 	for _, r := range results {
 		if r.err != nil {
@@ -586,21 +579,8 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		}
 
 		if len(r.changes) == 0 {
-			// No changes for this table - keep existing last_lsn and next_lsn, update max_lsn
-			currentOffset, err := p.offsets.Get(r.table)
-			if err != nil {
-				slog.Error("failed to get current offset for table, skipping", "table", r.table, "error", err)
-				continue
-			}
-			lastLSN := currentOffset.LastLSN
-			nextLSN := currentOffset.NextLSN
-			maxLSNStr := currentOffset.MaxLSN
-			if currentMaxLSN != nil {
-				maxLSNStr = LSN(currentMaxLSN).String()
-			}
-			if err := p.offsets.Set(r.table, lastLSN, nextLSN, maxLSNStr); err != nil {
-				slog.Error("failed to save offset", "table", r.table, "error", err)
-			}
+			// No changes for this table - keep existing last_lsn and next_lsn
+			// (no need to update anything since nothing changed)
 			continue
 		}
 
@@ -616,13 +596,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		}
 		nextLSNStr := LSN(nextLSNBytes).String()
 
-		// 3. max_lsn = GetMaxLSN() at save time
-		maxLSNStr := ""
-		if currentMaxLSN != nil {
-			maxLSNStr = LSN(currentMaxLSN).String()
-		}
-
-		if err := p.offsets.Set(r.table, lastLSNStr, nextLSNStr, maxLSNStr); err != nil {
+		if err := p.offsets.Set(r.table, lastLSNStr, nextLSNStr); err != nil {
 			slog.Error("failed to save offset", "table", r.table, "error", err)
 			continue
 		}
@@ -637,7 +611,6 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 			"table", r.table,
 			"last_lsn", lastLSNStr,
 			"next_lsn", nextLSNStr,
-			"max_lsn", maxLSNStr,
 			"changes", len(r.changes))
 	}
 
