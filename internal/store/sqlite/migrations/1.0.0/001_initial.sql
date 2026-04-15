@@ -54,25 +54,21 @@ INSERT OR IGNORE INTO poller_state (id, last_poll_time, last_lsn, total_changes,
 VALUES (1, NULL, NULL, 0, 0);
 
 -- =============================================================================
--- offsets: stores LSN offsets per table using three-value approach
+-- offsets: stores LSN offsets per table
 -- =============================================================================
--- Three-value approach reduces remote GetMaxLSN() calls:
+-- Uses globalMaxLSN (fetched at poll start) for comparison:
 --   - last_lsn: the last LSN from fetched data (tracks progress)
 --   - next_lsn: incrementLSN(last) - pre-computed next start point for querying
---   - max_lsn: GetMaxLSN() cached at save time for comparison
 --
--- GetFromLSN logic:
+-- GetFromLSN logic (using next_lsn vs globalMaxLSN):
 --   1. If last_lsn is empty → getMinLSN() (cold start)
---   2. If last_lsn < max_lsn → use next_lsn (new data available)
---   3. If last_lsn == max_lsn → re-fetch max and compare:
---      a. If new_max > last_lsn → use next_lsn
---      b. If new_max == last_lsn → no new data
+--   2. If next_lsn < globalMaxLSN → use next_lsn (new data available)
+--   3. If next_lsn >= globalMaxLSN → no new data
 CREATE TABLE IF NOT EXISTS offsets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL UNIQUE,
     last_lsn TEXT NOT NULL,
     next_lsn TEXT NOT NULL,
-    max_lsn TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

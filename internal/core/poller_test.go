@@ -302,11 +302,11 @@ func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
 		return offsetVal, nil
 	}
 
-func (s *mockOffsetStore) Set(table string, lastLSN string, nextLSN string, maxLSN string) error {
+func (s *mockOffsetStore) Set(table string, lastLSN string, nextLSN string) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.setCalled = true
-		s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, MaxLSN: maxLSN, UpdatedAt: time.Now()}
+		s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, UpdatedAt: time.Now()}
 		return nil
 	}
 
