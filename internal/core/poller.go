@@ -486,10 +486,11 @@ func (p *Poller) poll(ctx context.Context) error {
 
 		// Use GetFromLSN to determine fromLSN
 		// This uses incrementLSN(stored) vs GetMaxLSN() comparison
+		// MSSQL errors (GetMaxLSN/GetMinLSN/IncrementLSN) should abort the poll cycle
 		fromLSN, err := p.GetFromLSN(ctx, table, stored)
 		if err != nil {
-			results = append(results, tablePollResult{table: table, err: err})
-			continue
+			slog.Error("GetFromLSN failed for table, aborting poll cycle", "table", table, "error", err)
+			return fmt.Errorf("GetFromLSN for table %s: %w", table, err)
 		}
 
 		// No new data - skip this table
