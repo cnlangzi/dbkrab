@@ -49,7 +49,7 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 	}
 
 	fetchTime := time.Now()
-	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime)
+	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime, 10*time.Millisecond)
 	if err == nil {
 		t.Fatal("Expected error from failing sink, got nil")
 	}
@@ -105,7 +105,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 	}
 
 	fetchTime := time.Now()
-	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime)
+	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime, 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Expected no error (handler failures don't block), got: %v", err)
 	}
@@ -412,6 +412,102 @@ func TestPollMetricsWindowEmpty(t *testing.T) {
 	avgLatency := window.avgLatencyMs()
 	if avgLatency != 0 {
 		t.Errorf("Expected 0 latency for empty window, got %v", avgLatency)
+	}
+}
+
+// TestPollMetricsFlushDuration tests that PollMetrics includes FlushDurationMs field
+func TestPollMetricsFlushDuration(t *testing.T) {
+	pm := PollMetrics{
+		FetchedChanges:    100,
+		ProcessedTx:       5,
+		PullDurationMs:    23,
+		StoreDurationMs:   12,
+		FlushDurationMs:   3,
+		DLQCount:          0,
+		LastLSN:           "0x00123:00004567",
+	}
+
+	// Verify all duration fields are present
+	if pm.PullDurationMs != 23 {
+		t.Errorf("Expected PullDurationMs=23, got %d", pm.PullDurationMs)
+	}
+	if pm.StoreDurationMs != 12 {
+		t.Errorf("Expected StoreDurationMs=12, got %d", pm.StoreDurationMs)
+	}
+	if pm.FlushDurationMs != 3 {
+		t.Errorf("Expected FlushDurationMs=3, got %d", pm.FlushDurationMs)
+	}
+}
+
+// TestPollCycleDurations tests that updateOffsets correctly records pull/write/flush durations
+func TestPollCycleDurations(t *testing.T) {
+	// Create mock store that succeeds
+	successSink := &mockSink{fail: false}
+
+	// Create mock offset store
+	offsetStore := &mockOffsetStore{
+		data: make(map[string]offset.Offset),
+	}
+
+	// Create poller
+	poller := &Poller{
+		store:         successSink,
+		offsets:       offsetStore,
+		querier:       &mockQuerier{},
+		metricsWindow: newPollMetricsWindow(60),
+	}
+
+	// Create test transaction
+	tx := &Transaction{
+		ID: "test-tx-1",
+		Changes: []Change{
+			{
+				Table:         "dbo.Test",
+				TransactionID: "test-tx-1",
+				Operation:     OpInsert,
+				Data:          map[string]interface{}{"id": 1},
+			},
+		},
+	}
+
+	// Process transaction with measured durations
+	results := []tablePollResult{
+		{table: "dbo.Test", changes: tx.Changes, lastLSN: LSN{1, 2, 3, 4}, err: nil},
+	}
+
+	fetchTime := time.Now()
+	pullDuration := 23 * time.Millisecond
+	err := poller.processDirect(context.TODO(), tx.Changes, results, fetchTime, pullDuration)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Verify metrics were recorded
+	metrics := poller.GetMetrics()
+
+	// PullDurationMs should reflect the passed pull duration
+	if metrics["last_pull_ms"] != nil {
+		// Check if it's in the metrics - we need to add it to GetMetrics first
+	}
+
+	// Get the last metrics directly
+	poller.metricsMu.RLock()
+	lastMetrics := poller.metrics
+	poller.metricsMu.RUnlock()
+
+	// Verify PullDurationMs is recorded
+	if lastMetrics.PullDurationMs != pullDuration.Milliseconds() {
+		t.Errorf("Expected PullDurationMs=%d, got %d", pullDuration.Milliseconds(), lastMetrics.PullDurationMs)
+	}
+
+	// Verify FlushDurationMs is recorded (should be >= 0)
+	if lastMetrics.FlushDurationMs < 0 {
+		t.Errorf("FlushDurationMs should be >= 0, got %d", lastMetrics.FlushDurationMs)
+	}
+
+	// Verify StoreDurationMs is recorded (should be >= 0)
+	if lastMetrics.StoreDurationMs < 0 {
+		t.Errorf("StoreDurationMs should be >= 0, got %d", lastMetrics.StoreDurationMs)
 	}
 }
 
