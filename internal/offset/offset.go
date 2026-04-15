@@ -21,6 +21,7 @@ type Offset struct {
 type StoreInterface interface {
 	Load() error
 	Save() error
+	Flush() error
 	Get(table string) (Offset, error)
 	Set(table string, lastLSN string, nextLSN string) error
 	GetAll() (map[string]Offset, error)

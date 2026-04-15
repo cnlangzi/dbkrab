@@ -100,8 +100,10 @@ plugins:
 app:
   listen: 3000
   type: sqlite
-  db: ./data/app/dbkrab.db   # Store/offset: transactions, poller_state, offsets
-  dlq: ./data/app/dlq.db     # DLQ: dlq_entries
+  db:                   # Database paths (separate DBs for transactional safety)
+    cdc: ./data/app/cdc.db      # CDC store: transactions, poller_state
+    offset: ./data/app/offset.db # Offset store: LSN offsets per table
+    dlq: ./data/app/dlq.db       # DLQ: dlq_entries
 ```
 
 ## Dashboard
