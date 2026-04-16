@@ -392,7 +392,7 @@ func operationStringToInt(op string) int {
 	case "UPDATE_AFTER":
 		return 4
 	default:
-		return 0
+		return 2 // Default to INSERT for safety
 	}
 }
 
