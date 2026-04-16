@@ -231,7 +231,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := NewServerWithCDCAndMetrics(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, apiPort, *configPath, cfg, configWatcher, poller)
+	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, *configPath, cfg, configWatcher, poller)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {

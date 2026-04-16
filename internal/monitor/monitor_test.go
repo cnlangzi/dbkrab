@@ -58,7 +58,7 @@ func TestDB_WriteBatchLog(t *testing.T) {
 	}
 
 	// Verify the log was written
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestDB_WriteBatchLog_Partial(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestDB_WriteBatchLog_Failed(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestDB_WriteSkillLog(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListSkillLogs("test-pull-004", 10)
+	logs, err := monitorDB.ListSkillLogs("", "test-pull-004", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListSkillLogs("test-pull-005", 10)
+	logs, err := monitorDB.ListSkillLogs("", "test-pull-005", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListSkillLogs("test-pull-006", 10)
+	logs, err := monitorDB.ListSkillLogs("", "test-pull-006", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestDB_WriteSinkLog(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListSinkLogs("test-pull-007", 10)
+	logs, err := monitorDB.ListSinkLogs("", "", 10)
 	if err != nil {
 		t.Fatalf("Failed to list sink logs: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListSinkLogs("test-pull-008", 10)
+	logs, err := monitorDB.ListSinkLogs("", "", 10)
 	if err != nil {
 		t.Fatalf("Failed to list sink logs: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestDB_Flush(t *testing.T) {
 	}
 
 	// Read should work after flush
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs after flush: %v", err)
 	}

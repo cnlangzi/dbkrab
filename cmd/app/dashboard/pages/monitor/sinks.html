@@ -1,0 +1,113 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-text">Monitor - Sinks</h2>
+    
+    <!-- Filters -->
+    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
+        <form class="flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Sink Name</label>
+                <input type="text" id="sinkName" placeholder="Filter by sink name"
+                       class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+            </div>
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Database</label>
+                <input type="text" id="database" placeholder="Filter by database/table"
+                       class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+            </div>
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Limit</label>
+                <select id="limit" class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <button type="button" onclick="loadSinks()" 
+                    class="bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-lg transition-colors">
+                Refresh
+            </button>
+        </form>
+    </div>
+
+    <!-- Sink Logs Table -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <div id="sinks-container" class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-bg text-textMuted text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">Batch ID</th>
+                        <th class="px-4 py-3 font-medium">Skill</th>
+                        <th class="px-4 py-3 font-medium">Sink</th>
+                        <th class="px-4 py-3 font-medium">Output Table</th>
+                        <th class="px-4 py-3 font-medium">Operation</th>
+                        <th class="px-4 py-3 font-medium">Rows</th>
+                        <th class="px-4 py-3 font-medium">Status</th>
+                        <th class="px-4 py-3 font-medium">Duration (ms)</th>
+                        <th class="px-4 py-3 font-medium">Error</th>
+                        <th class="px-4 py-3 font-medium">Created At</th>
+                    </tr>
+                </thead>
+                <tbody id="sinks-tbody" class="divide-y divide-border">
+                    <tr>
+                        <td colspan="10" class="px-4 py-8 text-center text-textMuted">
+                            Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', loadSinks);
+
+    function loadSinks() {
+        const sinkName = document.getElementById('sinkName').value;
+        const database = document.getElementById('database').value;
+        const limit = document.getElementById('limit').value;
+        let url = `/api/monitor/sinks?limit=${limit}`;
+        if (sinkName) {
+            url += `&sink_name=${encodeURIComponent(sinkName)}`;
+        }
+        if (database) {
+            url += `&database=${encodeURIComponent(database)}`;
+        }
+        
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('sinks-tbody');
+                if (!data.success || !data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-textMuted">No data</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="hover:bg-surfaceHover transition-colors">
+                        <td class="px-4 py-3 text-text font-mono text-sm">${log.batch_id || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.skill_name || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.sink_name || ''}</td>
+                        <td class="px-4 py-3 text-text font-mono text-sm">${log.output_table || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.operation || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.rows_written || 0}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 rounded text-xs font-medium ${
+                                log.status === 'SUCCESS' ? 'bg-success/20 text-success' :
+                                'bg-error/20 text-error'
+                            }">${log.status || ''}</span>
+                        </td>
+                        <td class="px-4 py-3 text-text">${log.duration_ms || 0}</td>
+                        <td class="px-4 py-3 text-error text-sm max-w-xs truncate" title="${log.error_message || ''}">${log.error_message || '-'}</td>
+                        <td class="px-4 py-3 text-textMuted text-sm">${log.created_at ? new Date(log.created_at).toLocaleString() : ''}</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                document.getElementById('sinks-tbody').innerHTML = 
+                    '<tr><td colspan="10" class="px-4 py-8 text-center text-error">Error loading data</td></tr>';
+            });
+    }
+</script>
+{{ end }}
