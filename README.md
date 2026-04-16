@@ -104,6 +104,7 @@ app:
     cdc: ./data/app/cdc.db      # CDC store: transactions, poller_state
     offset: ./data/app/offset.db # Offset store: LSN offsets per table
     dlq: ./data/app/dlq.db       # DLQ: dlq_entries
+    monitor: ./data/app/monitor.db     # Observability: batch_logs, skill_logs, sink_logs
 ```
 
 ## Dashboard
@@ -115,6 +116,18 @@ Dashboard runs on port 3000 (configurable via `api_port`):
 - `/dlq` - Dead letter queue
 - `/tables` - CDC tables status
 - `/gap` - Gap monitoring
+
+## Observability
+
+dbkrab provides full-chain observability logs for tracking CDC pipeline operations:
+
+- **Batch Logs**: Track each poll cycle with fetched rows, transaction count, DLQ count, and status (SUCCESS/PARTIAL/FAILED)
+- **Skill Logs**: Track skill execution per skill × operation with status (SKIP/EXECUTED/ERROR), rows processed, and duration
+- **Sink Logs**: Track sink writes per sink × table × operation with rows written, duration, and error details
+
+All logs are correlated via `batch_id` (UUID + timestamp format like `a1b2c3d4-1712345678`) for tracing errors across the pipeline.
+
+Logs are stored in a separate SQLite database (`monitor.db`) configured via `app.db.monitor`. Retention policy is not enforced in v1; TTL configuration will be added in a future release.
 
 ## MSSQL CDC Setup
 
