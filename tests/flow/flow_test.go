@@ -153,7 +153,7 @@ func (h *testHarness) setupSkillFixtures() {
 
 // setupPluginManager creates a plugin manager with skill fixtures
 func (h *testHarness) setupPluginManager(dbConfigs map[string]config.SinkConfig) *plugin.Manager {
-	mgr := plugin.NewManager()
+	mgr := plugin.NewManager(nil)
 	if err := mgr.Init(context.Background(), nil, struct {
 		Enabled      bool
 		Path         string

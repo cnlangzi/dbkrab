@@ -180,8 +180,7 @@ func main() {
 	slog.Info("sinker manager initialized")
 
 	// Create plugin manager
-	pluginManager := plugin.NewManager()
-	pluginManager.SetMonitorDB(monitorDB)
+	pluginManager := plugin.NewManager(monitorDB)
 
 	// Create config watcher for hot reload
 	configWatcher, err := config.NewWatcher(*configPath, cfg)

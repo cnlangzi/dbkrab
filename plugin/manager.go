@@ -25,18 +25,13 @@ type Manager struct {
 }
 
 // NewManager creates a new plugin manager
-func NewManager() *Manager {
+// NewManager creates a new plugin manager with optional monitor DB
+func NewManager(monitorDB *monitor.LogsDB) *Manager {
 	return &Manager{
 		plugins:   make(map[string]Plugin),
 		swManager: sinker.NewManager(),
+		monitorDB: monitorDB,
 	}
-}
-
-// SetMonitorDB sets the observability logs database
-func (m *Manager) SetMonitorDB(monitorDB *monitor.LogsDB) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.monitorDB = monitorDB
 }
 
 // Init initializes all SQL plugins based on the provided config.
