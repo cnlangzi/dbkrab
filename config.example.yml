@@ -72,6 +72,7 @@ app:
     cdc: ./data/app/cdc.db      # CDC store: transactions, poller_state (buffered writer)
     offset: ./data/app/offset.db # Offset store: LSN offsets per table
     dlq: ./data/app/dlq.db       # DLQ: dlq_entries
+    logs: ./data/app/logs.db     # Observability logs: pull_logs, skill_logs, sink_logs
 
 # -----------------------------------------------------------------------------
 # Business Sinks (data output targets)

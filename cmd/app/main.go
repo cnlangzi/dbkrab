@@ -17,6 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/logging"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/observe"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
@@ -155,6 +156,19 @@ func main() {
 	}()
 	slog.Info("dead letter queue initialized", "path", cfg.App.DB.DLQ)
 
+	// Create observability logs DB
+	logsDB, err := observe.New(ctx, cfg.App.DB.Logs)
+	if err != nil {
+		slog.Error("failed to create logs DB", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := logsDB.Close(); err != nil {
+			slog.Warn("logsDB.Close error", "error", err)
+		}
+	}()
+	slog.Info("observability logs initialized", "path", cfg.App.DB.Logs)
+
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
 	sinkerMgr.Configure(cfg.Sinks.ToMap())
@@ -167,6 +181,7 @@ func main() {
 
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
+	pluginManager.SetLogsDB(logsDB)
 
 	// Create config watcher for hot reload
 	configWatcher, err := config.NewWatcher(*configPath, cfg)
@@ -182,7 +197,7 @@ func main() {
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore)
+	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore, logsDB)
 	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction) error {
 		return pluginManager.Handle(ctx, tx)
 	}))

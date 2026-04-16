@@ -17,6 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/observe"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
@@ -86,6 +87,13 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 	return totalLatency / int64(len(w.samples))
 }
 
+// PullHandler extends Handler to support PullContext for observability
+// Handlers implementing this interface receive pull_id for logging correlation.
+type PullHandler interface {
+	Handler
+	HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
+}
+
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
 	cfg           *config.Config
@@ -97,7 +105,8 @@ type Poller struct {
 	offsets       offset.StoreInterface
 	store        Store
 	handler       Handler
-	dlq           *dlq.DLQ
+	dlq           *dlq.DLQ           // DLQ store
+	logsDB        *observe.LogsDB     // Observability logs database
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	paused        bool
@@ -132,8 +141,10 @@ type Store interface {
 
 // Handler interface for custom processing
 // Handle processes a transaction with the given context for cancellation/timeout.
+// PullCtx provides observability context (pull_id) for logging correlation.
 type Handler interface {
 	Handle(ctx context.Context, tx *Transaction) error
+	HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -149,6 +160,12 @@ type PluginHandler func(ctx context.Context, tx *Transaction) error
 
 // Handle implements Handler interface
 func (h PluginHandler) Handle(ctx context.Context, tx *Transaction) error {
+	return h(ctx, tx)
+}
+
+// HandleWithPull implements Handler interface with pull context
+// Default implementation: just calls Handle (backward compatible)
+func (h PluginHandler) HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error {
 	return h(ctx, tx)
 }
 
@@ -218,7 +235,7 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, logsDB *observe.LogsDB) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
@@ -230,6 +247,7 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 		offsets:  offsetStore,
 		store:    store,
 		dlq:      dlqStore,
+		logsDB:   logsDB,
 		stopCh:   make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
@@ -253,6 +271,11 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 // SetHandler sets a custom handler
 func (p *Poller) SetHandler(h Handler) {
 	p.handler = h
+}
+
+// SetLogsDB sets the observability logs database
+func (p *Poller) SetLogsDB(logsDB *observe.LogsDB) {
+	p.logsDB = logsDB
 }
 
 // SetReloadChan sets the config reload channel for hot reload
@@ -512,6 +535,9 @@ func (p *Poller) poll(ctx context.Context) error {
 
 // processDirect processes changes without transaction buffer (legacy behavior)
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
+	// Create PullContext for this poll cycle
+	pullCtx := NewPullContext()
+	
 	syncStartTime := time.Now()
 
 	// Group by transaction ID and deliver
@@ -521,6 +547,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	dlqCount := 0
 	actualInserted := 0
 	var totalStoreDuration time.Duration
+	var handlerErrors []error
 
 	// Process all transactions
 	var processErrors []error
@@ -530,15 +557,22 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, &tx)
+				// Try HandleWithPull first (for observability), fall back to Handle
+				if pullHandler, ok := p.handler.(PullHandler); ok {
+					handlerErr = pullHandler.HandleWithPull(ctx, &tx, pullCtx)
+				} else {
+					handlerErr = p.handler.Handle(ctx, &tx)
+				}
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
+					"pull_id", pullCtx.PullID,
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(&tx, err, "handler")
 				dlqCount++
+				handlerErrors = append(handlerErrors, err)
 			}
 		}
 
@@ -589,6 +623,35 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Then: update offsets after successful flush
 	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, len(txs), actualInserted); err != nil {
 		return err
+	}
+
+	// Write pull_log to logs.db for observability
+	if p.logsDB != nil {
+		pullStatus := observe.PullStatusSuccess
+		if dlqCount > 0 {
+			pullStatus = observe.PullStatusPartial
+		}
+		if len(handlerErrors) > 0 || len(processErrors) > 0 {
+			pullStatus = observe.PullStatusFailed
+		}
+
+		totalDuration := time.Since(fetchTime)
+		pullLog := &observe.PullLog{
+			PullID:      pullCtx.PullID,
+			FetchedRows: len(allChanges),
+			TxCount:     len(txs),
+			DLQCount:    dlqCount,
+			DurationMs:  totalDuration.Milliseconds(),
+			Status:      pullStatus,
+			CreatedAt:   fetchTime,
+		}
+		if err := p.logsDB.WritePullLog(pullLog); err != nil {
+			slog.Warn("failed to write pull_log", "pull_id", pullCtx.PullID, "error", err)
+		}
+		// Flush logs db to ensure observability data is persisted
+		if err := p.logsDB.Flush(); err != nil {
+			slog.Warn("failed to flush logs_db", "error", err)
+		}
 	}
 
 	return nil

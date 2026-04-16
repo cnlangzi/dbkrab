@@ -342,6 +342,15 @@ func (h *mockHandler) Handle(ctx context.Context, tx *Transaction) error {
 	return nil
 }
 
+func (h *mockHandler) HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.fail {
+		return errors.New("simulated handler failure")
+	}
+	return nil
+}
+
 type mockQuerier struct{}
 
 func (q *mockQuerier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {

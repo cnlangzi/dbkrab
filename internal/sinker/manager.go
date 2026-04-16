@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/observe"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -94,12 +96,19 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 
 // Write routes sink operations to appropriate sinkers based on Database field
 func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
+	return m.WriteWithPull(ctx, sinks, nil, nil)
+}
+
+// WriteWithPull routes sink operations with pull context for observability.
+// PullCtx provides pull_id for sink_logs correlation.
+// LogsDB receives sink_logs for each sink × table × operation.
+func (m *Manager) WriteWithPull(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *observe.LogsDB) error {
 	if len(sinks) == 0 {
-		slog.Debug("SinkerManager.Write: no sinks to write")
+		slog.Debug("SinkerManager.WriteWithPull: no sinks to write")
 		return nil
 	}
 
-	slog.Info("SinkerManager.Write: routing sinks",
+	slog.Info("SinkerManager.WriteWithPull: routing sinks",
 		"total_sinks", len(sinks))
 
 	// Group sinks by database; skip sinks with missing database config instead of aborting
@@ -107,43 +116,82 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
 	for _, sink := range sinks {
 		dbName := sink.Config.Database
 		if dbName == "" {
-			slog.Warn("SinkerManager.Write: sink has no database configured, skipping",
+			slog.Warn("SinkerManager.WriteWithPull: sink has no database configured, skipping",
 				"sink_name", sink.Config.Name)
 			continue
 		}
 		sinksByDB[dbName] = append(sinksByDB[dbName], sink)
 	}
 
-	slog.Debug("SinkerManager.Write: sinks grouped by database",
+	slog.Debug("SinkerManager.WriteWithPull: sinks grouped by database",
 		"databases", len(sinksByDB))
 
 	// Write to each database
 	for dbName, dbSinks := range sinksByDB {
-		slog.Debug("SinkerManager.Write: writing to database",
+		slog.Debug("SinkerManager.WriteWithPull: writing to database",
 			"database", dbName,
 			"sinks", len(dbSinks))
 
 		sinker, err := m.GetSinker(dbName)
 		if err != nil {
-			slog.Warn("SinkerManager.Write: failed to get sinker, skipping database",
+			slog.Warn("SinkerManager.WriteWithPull: failed to get sinker, skipping database",
 				"database", dbName,
 				"error", err)
 			continue
 		}
 
-		if err := sinker.Write(ctx, dbSinks); err != nil {
-			slog.Error("SinkerManager.Write: write failed for database, skipping",
+		// Track sink write stats for observability
+		writeStart := time.Now()
+		writeErr := sinker.Write(ctx, dbSinks)
+		writeDuration := time.Since(writeStart)
+
+		// Write sink_logs for observability (per sink × table × operation)
+		if pullCtx != nil && logsDB != nil {
+			for _, sink := range dbSinks {
+				rowsWritten := 0
+				if sink.DataSet != nil {
+					rowsWritten = len(sink.DataSet.Rows)
+				}
+
+				sinkStatus := observe.SinkStatusSuccess
+				var errMsg string
+				if writeErr != nil {
+					sinkStatus = observe.SinkStatusError
+					errMsg = writeErr.Error()
+				}
+
+				// Note: skill_name is passed from plugin manager, sink.Config.Name is the sink config name
+				sinkLog := &observe.SinkLog{
+					PullID:       pullCtx.PullID,
+					SkillName:    "", // Will be set by caller if available
+					SinkName:     dbName,
+					OutputTable:  sink.Config.Output,
+					Operation:    sink.OpType.String(),
+					RowsWritten:  rowsWritten,
+					Status:       sinkStatus,
+					ErrorMessage: errMsg,
+					DurationMs:   writeDuration.Milliseconds(),
+					CreatedAt:    time.Now(),
+				}
+				if logWriteErr := logsDB.WriteSinkLog(sinkLog); logWriteErr != nil {
+					slog.Warn("failed to write sink_log", "pull_id", pullCtx.PullID, "error", logWriteErr)
+				}
+			}
+		}
+
+		if writeErr != nil {
+			slog.Error("SinkerManager.WriteWithPull: write failed for database, skipping",
 				"database", dbName,
-				"error", err)
+				"error", writeErr)
 			continue
 		}
 
-		slog.Debug("SinkerManager.Write: write completed",
+		slog.Debug("SinkerManager.WriteWithPull: write completed",
 			"database", dbName,
 			"sinks_written", len(dbSinks))
 	}
 
-	slog.Info("SinkerManager.Write: completed successfully",
+	slog.Info("SinkerManager.WriteWithPull: completed successfully",
 		"total_sinks", len(sinks),
 		"databases", len(sinksByDB))
 
