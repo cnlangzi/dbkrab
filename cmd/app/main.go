@@ -253,11 +253,9 @@ func main() {
 	if err := pluginManager.Init(ctx, mssqlDB, struct {
 		Enabled       bool
 		Path          string
-		SinkConfigs map[string]any
 	}{
 		Enabled:   config.IsEnabled(cfg.Plugins.SQL.Enabled),
 		Path:      cfg.Plugins.SQL.Path,
-		SinkConfigs: nil,
 	}, cfg.Sinks.ToMap()); err != nil {
 		slog.Warn("plugin initialization failed", "error", err)
 	}
