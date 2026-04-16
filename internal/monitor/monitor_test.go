@@ -58,7 +58,7 @@ func TestDB_WriteBatchLog(t *testing.T) {
 	}
 
 	// Verify the log was written
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestDB_WriteBatchLog_Partial(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestDB_WriteBatchLog_Failed(t *testing.T) {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestDB_Flush(t *testing.T) {
 	}
 
 	// Read should work after flush
-	logs, err := monitorDB.ListBatchLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10, time.Now().AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatalf("Failed to list pull logs after flush: %v", err)
 	}
