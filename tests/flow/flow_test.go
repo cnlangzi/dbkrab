@@ -157,7 +157,6 @@ func (h *testHarness) setupPluginManager(dbConfigs map[string]config.SinkConfig)
 	if err := mgr.Init(context.Background(), nil, struct {
 		Enabled      bool
 		Path         string
-		SinkConfigs map[string]any
 	}{
 		Enabled: true,
 		Path:   h.skillPath,

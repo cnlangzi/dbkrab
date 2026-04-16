@@ -158,9 +158,10 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.B
 				// Note: SkillName is not available at sinker level, only sink config name
 				sinkLog := &monitor.SinkLog{
 					BatchID:       batchCtx.BatchID,
-					SkillName:    "",
+					SkillName:    batchCtx.SkillName,
 					SinkName:     sink.Config.Name,
-					OutputTable:  sink.Config.Output,
+					Database:   sink.Config.Database,
+				OutputTable:  sink.Config.Output,
 					Operation:    sink.OpType.String(),
 					RowsWritten:  rowsWritten,
 					Status:       sinkStatus,
