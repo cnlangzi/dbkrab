@@ -260,7 +260,8 @@ func (l *DB) WriteSinkLog(log *SinkLog) error {
 }
 
 // ListBatchLogs retrieves pull logs with optional limit
-func (l *DB) ListBatchLogs(limit int) ([]*BatchLog, error) {
+// ListBatchLogs retrieves batch logs with optional time filter
+func (l *DB) ListBatchLogs(limit int, since time.Time) ([]*BatchLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -271,13 +272,14 @@ func (l *DB) ListBatchLogs(limit int) ([]*BatchLog, error) {
 	query := `
 		SELECT batch_id, fetched_rows, tx_count, dlq_count, duration_ms, status, created_at
 		FROM batch_logs
+		WHERE created_at >= ?
 		ORDER BY created_at DESC
 	`
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := l.db.Reader.Query(query)
+	rows, err := l.db.Reader.Query(query, since)
 	if err != nil {
 		return nil, fmt.Errorf("query batch_logs: %w", err)
 	}
@@ -302,8 +304,9 @@ func (l *DB) ListBatchLogs(limit int) ([]*BatchLog, error) {
 	return logs, rows.Err()
 }
 
-// ListSkillLogs retrieves skill logs for a specific batch_id
-func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
+// ListSkillLogs retrieves skill logs with optional filters
+// skillID filters by specific skill, pullID filters by specific batch
+func (l *DB) ListSkillLogs(skillID string, pullID string, limit int) ([]*SkillLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -315,14 +318,25 @@ func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 		SELECT batch_id, skill_id, skill_name, operation, rows_processed,
 			   status, error_message, duration_ms, created_at
 		FROM skill_logs
-		WHERE batch_id = ?
-		ORDER BY created_at DESC
+		WHERE 1=1
 	`
+	args := []interface{}{}
+
+	if skillID != "" {
+		query += " AND skill_id = ?"
+		args = append(args, skillID)
+	}
+	if pullID != "" {
+		query += " AND batch_id = ?"
+		args = append(args, pullID)
+	}
+
+	query += " ORDER BY created_at DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := l.db.Reader.Query(query, pullID)
+	rows, err := l.db.Reader.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query skill_logs: %w", err)
 	}
@@ -351,8 +365,9 @@ func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 	return logs, rows.Err()
 }
 
-// ListSinkLogs retrieves sink logs for a specific batch_id
-func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
+// ListSinkLogs retrieves sink logs with optional filters
+// sinkName filters by specific sink, database filters by output table
+func (l *DB) ListSinkLogs(sinkName string, database string, limit int) ([]*SinkLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -364,14 +379,25 @@ func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 		SELECT batch_id, skill_name, sink_name, output_table, operation,
 			   rows_written, status, error_message, duration_ms, created_at
 		FROM sink_logs
-		WHERE batch_id = ?
-		ORDER BY created_at DESC
+		WHERE 1=1
 	`
+	args := []interface{}{}
+
+	if sinkName != "" {
+		query += " AND sink_name = ?"
+		args = append(args, sinkName)
+	}
+	if database != "" {
+		query += " AND output_table = ?"
+		args = append(args, database)
+	}
+
+	query += " ORDER BY created_at DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := l.db.Reader.Query(query, pullID)
+	rows, err := l.db.Reader.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query sink_logs: %w", err)
 	}

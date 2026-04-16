@@ -172,6 +172,37 @@
                     </svg>
                     <span>Sinks</span>
                 </a>
+
+                <!-- Monitor Section (collapsible) -->
+                <div class="mt-2">
+                    <button onclick="toggleMonitorMenu()" 
+                            class="flex items-center justify-between w-full px-4 py-3 text-textMuted hover:bg-surface hover:text-text transition-colors">
+                        <div class="flex items-center gap-3">
+                            <!-- Monitor Icon -->
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                            <span>Monitor</span>
+                        </div>
+                        <svg id="monitor-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <div id="monitor-submenu" class="hidden pl-4">
+                        <a href="/monitor/batches" data-tab="monitor-batches"
+                           class="flex items-center gap-3 px-4 py-2 text-textMuted hover:bg-surface hover:text-text transition-colors text-sm sidebar-link">
+                            <span>Batch</span>
+                        </a>
+                        <a href="/monitor/skills" data-tab="monitor-skills"
+                           class="flex items-center gap-3 px-4 py-2 text-textMuted hover:bg-surface hover:text-text transition-colors text-sm sidebar-link">
+                            <span>Skills</span>
+                        </a>
+                        <a href="/monitor/sinks" data-tab="monitor-sinks"
+                           class="flex items-center gap-3 px-4 py-2 text-textMuted hover:bg-surface hover:text-text transition-colors text-sm sidebar-link">
+                            <span>Sinks</span>
+                        </a>
+                    </div>
+                </div>
             </nav>
 
             <!-- Footer -->
@@ -238,6 +269,14 @@
         document.addEventListener('DOMContentLoaded', highlightActiveTab);
         // Also run after HTMX swaps
         document.body.addEventListener('htmx:afterSwap', highlightActiveTab);
+
+        // Toggle Monitor submenu
+        function toggleMonitorMenu() {
+            const submenu = document.getElementById('monitor-submenu');
+            const chevron = document.getElementById('monitor-chevron');
+            submenu.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        }
     </script>
 </body>
 </html>

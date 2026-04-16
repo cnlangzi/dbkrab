@@ -1,0 +1,102 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-text">Monitor - Skills</h2>
+    
+    <!-- Filters -->
+    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
+        <form class="flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Skill ID</label>
+                <input type="text" id="skillId" placeholder="Filter by skill ID"
+                       class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+            </div>
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Limit</label>
+                <select id="limit" class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <button type="button" onclick="loadSkills()" 
+                    class="bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-lg transition-colors">
+                Refresh
+            </button>
+        </form>
+    </div>
+
+    <!-- Skill Logs Table -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <div id="skills-container" class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-bg text-textMuted text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">Batch ID</th>
+                        <th class="px-4 py-3 font-medium">Skill ID</th>
+                        <th class="px-4 py-3 font-medium">Skill Name</th>
+                        <th class="px-4 py-3 font-medium">Operation</th>
+                        <th class="px-4 py-3 font-medium">Rows</th>
+                        <th class="px-4 py-3 font-medium">Status</th>
+                        <th class="px-4 py-3 font-medium">Duration (ms)</th>
+                        <th class="px-4 py-3 font-medium">Error</th>
+                        <th class="px-4 py-3 font-medium">Created At</th>
+                    </tr>
+                </thead>
+                <tbody id="skills-tbody" class="divide-y divide-border">
+                    <tr>
+                        <td colspan="9" class="px-4 py-8 text-center text-textMuted">
+                            Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', loadSkills);
+
+    function loadSkills() {
+        const skillId = document.getElementById('skillId').value;
+        const limit = document.getElementById('limit').value;
+        let url = `/api/monitor/skills?limit=${limit}`;
+        if (skillId) {
+            url += `&skill_id=${encodeURIComponent(skillId)}`;
+        }
+        
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('skills-tbody');
+                if (!data.success || !data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-textMuted">No data</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="hover:bg-surfaceHover transition-colors">
+                        <td class="px-4 py-3 text-text font-mono text-sm">${log.batch_id || ''}</td>
+                        <td class="px-4 py-3 text-text font-mono text-sm">${log.skill_id || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.skill_name || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.operation || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.rows_processed || 0}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 rounded text-xs font-medium ${
+                                log.status === 'SUCCESS' ? 'bg-success/20 text-success' :
+                                'bg-error/20 text-error'
+                            }">${log.status || ''}</span>
+                        </td>
+                        <td class="px-4 py-3 text-text">${log.duration_ms || 0}</td>
+                        <td class="px-4 py-3 text-error text-sm max-w-xs truncate" title="${log.error_message || ''}">${log.error_message || '-'}</td>
+                        <td class="px-4 py-3 text-textMuted text-sm">${log.created_at ? new Date(log.created_at).toLocaleString() : ''}</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                document.getElementById('skills-tbody').innerHTML = 
+                    '<tr><td colspan="9" class="px-4 py-8 text-center text-error">Error loading data</td></tr>';
+            });
+    }
+</script>
+{{ end }}
