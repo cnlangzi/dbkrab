@@ -4,14 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/store"
 )
+
+// ReplayStore defines the interface for replay operations
+// This is a local interface to avoid import cycle with store package
+type ReplayStore interface {
+	GetLSNs() ([]string, error)
+	GetChangesWithLSN(lsn string) ([]Change, error)
+}
 
 // ReplayService replays CDC changes from the store
 type ReplayService struct {
-	store   store.Store
+	store   ReplayStore
 	handler Handler
 }
 
@@ -24,7 +28,7 @@ type ReplayResult struct {
 }
 
 // NewReplayService creates a new ReplayService
-func NewReplayService(store store.Store, handler Handler) *ReplayService {
+func NewReplayService(store ReplayStore, handler Handler) *ReplayService {
 	return &ReplayService{
 		store:   store,
 		handler: handler,
