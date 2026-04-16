@@ -135,7 +135,7 @@ type Store interface {
 }
 
 // Handler interface for custom processing.
-// PullCtx provides observability context (batch_id) for logging correlation.
+// BatchCtx provides observability context (batch_id) for logging correlation.
 type Handler interface {
 	Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
 }

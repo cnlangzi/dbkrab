@@ -104,7 +104,7 @@ func (m *Manager) Unload(name string) error {
 }
 
 // Handle processes a transaction through all SQL plugins with pull context.
-// PullCtx provides batch_id for observability logging.
+// BatchCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
 // Sink logs are written by the sinker for each sink write (per sink × table × operation).
 func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
