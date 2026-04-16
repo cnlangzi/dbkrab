@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
@@ -32,4 +33,10 @@ type Store interface {
 
 	// Close closes the store and releases resources
 	Close() error
+
+	// GetLSNs returns all unique LSNs from the store, ordered by LSN
+	GetLSNs() ([]string, error)
+
+	// GetChangesWithLSN returns all changes for a specific LSN, converted to cdc.Change format
+	GetChangesWithLSN(lsn string) ([]cdc.Change, error)
 }
