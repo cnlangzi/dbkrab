@@ -467,6 +467,8 @@ function loadLogs() {
 
 // Replay functionality
 let replayPollingInterval = null;
+let replayStatusFailureCount = 0;
+const REPLAY_STATUS_MAX_FAILURES = 5;
 
 function startReplay() {
     const btn = document.getElementById('replay-btn');
@@ -483,6 +485,8 @@ function startReplay() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
+                // Reset failure counter when starting new replay
+                replayStatusFailureCount = 0;
                 showReplayProgress();
                 startReplayPolling();
             } else {
@@ -536,15 +540,33 @@ function checkReplayStatus() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
+                // Reset failure counter on success
+                replayStatusFailureCount = 0;
+
                 updateReplayUI(data);
                 if (data.status !== 'running') {
+                    stopReplayPolling();
+                    resetReplayButton();
+                    hideReplayProgress();
+                }
+            } else {
+                // Treat unsuccessful responses as failures
+                replayStatusFailureCount++;
+                if (replayStatusFailureCount >= REPLAY_STATUS_MAX_FAILURES) {
+                    console.error('Replay status check failed too many times, stopping polling.');
                     stopReplayPolling();
                     resetReplayButton();
                 }
             }
         })
         .catch(err => {
+            replayStatusFailureCount++;
             console.error('Failed to check replay status:', err);
+            if (replayStatusFailureCount >= REPLAY_STATUS_MAX_FAILURES) {
+                console.error('Replay status check failed too many times, stopping polling.');
+                stopReplayPolling();
+                resetReplayButton();
+            }
         });
 }
 
@@ -564,15 +586,21 @@ function updateReplayUI(data) {
     const statusText = document.getElementById('replay-status-text');
     const progressBar = document.getElementById('replay-progress-bar');
     if (data.status === 'completed') {
-        statusText.classList.remove('text-warning');
+        statusText.classList.remove('text-warning', 'text-error');
         statusText.classList.add('text-success');
-        progressBar.classList.remove('bg-warning');
+        progressBar.classList.remove('bg-warning', 'bg-error');
         progressBar.classList.add('bg-success');
     } else if (data.status === 'failed') {
-        statusText.classList.remove('text-warning');
+        statusText.classList.remove('text-warning', 'text-success');
         statusText.classList.add('text-error');
-        progressBar.classList.remove('bg-warning');
+        progressBar.classList.remove('bg-warning', 'bg-success');
         progressBar.classList.add('bg-error');
+    } else {
+        // Reset to running state colors
+        statusText.classList.remove('text-success', 'text-error');
+        statusText.classList.add('text-warning');
+        progressBar.classList.remove('bg-success', 'bg-error');
+        progressBar.classList.add('bg-warning');
     }
 }
 
