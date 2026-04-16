@@ -20,13 +20,13 @@ type Manager struct {
 	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
 	sqlPlugin *sql.Plugin        // direct reference to SQLPlugin for fast access
 	swManager *sinker.Manager    // Routes sinks to appropriate writers
-	monitorDB *monitor.LogsDB    // Observability logs database
+	monitorDB *monitor.DB    // Observability logs database
 	mu        sync.RWMutex
 }
 
 // NewManager creates a new plugin manager
 // NewManager creates a new plugin manager with optional monitor DB
-func NewManager(monitorDB *monitor.LogsDB) *Manager {
+func NewManager(monitorDB *monitor.DB) *Manager {
 	return &Manager{
 		plugins:   make(map[string]Plugin),
 		swManager: sinker.NewManager(),

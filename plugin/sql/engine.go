@@ -43,7 +43,7 @@ func (e *Engine) HandleWithSkill(tx *core.Transaction, skill *Skill) ([]core.Sin
 // Skill log is written with EXECUTED status and rows_processed from returned sinks.
 // If no sinks are produced (if condition not met), SKIP is logged with rows_processed=0.
 // If execution fails, ERROR is logged.
-func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *core.PullContext, logsDB *monitor.LogsDB) ([]core.Sink, error) {
+func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *core.PullContext, logsDB *monitor.DB) ([]core.Sink, error) {
 	original := e.skill
 	e.skill = skill
 	defer func() { e.skill = original }()

@@ -97,7 +97,7 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 // Write routes sink operations to appropriate sinkers based on Database field.
 // PullCtx provides pull_id for sink_logs correlation.
 // LogsDB receives sink_logs for each sink × table × operation.
-func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *monitor.LogsDB) error {
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *monitor.DB) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil

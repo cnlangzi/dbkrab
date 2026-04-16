@@ -101,7 +101,7 @@ type Poller struct {
 	store        Store
 	handler       Handler
 	dlq           *dlq.DLQ           // DLQ store
-	monitorDB *monitor.LogsDB     // Observability logs database
+	monitorDB *monitor.DB     // Observability logs database
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	paused        bool
@@ -222,7 +222,7 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.LogsDB) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 

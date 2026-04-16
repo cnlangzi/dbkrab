@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestLogsDB_New(t *testing.T) {
+func TestDB_New(t *testing.T) {
 	// Create temp directory for test
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
@@ -16,7 +16,7 @@ func TestLogsDB_New(t *testing.T) {
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -26,14 +26,14 @@ func TestLogsDB_New(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WritePullLog(t *testing.T) {
+func TestDB_WritePullLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -76,14 +76,14 @@ func TestLogsDB_WritePullLog(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WritePullLog_Partial(t *testing.T) {
+func TestDB_WritePullLog_Partial(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -124,14 +124,14 @@ func TestLogsDB_WritePullLog_Partial(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WritePullLog_Failed(t *testing.T) {
+func TestDB_WritePullLog_Failed(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -168,14 +168,14 @@ func TestLogsDB_WritePullLog_Failed(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WriteSkillLog(t *testing.T) {
+func TestDB_WriteSkillLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -231,14 +231,14 @@ func TestLogsDB_WriteSkillLog(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WriteSkillLog_Skip(t *testing.T) {
+func TestDB_WriteSkillLog_Skip(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -290,14 +290,14 @@ func TestLogsDB_WriteSkillLog_Skip(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WriteSkillLog_Error(t *testing.T) {
+func TestDB_WriteSkillLog_Error(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -354,14 +354,14 @@ func TestLogsDB_WriteSkillLog_Error(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WriteSinkLog(t *testing.T) {
+func TestDB_WriteSinkLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -418,14 +418,14 @@ func TestLogsDB_WriteSinkLog(t *testing.T) {
 	}
 }
 
-func TestLogsDB_WriteSinkLog_Error(t *testing.T) {
+func TestDB_WriteSinkLog_Error(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -483,14 +483,14 @@ func TestLogsDB_WriteSinkLog_Error(t *testing.T) {
 	}
 }
 
-func TestLogsDB_GetPullLogStats(t *testing.T) {
+func TestDB_GetPullLogStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 
@@ -546,14 +546,14 @@ func TestLogsDB_GetPullLogStats(t *testing.T) {
 	}
 }
 
-func TestLogsDB_Closed(t *testing.T) {
+func TestDB_Closed(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 
 	// Close the database
@@ -575,14 +575,14 @@ func TestLogsDB_Closed(t *testing.T) {
 	}
 }
 
-func TestLogsDB_Flush(t *testing.T) {
+func TestDB_Flush(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
 	logsDB, err := New(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Failed to create LogsDB: %v", err)
+		t.Fatalf("Failed to create DB: %v", err)
 	}
 	defer logsDB.Close()
 

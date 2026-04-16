@@ -83,15 +83,15 @@ type SinkLog struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-// LogsDB manages the observability logs database
-type LogsDB struct {
+// DB manages the observability logs database
+type DB struct {
 	db     *sqlite.DB
 	mu     sync.RWMutex
 	closed bool
 }
 
-// New creates a new LogsDB and runs migrations
-func New(ctx context.Context, dbPath string) (*LogsDB, error) {
+// New creates a new DB and runs migrations
+func New(ctx context.Context, dbPath string) (*DB, error) {
 	db, err := sqlite.Open(ctx, dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open logs database: %w", err)
@@ -106,7 +106,7 @@ func New(ctx context.Context, dbPath string) (*LogsDB, error) {
 
 	slog.Info("observability logs database initialized", "path", dbPath)
 
-	return &LogsDB{
+	return &DB{
 		db: db,
 	}, nil
 }
@@ -127,12 +127,12 @@ func runMigrations(db *sqlite.DB) error {
 }
 
 // Flush ensures all buffered writes are committed
-func (l *LogsDB) Flush() error {
+func (l *DB) Flush() error {
 	return l.db.Flush()
 }
 
 // WritePullLog writes a pull cycle log entry
-func (l *LogsDB) WritePullLog(log *PullLog) error {
+func (l *DB) WritePullLog(log *PullLog) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -173,7 +173,7 @@ func (l *LogsDB) WritePullLog(log *PullLog) error {
 }
 
 // WriteSkillLog writes a skill execution log entry
-func (l *LogsDB) WriteSkillLog(log *SkillLog) error {
+func (l *DB) WriteSkillLog(log *SkillLog) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -216,7 +216,7 @@ func (l *LogsDB) WriteSkillLog(log *SkillLog) error {
 }
 
 // WriteSinkLog writes a sink write log entry
-func (l *LogsDB) WriteSinkLog(log *SinkLog) error {
+func (l *DB) WriteSinkLog(log *SinkLog) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -259,7 +259,7 @@ func (l *LogsDB) WriteSinkLog(log *SinkLog) error {
 }
 
 // ListPullLogs retrieves pull logs with optional limit
-func (l *LogsDB) ListPullLogs(limit int) ([]*PullLog, error) {
+func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -303,7 +303,7 @@ func (l *LogsDB) ListPullLogs(limit int) ([]*PullLog, error) {
 }
 
 // ListSkillLogs retrieves skill logs for a specific pull_id
-func (l *LogsDB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
+func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -352,7 +352,7 @@ func (l *LogsDB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 }
 
 // ListSinkLogs retrieves sink logs for a specific pull_id
-func (l *LogsDB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
+func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -402,7 +402,7 @@ func (l *LogsDB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 }
 
 // Close closes the database connection
-func (l *LogsDB) Close() error {
+func (l *DB) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -415,7 +415,7 @@ func (l *LogsDB) Close() error {
 }
 
 // GetPullLogStats returns statistics for recent pull logs
-func (l *LogsDB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
+func (l *DB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 

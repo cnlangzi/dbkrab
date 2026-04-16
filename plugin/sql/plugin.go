@@ -422,7 +422,7 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 //   - EXECUTED: skill matched and produced sinks
 //   - ERROR: skill matched but execution failed
 // Sinks are returned for the caller to write.
-func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *monitor.LogsDB) ([]core.Sink, error) {
+func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *monitor.DB) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
 	}
