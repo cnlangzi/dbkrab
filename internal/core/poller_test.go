@@ -333,7 +333,7 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(ctx context.Context, tx *Transaction, pullCtx *BatchContext) error {
+func (h *mockHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {
