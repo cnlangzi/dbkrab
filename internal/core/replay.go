@@ -6,22 +6,25 @@ import (
 	"log/slog"
 
 	"github.com/cnlangzi/dbkrab/internal/cdc"
+	"github.com/cnlangzi/dbkrab/internal/store"
 )
 
 // ReplayService replays CDC changes from the store
 type ReplayService struct {
-	store   Store
+	store   store.Store
 	handler Handler
 }
 
-// Store interface for replay operations (uses cdc.Change)
-type Store interface {
-	GetLSNs() ([]string, error)
-	GetChangesWithLSN(lsn string) ([]cdc.Change, error)
+// ReplayResult contains the replay statistics
+type ReplayResult struct {
+	TotalLSNs     int
+	TotalChanges  int
+	ProcessedLSNs int
+	FailedLSNs    int
 }
 
 // NewReplayService creates a new ReplayService
-func NewReplayService(store Store, handler Handler) *ReplayService {
+func NewReplayService(store store.Store, handler Handler) *ReplayService {
 	return &ReplayService{
 		store:   store,
 		handler: handler,
@@ -29,32 +32,41 @@ func NewReplayService(store Store, handler Handler) *ReplayService {
 }
 
 // Execute replays all CDC changes from the store in LSN order
-func (r *ReplayService) Execute(ctx context.Context) error {
+func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
-		return fmt.Errorf("failed to get LSNs: %w", err)
+		return nil, fmt.Errorf("failed to get LSNs: %w", err)
 	}
 
 	if len(lsns) == 0 {
 		slog.Info("no changes to replay")
-		return nil
+		return &ReplayResult{}, nil
 	}
 
 	slog.Info("starting replay", "lsn_count", len(lsns))
+
+	result := &ReplayResult{TotalLSNs: len(lsns)}
 
 	// Process each LSN in order
 	for i, lsn := range lsns {
 		if err := r.replayLSN(ctx, lsn); err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
-			return fmt.Errorf("replay LSN %s: %w", lsn, err)
+			result.FailedLSNs++
+			continue
 		}
 
+		result.ProcessedLSNs++
 		slog.Debug("replayed LSN", "lsn", lsn, "index", i+1, "total", len(lsns))
 	}
 
-	slog.Info("replay completed", "total_lsns", len(lsns))
-	return nil
+	slog.Info("replay completed",
+		"total_lsns", result.TotalLSNs,
+		"processed", result.ProcessedLSNs,
+		"failed", result.FailedLSNs,
+		"total_changes", result.TotalChanges)
+
+	return result, nil
 }
 
 // replayLSN replays all changes for a specific LSN
