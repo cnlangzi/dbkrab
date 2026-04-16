@@ -147,12 +147,13 @@ reset:
 	@echo "Stopping dbkrab..."
 	@pkill -x dbkrab 2>/dev/null || true
 	@sleep 2
-	@echo "Deleting app data files..."
-	@rm -rf /opt/dbkrab/data/app/*
+	@echo "Deleting data files..."
+	@rm -rf /opt/dbkrab/data/*.db /opt/dbkrab/data/*.db-* /opt/dbkrab/data/app/*
 	@echo "Deleting sinks data files..."
 	@rm -rf /opt/dbkrab/data/sinks/*/*.db /opt/dbkrab/data/sinks/*/*.db-shm /opt/dbkrab/data/sinks/*/*.db-wal
 	@echo "Deleting logs..."
 	@rm -rf /opt/dbkrab/logs/*
+	@mkdir -p /opt/dbkrab/logs
 	@mkdir -p /opt/dbkrab/logs
 	@echo "Starting dbkrab..."
 	@cd /opt/dbkrab && nohup ./dbkrab --config config.yaml > logs/dbkrab.log 2>&1 &
