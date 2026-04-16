@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -92,8 +94,10 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 	return s, nil
 }
 
-// Write routes sink operations to appropriate sinkers based on Database field
-func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
+// Write routes sink operations to appropriate sinkers based on Database field.
+// BatchCtx provides batch_id for sink_logs correlation.
+// monitorDB receives sink_logs for each sink × table × operation.
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext, monitorDB *monitor.DB) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil
@@ -131,10 +135,49 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink) error {
 			continue
 		}
 
-		if err := sinker.Write(ctx, dbSinks); err != nil {
+		// Track sink write stats for observability
+		writeStart := time.Now()
+		writeErr := sinker.Write(ctx, dbSinks)
+		writeDuration := time.Since(writeStart)
+
+		// Write sink_logs for observability (per sink × table × operation)
+		if batchCtx != nil && monitorDB != nil {
+			for _, sink := range dbSinks {
+				rowsWritten := 0
+				if sink.DataSet != nil {
+					rowsWritten = len(sink.DataSet.Rows)
+				}
+
+				sinkStatus := monitor.SinkStatusSuccess
+				var errMsg string
+				if writeErr != nil {
+					sinkStatus = monitor.SinkStatusError
+					errMsg = writeErr.Error()
+				}
+
+				// Note: SkillName is not available at sinker level, only sink config name
+				sinkLog := &monitor.SinkLog{
+					BatchID:       batchCtx.BatchID,
+					SkillName:    "",
+					SinkName:     sink.Config.Name,
+					OutputTable:  sink.Config.Output,
+					Operation:    sink.OpType.String(),
+					RowsWritten:  rowsWritten,
+					Status:       sinkStatus,
+					ErrorMessage: errMsg,
+					DurationMs:   writeDuration.Milliseconds(),
+					CreatedAt:    time.Now(),
+				}
+				if logWriteErr := monitorDB.WriteSinkLog(sinkLog); logWriteErr != nil {
+					slog.Warn("failed to write sink_log", "batch_id", batchCtx.BatchID, "error", logWriteErr)
+				}
+			}
+		}
+
+		if writeErr != nil {
 			slog.Error("SinkerManager.Write: write failed for database, skipping",
 				"database", dbName,
-				"error", err)
+				"error", writeErr)
 			continue
 		}
 
