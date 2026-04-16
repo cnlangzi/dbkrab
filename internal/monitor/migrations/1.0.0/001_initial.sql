@@ -5,12 +5,11 @@
 
 -- Batch logs: tracks each batch cycle with summary metrics
 CREATE TABLE IF NOT EXISTS batch_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    batch_id TEXT UNIQUE NOT NULL,           -- UUID with short timestamp (root trace ID)
+    batch_id TEXT PRIMARY KEY,                 -- UUID with short timestamp (root trace ID)
     fetched_rows INTEGER NOT NULL DEFAULT 0, -- Total CDC rows fetched in this cycle
     tx_count INTEGER NOT NULL DEFAULT 0,     -- Number of transactions processed
     dlq_count INTEGER NOT NULL DEFAULT 0,    -- Number of transactions sent to DLQ
-    duration_ms INTEGER NOT NULL DEFAULT 0,  -- Total pull cycle duration in milliseconds
+    duration_ms INTEGER NOT NULL DEFAULT 0, -- Total batch duration in milliseconds
     status TEXT NOT NULL,                    -- SUCCESS / PARTIAL / FAILED
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
