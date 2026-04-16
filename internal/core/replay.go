@@ -50,7 +50,7 @@ func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
 
 	// Process each LSN in order
 	for i, lsn := range lsns {
-		if err := r.replayLSN(ctx, lsn); err != nil {
+		if err := r.replayLSN(ctx, lsn, result); err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
 			continue
@@ -70,7 +70,7 @@ func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
 }
 
 // replayLSN replays all changes for a specific LSN
-func (r *ReplayService) replayLSN(ctx context.Context, lsn string) error {
+func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *ReplayResult) error {
 	// Get all changes for this LSN
 	changes, err := r.store.GetChangesWithLSN(lsn)
 	if err != nil {
@@ -81,6 +81,9 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string) error {
 		slog.Debug("no changes for LSN", "lsn", lsn)
 		return nil
 	}
+
+	// Count total changes
+	result.TotalChanges += len(changes)
 
 	// Build transaction from changes
 	tx := r.buildTransaction(changes)
