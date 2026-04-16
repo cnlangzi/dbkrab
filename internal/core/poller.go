@@ -227,6 +227,7 @@ func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, off
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
+		handler:     handler,
 		cfg:       cfg,
 		db:        db,
 		querier:   cdc.NewQuerier(db, mssqlTimezone),

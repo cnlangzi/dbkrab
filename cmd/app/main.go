@@ -204,6 +204,16 @@ func main() {
 	// Start config watcher
 	go configWatcher.Start()
 
+	// Listen for config reload and update sinker manager
+	go func() {
+		for newCfg := range configWatcher.ReloadChan() {
+			if newCfg != nil && newCfg.Sinks != nil {
+				sinkerMgr.Configure(newCfg.Sinks.ToMap())
+				slog.Info("sinker manager reconfigured", "databases", len(newCfg.Sinks.ToMap()))
+			}
+		}
+	}()
+
 	// Handle shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -247,7 +257,7 @@ func main() {
 	}{
 		Enabled:   config.IsEnabled(cfg.Plugins.SQL.Enabled),
 		Path:      cfg.Plugins.SQL.Path,
-		SinkConfigs: nil, // passed via dbConfigs
+		SinkConfigs: nil,
 	}, cfg.Sinks.ToMap()); err != nil {
 		slog.Warn("plugin initialization failed", "error", err)
 	}

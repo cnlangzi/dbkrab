@@ -73,6 +73,7 @@ type SinkLog struct {
 	BatchID       string     `json:"batch_id"`        // Links to batch_logs
 	SkillName    string     `json:"skill_name"`     // Skill that produced this sink
 	SinkName     string     `json:"sink_name"`      // Sink config name
+	Database     string     `json:"database"`      // Target database name
 	OutputTable  string     `json:"output_table"`   // Target table name
 	Operation    string     `json:"operation"`      // INSERT/UPDATE/DELETE
 	RowsWritten  int        `json:"rows_written"`   // Rows written to sink
@@ -232,10 +233,10 @@ func (l *DB) WriteSinkLog(log *SinkLog) error {
 
 	result, err := l.db.Writer.Exec(`
 		INSERT INTO sink_logs (
-			batch_id, skill_name, sink_name, output_table, operation,
+			batch_id, skill_name, sink_name, database, output_table, operation,
 			rows_written, status, error_message, duration_ms, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.BatchID, log.SkillName, log.SinkName, log.OutputTable,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, log.BatchID, log.SkillName, log.SinkName, log.Database, log.OutputTable,
 		log.Operation, log.RowsWritten, log.Status, log.ErrorMessage,
 		log.DurationMs, log.CreatedAt)
 	if err != nil {
@@ -376,7 +377,7 @@ func (l *DB) ListSinkLogs(sinkName string, database string, limit int) ([]*SinkL
 	}
 
 	query := `
-		SELECT batch_id, skill_name, sink_name, output_table, operation,
+		SELECT batch_id, skill_name, sink_name, database, output_table, operation,
 			   rows_written, status, error_message, duration_ms, created_at
 		FROM sink_logs
 		WHERE 1=1
@@ -412,7 +413,7 @@ func (l *DB) ListSinkLogs(sinkName string, database string, limit int) ([]*SinkL
 		log := &SinkLog{}
 		var errMsg string
 		if err := rows.Scan(
-			&log.BatchID, &log.SkillName, &log.SinkName, &log.OutputTable,
+			&log.BatchID, &log.SkillName, &log.SinkName, &log.Database, &log.OutputTable,
 			&log.Operation, &log.RowsWritten, &log.Status, &errMsg,
 			&log.DurationMs, &log.CreatedAt,
 		); err != nil {
