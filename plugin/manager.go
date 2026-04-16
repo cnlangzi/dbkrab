@@ -38,7 +38,6 @@ func NewManager(monitorDB *monitor.DB) *Manager {
 func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
 	Enabled       bool
 	Path          string
-	SinkConfigs map[string]any // database name -> config
 }, dbConfigs map[string]config.SinkConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

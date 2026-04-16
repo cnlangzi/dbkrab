@@ -11,6 +11,9 @@ import (
 // It is created at the start of each poll cycle and passed to handlers,
 // skills, and sinks for logging correlation.
 type BatchContext struct {
+	// SkillName is the skill being executed (for sink logging)
+	SkillName string
+
 	// BatchID is a unique identifier for each poll cycle (root trace ID)
 	// Format: {uuid-short-8chars}-{timestamp-ms}
 	BatchID string
