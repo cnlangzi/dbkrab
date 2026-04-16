@@ -153,7 +153,7 @@ func (h *testHarness) setupSkillFixtures() {
 
 // setupPluginManager creates a plugin manager with skill fixtures
 func (h *testHarness) setupPluginManager(dbConfigs map[string]config.SinkConfig) *plugin.Manager {
-	mgr := plugin.NewManager()
+	mgr := plugin.NewManager(nil)
 	if err := mgr.Init(context.Background(), nil, struct {
 		Enabled      bool
 		Path         string
@@ -245,7 +245,7 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 		fn: func(tx *core.Transaction) error {
 			handlerCalled = true
 			// Call plugin manager to process
-			handlerErr = pluginMgr.Handle(context.Background(), tx)
+			handlerErr = pluginMgr.Handle(context.Background(), tx, nil)
 			return handlerErr
 		},
 	}
@@ -316,7 +316,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(context.Background(), tx)
+			return pluginMgr.Handle(context.Background(), tx, nil)
 		},
 	}
 
@@ -423,7 +423,7 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 
 	handler := &simpleHandler{
 		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(context.Background(), tx)
+			return pluginMgr.Handle(context.Background(), tx, nil)
 		},
 	}
 
@@ -568,7 +568,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 			if callCount == 1 {
 				return fmt.Errorf("transient handler error")
 			}
-			return pluginMgr.Handle(context.Background(), tx)
+			return pluginMgr.Handle(context.Background(), tx, nil)
 		},
 	}
 
