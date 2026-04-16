@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/cnlangzi/dbkrab/internal/cdc"
+	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/store"
 )
 
@@ -96,15 +96,15 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	return nil
 }
 
-// buildTransaction builds a core.Transaction from cdc.Change slice
+// buildTransaction builds a core.Transaction from core.Change slice
 // It groups changes by transaction ID and filters out UPDATE_BEFORE operations
-func (r *ReplayService) buildTransaction(changes []cdc.Change) *Transaction {
+func (r *ReplayService) buildTransaction(changes []core.Change) *Transaction {
 	// Group by transaction ID, filtering out UPDATE_BEFORE
 	txMap := make(map[string]*Transaction)
 
 	for _, c := range changes {
 		// Filter out UPDATE_BEFORE operations (operation == 3)
-		if c.Operation == 3 { // OpUpdateBefore
+		if c.Operation == core.OpUpdateBefore { // OpUpdateBefore
 			slog.Debug("buildTransaction: silently dropping UPDATE_BEFORE change",
 				"table", c.Table,
 				"tx_id", c.TransactionID,
@@ -118,9 +118,8 @@ func (r *ReplayService) buildTransaction(changes []cdc.Change) *Transaction {
 			txMap[c.TransactionID] = tx
 		}
 
-		// Convert cdc.Change to core.Change
-		coreChange := ConvertToCoreChange(c)
-		tx.AddChange(coreChange)
+		// Already core.Change, add directly
+		tx.AddChange(c)
 	}
 
 	// Convert map to slice - should only have one transaction per LSN
@@ -139,18 +138,5 @@ func (r *ReplayService) buildTransaction(changes []cdc.Change) *Transaction {
 	return &Transaction{
 		ID:      "",
 		Changes: []Change{},
-	}
-}
-
-// ConvertToCoreChange converts cdc.Change to core.Change
-func ConvertToCoreChange(c cdc.Change) Change {
-	return Change{
-		Table:         c.Table,
-		TransactionID: c.TransactionID,
-		LSN:           c.LSN,
-		Operation:     Operation(c.Operation),
-		Data:          c.Data,
-		CommitTime:    c.CommitTime,
-		ID:            "", // ID will be computed if needed
 	}
 }

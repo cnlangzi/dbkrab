@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/internal/store"
@@ -312,8 +311,8 @@ func (s *Store) GetLSNs() ([]string, error) {
 	return lsns, rows.Err()
 }
 
-// GetChangesWithLSN returns all changes for a specific LSN, converted to cdc.Change format
-func (s *Store) GetChangesWithLSN(lsn string) ([]cdc.Change, error) {
+// GetChangesWithLSN returns all changes for a specific LSN, as core.Change
+func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 	rows, err := s.db.Reader.Query(`
 		SELECT id, transaction_id, table_name, operation, data, lsn, changed_at
 		FROM changes
@@ -329,7 +328,7 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]cdc.Change, error) {
 		}
 	}()
 
-	var changes []cdc.Change
+	var changes []core.Change
 	for rows.Next() {
 		var id, txID, tableName, operation, dataStr, lsnStr string
 		var changedAt interface{}
@@ -338,13 +337,12 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]cdc.Change, error) {
 			return nil, err
 		}
 
-		// Convert operation string to int
-		op := operationStringToInt(operation)
+		// Convert operation string to core.Operation
+		op := core.Operation(operationStringToInt(operation))
 
 		// Convert LSN hex string to bytes
 		var lsnBytes []byte
 		if lsnStr != "" && len(lsnStr) > 2 {
-			// Remove "0x" prefix if present
 			hexStr := lsnStr
 			if len(hexStr) >= 2 && hexStr[:2] == "0x" {
 				hexStr = hexStr[2:]
@@ -366,13 +364,14 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]cdc.Change, error) {
 			}
 		}
 
-		changes = append(changes, cdc.Change{
+		changes = append(changes, core.Change{
 			Table:         tableName,
 			TransactionID: txID,
 			LSN:           lsnBytes,
 			Operation:     op,
 			CommitTime:    commitTime,
 			Data:          data,
+			ID:            id, // Use the stored ID
 		})
 	}
 
