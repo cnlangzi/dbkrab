@@ -2,8 +2,11 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+
+	"github.com/cnlangzi/dbkrab/internal/dlq"
 )
 
 // ReplayStore defines the interface for replay operations
@@ -17,6 +20,7 @@ type ReplayStore interface {
 type ReplayService struct {
 	store   ReplayStore
 	handler Handler
+	dlq     *dlq.DLQ // DLQ for recording failures
 }
 
 // ReplayResult contains the replay statistics
@@ -27,11 +31,12 @@ type ReplayResult struct {
 	FailedLSNs    int
 }
 
-// NewReplayService creates a new ReplayService
-func NewReplayService(store ReplayStore, handler Handler) *ReplayService {
+// NewReplayService creates a new ReplayService with DLQ support
+func NewReplayService(store ReplayStore, handler Handler, dlq *dlq.DLQ) *ReplayService {
 	return &ReplayService{
 		store:   store,
 		handler: handler,
+		dlq:     dlq,
 	}
 }
 
@@ -112,6 +117,8 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	// Handle the transaction
 	batchCtx := NewBatchContext()
 	if err := r.handler.Handle(ctx, tx, batchCtx); err != nil {
+		// Write to DLQ on failure (same logic as Poller)
+		r.writeToDLQ(tx, err, lsn, "replay_handler")
 		return fmt.Errorf("handle transaction %s: %w", tx.ID, err)
 	}
 
@@ -161,4 +168,62 @@ func (r *ReplayService) buildTransaction(changes []Change) *Transaction {
 		ID:      "",
 		Changes: []Change{},
 	}
+}
+
+// writeToDLQ writes a failed transaction to the dead letter queue
+func (r *ReplayService) writeToDLQ(tx *Transaction, handlerErr error, lsn string, source string) {
+	if r.dlq == nil {
+		slog.Warn("cannot write to DLQ: not initialized",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID)
+		return
+	}
+
+	// Get the first change to extract table name and operation
+	var tableName, operation string
+	if len(tx.Changes) > 0 {
+		tableName = tx.Changes[0].Table
+		operation = tx.Changes[0].Operation.String()
+	}
+
+	// Encode transaction data as JSON
+	txData := map[string]interface{}{
+		"transaction_id": tx.ID,
+		"changes":        tx.Changes,
+	}
+	changeJSON, encodeErr := json.Marshal(txData)
+	if encodeErr != nil {
+		slog.Error("failed to encode transaction data",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID,
+			"error", encodeErr)
+		changeJSON = []byte("{}")
+	}
+
+	entry := &dlq.DLQEntry{
+		TraceID:      tx.TraceID,
+		Source:       source,
+		LSN:          lsn,
+		TableName:    tableName,
+		Operation:    operation,
+		ChangeData:   string(changeJSON),
+		ErrorMessage: fmt.Sprintf("%s error: %v", source, handlerErr),
+		RetryCount:   0,
+		Status:       dlq.StatusPending,
+	}
+
+	if writeErr := r.dlq.Write(entry); writeErr != nil {
+		slog.Error("failed to write DLQ entry",
+			"trace_id", tx.TraceID,
+			"tx_id", tx.ID,
+			"error", writeErr)
+		return
+	}
+
+		slog.Warn("transaction written to DLQ during replay",
+		"trace_id", tx.TraceID,
+		"tx_id", tx.ID,
+		"table", tableName,
+		"operation", operation,
+		"lsn", lsn)
 }

@@ -7,12 +7,53 @@
             <h2 class="text-2xl sm:text-3xl font-bold text-text">CDC Changes</h2>
             <p class="text-sm text-textMuted mt-1">View and filter database change events</p>
         </div>
-        <button onclick="loadLogs()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+        <div class="flex gap-2">
+            <button id="replay-btn" onclick="startReplay()" class="flex items-center justify-center gap-2 px-4 py-2 bg-warning hover:bg-warning/80 text-white font-medium rounded-lg transition-all duration-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                </svg>
+                Replay
+            </button>
+            <button onclick="loadLogs()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Replay Progress -->
+    <div id="replay-progress" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-warning/30">
+        <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
+            <svg class="w-5 h-5 text-warning animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            Refresh
-        </button>
+            Replay Progress
+        </h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <div class="p-3 sm:p-4 rounded-xl bg-warning/10 border border-warning/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Processed</p>
+                <p class="text-base sm:text-lg font-bold text-warning">
+                    <span id="replay-processed">0</span><span class="text-textMuted font-normal"> / </span><span id="replay-total">0</span>
+                </p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-error/10 border border-error/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Failed</p>
+                <p id="replay-failed" class="text-base sm:text-lg font-bold text-error">0</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Status</p>
+                <p id="replay-status-text" class="text-base sm:text-lg font-bold text-warning">Running</p>
+            </div>
+        </div>
+        <!-- Progress Bar -->
+        <div class="mt-4">
+            <div class="w-full bg-surfaceHover rounded-full h-2.5">
+                <div id="replay-progress-bar" class="bg-warning h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Filters - Collapsible on Mobile -->
@@ -422,6 +463,128 @@ function loadLogs() {
                 </div>
             `;
         });
+}
+
+// Replay functionality
+let replayPollingInterval = null;
+
+function startReplay() {
+    const btn = document.getElementById('replay-btn');
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Starting...
+    `;
+
+    fetch('/api/cdc/replay', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showReplayProgress();
+                startReplayPolling();
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                    </svg>
+                    Replay
+                `;
+                alert('Failed to start replay: ' + data.error);
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+                </svg>
+                Replay
+            `;
+            alert('Failed to start replay: ' + err);
+        });
+}
+
+function showReplayProgress() {
+    document.getElementById('replay-progress').classList.remove('hidden');
+}
+
+function hideReplayProgress() {
+    document.getElementById('replay-progress').classList.add('hidden');
+}
+
+function startReplayPolling() {
+    if (replayPollingInterval) {
+        clearInterval(replayPollingInterval);
+    }
+    replayPollingInterval = setInterval(checkReplayStatus, 1000);
+    checkReplayStatus(); // Check immediately
+}
+
+function stopReplayPolling() {
+    if (replayPollingInterval) {
+        clearInterval(replayPollingInterval);
+        replayPollingInterval = null;
+    }
+}
+
+function checkReplayStatus() {
+    fetch('/api/cdc/replay/status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                updateReplayUI(data);
+                if (data.status !== 'running') {
+                    stopReplayPolling();
+                    resetReplayButton();
+                }
+            }
+        })
+        .catch(err => {
+            console.error('Failed to check replay status:', err);
+        });
+}
+
+function updateReplayUI(data) {
+    document.getElementById('replay-processed').textContent = data.processed || 0;
+    document.getElementById('replay-total').textContent = data.total || 0;
+    document.getElementById('replay-failed').textContent = data.failed || 0;
+    document.getElementById('replay-status-text').textContent = data.status || 'Unknown';
+
+    // Update progress bar
+    const total = data.total || 0;
+    const processed = data.processed || 0;
+    const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+    document.getElementById('replay-progress-bar').style.width = percentage + '%';
+
+    // Update status color
+    const statusText = document.getElementById('replay-status-text');
+    const progressBar = document.getElementById('replay-progress-bar');
+    if (data.status === 'completed') {
+        statusText.classList.remove('text-warning');
+        statusText.classList.add('text-success');
+        progressBar.classList.remove('bg-warning');
+        progressBar.classList.add('bg-success');
+    } else if (data.status === 'failed') {
+        statusText.classList.remove('text-warning');
+        statusText.classList.add('text-error');
+        progressBar.classList.remove('bg-warning');
+        progressBar.classList.add('bg-error');
+    }
+}
+
+function resetReplayButton() {
+    const btn = document.getElementById('replay-btn');
+    btn.disabled = false;
+    btn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.058A5.996 5.996 0 0112 5.5c3.314 0 6 2.686 6 6 0 .343-.029.68-.083 1.01M20 20v5h-.058A5.996 5.996 0 0112 18.5c-3.314 0-6-2.686-6-6 0-.343.029-.68.083-1.01"/>
+        </svg>
+        Replay
+    `;
 }
 
 // Initial load

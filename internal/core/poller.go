@@ -981,12 +981,25 @@ func (p *Poller) checkGaps(ctx context.Context) error {
 	return nil
 }
 
-// pause pauses the poller
+// pause pauses the poller (internal method for gap detection)
 func (p *Poller) pause() {
 	p.pausedMu.Lock()
 	defer p.pausedMu.Unlock()
 	p.paused = true
 	slog.Warn("poller paused")
+}
+
+// Pause pauses the poller (public method for replay)
+func (p *Poller) Pause() {
+	p.pause()
+}
+
+// Resume resumes the poller after being paused
+func (p *Poller) Resume() {
+	p.pausedMu.Lock()
+	defer p.pausedMu.Unlock()
+	p.paused = false
+	slog.Info("poller resumed")
 }
 
 // isPaused returns true if the poller is paused
