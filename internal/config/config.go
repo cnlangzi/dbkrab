@@ -89,6 +89,7 @@ type DBConfig struct {
 	CDC    string `yaml:"cdc"`    // Path for CDC store DB (changes, poller_state)
 	Offset string `yaml:"offset"` // Path for offset DB (offsets table only)
 	DLQ    string `yaml:"dlq"`    // Path for DLQ DB (dlq_entries)
+	Monitor string `yaml:"monitor"` // Path for monitor DB (pull_logs, skill_logs, sink_logs)
 }
 
 // AppConfig contains the app-level database storage configuration
@@ -175,6 +176,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.App.DB.DLQ == "" {
 		cfg.App.DB.DLQ = "./data/app/dlq.db"
+	}
+	if cfg.App.DB.Monitor == "" {
+		cfg.App.DB.Monitor = "./data/app/monitor.db"
 	}
 	if cfg.App.Listen == 0 {
 		cfg.App.Listen = 9020

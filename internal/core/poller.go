@@ -17,6 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
@@ -86,6 +87,8 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 	return totalLatency / int64(len(w.samples))
 }
 
+
+
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
 	cfg           *config.Config
@@ -97,7 +100,8 @@ type Poller struct {
 	offsets       offset.StoreInterface
 	store        Store
 	handler       Handler
-	dlq           *dlq.DLQ
+	dlq           *dlq.DLQ           // DLQ store
+	monitorDB *monitor.DB     // Observability logs database
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	paused        bool
@@ -130,10 +134,10 @@ type Store interface {
 	Close() error
 }
 
-// Handler interface for custom processing
-// Handle processes a transaction with the given context for cancellation/timeout.
+// Handler interface for custom processing.
+// BatchCtx provides observability context (batch_id) for logging correlation.
 type Handler interface {
-	Handle(ctx context.Context, tx *Transaction) error
+	Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -145,11 +149,11 @@ type CDCQuerier interface {
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(ctx context.Context, tx *Transaction) error
+type PluginHandler func(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, tx *Transaction) error {
-	return h(ctx, tx)
+func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
+	return h(ctx, tx, batchCtx)
 }
 
 type tablePollResult struct {
@@ -218,19 +222,20 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
-		cfg:      cfg,
-		db:       db,
-		querier:  cdc.NewQuerier(db, mssqlTimezone),
-		cdcAdmin: cdcadmin.NewAdmin(&cfg.MSSQL),
-		offsets:  offsetStore,
-		store:    store,
-		dlq:      dlqStore,
-		stopCh:   make(chan struct{}),
+		cfg:       cfg,
+		db:        db,
+		querier:   cdc.NewQuerier(db, mssqlTimezone),
+		cdcAdmin:  cdcadmin.NewAdmin(&cfg.MSSQL),
+		offsets:   offsetStore,
+		store:     store,
+		dlq:       dlqStore,
+		monitorDB: monitorDB,
+		stopCh:    make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
 
@@ -512,6 +517,9 @@ func (p *Poller) poll(ctx context.Context) error {
 
 // processDirect processes changes without transaction buffer (legacy behavior)
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
+	// Create BatchContext for this poll cycle
+	batchCtx := NewBatchContext()
+	
 	syncStartTime := time.Now()
 
 	// Group by transaction ID and deliver
@@ -521,6 +529,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	dlqCount := 0
 	actualInserted := 0
 	var totalStoreDuration time.Duration
+	var handlerErrors []error
 
 	// Process all transactions
 	var processErrors []error
@@ -530,15 +539,17 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, &tx)
+				handlerErr = p.handler.Handle(ctx, &tx, batchCtx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
+					"batch_id", batchCtx.BatchID,
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(&tx, err, "handler")
 				dlqCount++
+				handlerErrors = append(handlerErrors, err)
 			}
 		}
 
@@ -589,6 +600,35 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	// Then: update offsets after successful flush
 	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, len(txs), actualInserted); err != nil {
 		return err
+	}
+
+	// Write batch_log to logs.db for observability
+	if p.monitorDB != nil {
+		pullStatus := monitor.PullStatusSuccess
+		if dlqCount > 0 {
+			pullStatus = monitor.PullStatusPartial
+		}
+		if len(handlerErrors) > 0 || len(processErrors) > 0 {
+			pullStatus = monitor.PullStatusFailed
+		}
+
+		totalDuration := time.Since(fetchTime)
+		batchLog := &monitor.BatchLog{
+			BatchID:      batchCtx.BatchID,
+			FetchedRows: len(allChanges),
+			TxCount:     len(txs),
+			DLQCount:    dlqCount,
+			DurationMs:  totalDuration.Milliseconds(),
+			Status:      pullStatus,
+			CreatedAt:   fetchTime,
+		}
+		if err := p.monitorDB.WriteBatchLog(batchLog); err != nil {
+			slog.Warn("failed to write batch_log", "batch_id", batchCtx.BatchID, "error", err)
+		}
+		// Flush logs db to ensure observability data is persisted
+		if err := p.monitorDB.Flush(); err != nil {
+			slog.Warn("failed to flush logs_db", "error", err)
+		}
 	}
 
 	return nil
@@ -709,12 +749,12 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		p.metricsMu.Unlock()
 
 		// Emit structured INFO summary log for non-empty polls
-		// Includes pull_ms, write_ms (store_ms), and flush_ms for bottleneck analysis
+		// Includes batch_ms, write_ms (store_ms), and flush_ms for bottleneck analysis
 		slog.Info("[poll cycle]",
 			"cdc_fetched", len(allChanges),
 			"inserted", actualInserted,
 			"tx_count", txCount,
-			"pull_ms", pullDuration.Milliseconds(),
+			"batch_ms", pullDuration.Milliseconds(),
 			"write_ms", storeDuration.Milliseconds(),
 			"flush_ms", flushDuration.Milliseconds(),
 			"dlq", dlqCount,
@@ -1149,7 +1189,7 @@ func (p *Poller) GetMetrics() map[string]interface{} {
 		"last_processed_tx":     m.ProcessedTx,
 		"last_sync_tps":         m.SyncTPS,
 		"last_sync_duration_ms": m.SyncDurationMs,
-		"last_pull_ms":          m.PullDurationMs,
+		"last_batch_ms":          m.PullDurationMs,
 		"last_write_ms":         m.StoreDurationMs,
 		"last_flush_ms":         m.FlushDurationMs,
 		"last_dlq_count":        m.DLQCount,

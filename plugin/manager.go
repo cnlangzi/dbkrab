@@ -4,11 +4,13 @@ import (
 	"context"
 	dbsql "database/sql"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/plugin/sql"
 )
@@ -16,16 +18,19 @@ import (
 // Manager manages SQL plugins.
 type Manager struct {
 	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
-	sqlPlugin *sql.Plugin       // direct reference to SQLPlugin for fast access
-	swManager *sinker.Manager   // Routes sinks to appropriate writers
+	sqlPlugin *sql.Plugin        // direct reference to SQLPlugin for fast access
+	swManager *sinker.Manager    // Routes sinks to appropriate writers
+	monitorDB *monitor.DB    // Observability logs database
 	mu        sync.RWMutex
 }
 
 // NewManager creates a new plugin manager
-func NewManager() *Manager {
+// NewManager creates a new plugin manager with optional monitor DB
+func NewManager(monitorDB *monitor.DB) *Manager {
 	return &Manager{
 		plugins:   make(map[string]Plugin),
 		swManager: sinker.NewManager(),
+		monitorDB: monitorDB,
 	}
 }
 
@@ -98,35 +103,37 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Handle processes a transaction through all SQL plugins.
-// Each plugin transforms data and returns sinks with Database field set.
-// The sink manager routes sinks to appropriate writers based on Database field.
-func (m *Manager) Handle(ctx context.Context, tx *core.Transaction) error {
+// Handle processes a transaction through all SQL plugins with pull context.
+// BatchCtx provides batch_id for observability logging.
+// Skill logs are written by the engine for each skill (per skill × operation).
+// Sink logs are written by the sinker for each sink write (per sink × table × operation).
+func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Collect all sink operations from all plugins
 	var allSinks []core.Sink
 
-	for _, p := range m.plugins {
-		splug, ok := p.(*sql.Plugin)
-		if !ok {
-			continue
-		}
-
-		// Transform and get sinks with Database field
-		sinks, err := splug.Handle(tx)
+	if m.sqlPlugin != nil {
+		// Process transaction through SQL plugin
+		// Skill logs are written internally by engine.HandleWithPull
+		sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
 		if err != nil {
-			return fmt.Errorf("SQL plugin %s handle: %w", splug.Name(), err)
+			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
 		}
-
 		allSinks = append(allSinks, sinks...)
 	}
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
-		if err := m.swManager.Write(ctx, allSinks); err != nil {
+		if err := m.swManager.Write(ctx, allSinks, batchCtx, m.monitorDB); err != nil {
 			return fmt.Errorf("sink write: %w", err)
+		}
+	}
+
+	// Flush logs db
+	if m.monitorDB != nil {
+		if err := m.monitorDB.Flush(); err != nil {
+			slog.Warn("failed to flush logs_db", "error", err)
 		}
 	}
 
