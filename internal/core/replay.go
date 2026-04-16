@@ -110,7 +110,8 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	}
 
 	// Handle the transaction
-	if err := r.handler.Handle(ctx, tx); err != nil {
+	batchCtx := NewBatchContext()
+	if err := r.handler.Handle(ctx, tx, batchCtx); err != nil {
 		return fmt.Errorf("handle transaction %s: %w", tx.ID, err)
 	}
 
