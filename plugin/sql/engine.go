@@ -50,6 +50,11 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 
 	start := time.Now()
 	sinks, err := e.Handle(tx)
+	slog.Info("Engine.HandleWithPull: called", "skill", skill.Name, "tx_changes", len(tx.Changes))
+	// Set skill name on batchCtx for sink logging
+	if batchCtx != nil {
+		batchCtx.SkillName = skill.Name
+	}
 	duration := time.Since(start)
 
 	if err != nil {
@@ -116,6 +121,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 		return nil, nil
 	}
 
+	slog.Info("Engine.Handle: called", "skill", e.skill.Name, "changes", len(tx.Changes))
+
 	// Collect all job operations
 	var allOps []core.Sink
 
@@ -153,6 +160,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 			// Filter sinks by table and evaluate 'if' conditions
 			for _, sinkCfg := range sinkConfigs {
+				slog.Info("Engine.Handle: executing sink", "sink", sinkCfg.Name, "table", change.Table)
 				if sinkCfg.On != "" && !strings.EqualFold(sinkCfg.On, change.Table) {
 					slog.Debug("Engine.Handle: sink table mismatch",
 						"sink", sinkCfg.Name,
@@ -169,12 +177,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 					continue
 				}
 
-				slog.Debug("Engine.Handle: executing sink SQL",
-					"sink", sinkCfg.Name,
-					"output", sinkCfg.Output,
-					"param_count", len(sinkParams))
-
 				// Execute sink SQL against MSSQL
+				slog.Info("Engine.Handle: executing sink SQL", "sink", sinkCfg.Name, "output", sinkCfg.Output, "param_count", len(sinkParams))
 				ds, err := e.executor.ExecuteDriver(sinkCfg.SQL, sinkParams)
 				if err != nil {
 					slog.Error("Engine.Handle: sink SQL execution failed",
@@ -183,10 +187,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 					return nil, fmt.Errorf("execute sink %s: %w", sinkCfg.Name, err)
 				}
 
-				slog.Debug("Engine.Handle: sink SQL executed successfully",
-					"sink", sinkCfg.Name,
-					"rows", len(ds.Rows),
-					"columns", len(ds.Columns))
+				slog.Info("Engine.Handle: sink SQL executed", "sink", sinkCfg.Name, "rows", len(ds.Rows), "columns", len(ds.Columns))
 
 				// Collect sink operation
 				// Note: OpType should be the original change.Operation, not sinkType.
@@ -416,6 +417,7 @@ func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 	if id, ok := change.Data["id"]; ok {
 		fieldName := shortTable + "_id"
 		params.Fields[fieldName] = id
+		slog.Info("Engine.buildCDCParams: parameter built", "param", fieldName, "value", id)
 		slog.Debug("Engine.buildCDCParams: id field mapped",
 			"field", fieldName,
 			"value", id)
