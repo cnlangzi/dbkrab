@@ -422,7 +422,7 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 //   - EXECUTED: skill matched and produced sinks
 //   - ERROR: skill matched but execution failed
 // Sinks are returned for the caller to write.
-func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *monitor.DB) ([]core.Sink, error) {
+func (p *Plugin) HandleWithPull(tx *core.Transaction, batchCtx *core.BatchContext, logsDB *monitor.DB) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
 	}
@@ -445,7 +445,7 @@ func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext,
 		"table", table,
 		"changes", len(tx.Changes),
 		"skills_count", len(p.Skills.List()),
-		"pull_id", pullCtx.PullID)
+		"batch_id", batchCtx.BatchID)
 
 	// Iterate over all skills
 	for _, skill := range p.Skills.List() { // internal RLock
@@ -459,9 +459,9 @@ func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext,
 			slog.Debug("Plugin.HandleWithPull: skill does not match table, recording SKIP",
 				"skill", skill.Name,
 				"table", table)
-			if logsDB != nil && pullCtx != nil {
+			if logsDB != nil && batchCtx != nil {
 				skillLog := &monitor.SkillLog{
-					PullID:        pullCtx.PullID,
+					BatchID:        batchCtx.BatchID,
 					SkillID:       skill.Id,
 					SkillName:     skill.Name,
 					Operation:     "",
@@ -482,7 +482,7 @@ func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext,
 			"skill", skill.Name)
 
 		// engine.HandleWithPull writes skill log (EXECUTED/SKIP/ERROR)
-		sinks, err := p.engine.HandleWithPull(tx, skill, pullCtx, logsDB)
+		sinks, err := p.engine.HandleWithPull(tx, skill, batchCtx, logsDB)
 		if err != nil {
 			slog.Error("Plugin.HandleWithPull: skill execution failed, skipping skill",
 				"skill", skill.Name,

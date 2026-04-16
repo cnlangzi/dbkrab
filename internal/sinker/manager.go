@@ -95,9 +95,9 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 }
 
 // Write routes sink operations to appropriate sinkers based on Database field.
-// PullCtx provides pull_id for sink_logs correlation.
+// PullCtx provides batch_id for sink_logs correlation.
 // LogsDB receives sink_logs for each sink × table × operation.
-func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *monitor.DB) error {
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext, logsDB *monitor.DB) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil
@@ -141,7 +141,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.Pu
 		writeDuration := time.Since(writeStart)
 
 		// Write sink_logs for observability (per sink × table × operation)
-		if pullCtx != nil && logsDB != nil {
+		if batchCtx != nil && logsDB != nil {
 			for _, sink := range dbSinks {
 				rowsWritten := 0
 				if sink.DataSet != nil {
@@ -157,7 +157,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.Pu
 
 				// Note: SkillName is not available at sinker level, only sink config name
 				sinkLog := &monitor.SinkLog{
-					PullID:       pullCtx.PullID,
+					BatchID:       batchCtx.BatchID,
 					SkillName:    "",
 					SinkName:     sink.Config.Name,
 					OutputTable:  sink.Config.Output,
@@ -169,7 +169,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.Pu
 					CreatedAt:    time.Now(),
 				}
 				if logWriteErr := logsDB.WriteSinkLog(sinkLog); logWriteErr != nil {
-					slog.Warn("failed to write sink_log", "pull_id", pullCtx.PullID, "error", logWriteErr)
+					slog.Warn("failed to write sink_log", "batch_id", batchCtx.BatchID, "error", logWriteErr)
 				}
 			}
 		}

@@ -45,7 +45,7 @@ const (
 // PullLog represents a pull cycle log entry
 type PullLog struct {
 	ID           int64      `json:"id"`
-	PullID       string     `json:"pull_id"`       // UUID with short timestamp
+	BatchID       string     `json:"batch_id"`       // UUID with short timestamp
 	FetchedRows  int        `json:"fetched_rows"`  // Total CDC rows fetched
 	TxCount      int        `json:"tx_count"`      // Number of transactions
 	DLQCount     int        `json:"dlq_count"`     // Number of DLQ entries
@@ -57,7 +57,7 @@ type PullLog struct {
 // SkillLog represents a skill execution log entry
 type SkillLog struct {
 	ID            int64      `json:"id"`
-	PullID        string     `json:"pull_id"`        // Links to pull_logs
+	BatchID        string     `json:"batch_id"`        // Links to batch_logs
 	SkillID       string     `json:"skill_id"`       // Skill hash ID
 	SkillName     string     `json:"skill_name"`     // Skill name
 	Operation     string     `json:"operation"`      // INSERT/UPDATE/DELETE
@@ -71,7 +71,7 @@ type SkillLog struct {
 // SinkLog represents a sink write log entry
 type SinkLog struct {
 	ID           int64      `json:"id"`
-	PullID       string     `json:"pull_id"`        // Links to pull_logs
+	BatchID       string     `json:"batch_id"`        // Links to batch_logs
 	SkillName    string     `json:"skill_name"`     // Skill that produced this sink
 	SinkName     string     `json:"sink_name"`      // Sink config name
 	OutputTable  string     `json:"output_table"`   // Target table name
@@ -146,13 +146,13 @@ func (l *DB) WritePullLog(log *PullLog) error {
 	}
 
 	result, err := l.db.Writer.Exec(`
-		INSERT INTO pull_logs (
-			pull_id, fetched_rows, tx_count, dlq_count, duration_ms, status, created_at
+		INSERT INTO batch_logs (
+			batch_id, fetched_rows, tx_count, dlq_count, duration_ms, status, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, log.PullID, log.FetchedRows, log.TxCount, log.DLQCount,
+	`, log.BatchID, log.FetchedRows, log.TxCount, log.DLQCount,
 		log.DurationMs, log.Status, log.CreatedAt)
 	if err != nil {
-		return fmt.Errorf("insert pull_log: %w", err)
+		return fmt.Errorf("insert batch_log: %w", err)
 	}
 
 	id, err := result.LastInsertId()
@@ -161,8 +161,8 @@ func (l *DB) WritePullLog(log *PullLog) error {
 	}
 	log.ID = id
 
-	slog.Debug("pull_log written",
-		"pull_id", log.PullID,
+	slog.Debug("batch_log written",
+		"batch_id", log.BatchID,
 		"fetched_rows", log.FetchedRows,
 		"tx_count", log.TxCount,
 		"dlq_count", log.DLQCount,
@@ -188,10 +188,10 @@ func (l *DB) WriteSkillLog(log *SkillLog) error {
 
 	result, err := l.db.Writer.Exec(`
 		INSERT INTO skill_logs (
-			pull_id, skill_id, skill_name, operation, rows_processed,
+			batch_id, skill_id, skill_name, operation, rows_processed,
 			status, error_message, duration_ms, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.PullID, log.SkillID, log.SkillName, log.Operation,
+	`, log.BatchID, log.SkillID, log.SkillName, log.Operation,
 		log.RowsProcessed, log.Status, log.ErrorMessage,
 		log.DurationMs, log.CreatedAt)
 	if err != nil {
@@ -205,7 +205,7 @@ func (l *DB) WriteSkillLog(log *SkillLog) error {
 	log.ID = id
 
 	slog.Debug("skill_log written",
-		"pull_id", log.PullID,
+		"batch_id", log.BatchID,
 		"skill_id", log.SkillID,
 		"skill_name", log.SkillName,
 		"operation", log.Operation,
@@ -231,10 +231,10 @@ func (l *DB) WriteSinkLog(log *SinkLog) error {
 
 	result, err := l.db.Writer.Exec(`
 		INSERT INTO sink_logs (
-			pull_id, skill_name, sink_name, output_table, operation,
+			batch_id, skill_name, sink_name, output_table, operation,
 			rows_written, status, error_message, duration_ms, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.PullID, log.SkillName, log.SinkName, log.OutputTable,
+	`, log.BatchID, log.SkillName, log.SinkName, log.OutputTable,
 		log.Operation, log.RowsWritten, log.Status, log.ErrorMessage,
 		log.DurationMs, log.CreatedAt)
 	if err != nil {
@@ -248,7 +248,7 @@ func (l *DB) WriteSinkLog(log *SinkLog) error {
 	log.ID = id
 
 	slog.Debug("sink_log written",
-		"pull_id", log.PullID,
+		"batch_id", log.BatchID,
 		"skill_name", log.SkillName,
 		"sink_name", log.SinkName,
 		"output_table", log.OutputTable,
@@ -268,9 +268,9 @@ func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 	}
 
 	query := `
-		SELECT id, pull_id, fetched_rows, tx_count, dlq_count,
+		SELECT id, batch_id, fetched_rows, tx_count, dlq_count,
 			   duration_ms, status, created_at
-		FROM pull_logs
+		FROM batch_logs
 		ORDER BY created_at DESC
 	`
 	if limit > 0 {
@@ -279,7 +279,7 @@ func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 
 	rows, err := l.db.Reader.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("query pull_logs: %w", err)
+		return nil, fmt.Errorf("query batch_logs: %w", err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
@@ -291,10 +291,10 @@ func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 	for rows.Next() {
 		log := &PullLog{}
 		if err := rows.Scan(
-			&log.ID, &log.PullID, &log.FetchedRows, &log.TxCount, &log.DLQCount,
+			&log.ID, &log.BatchID, &log.FetchedRows, &log.TxCount, &log.DLQCount,
 			&log.DurationMs, &log.Status, &log.CreatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan pull_log: %w", err)
+			return nil, fmt.Errorf("scan batch_log: %w", err)
 		}
 		logs = append(logs, log)
 	}
@@ -302,7 +302,7 @@ func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 	return logs, rows.Err()
 }
 
-// ListSkillLogs retrieves skill logs for a specific pull_id
+// ListSkillLogs retrieves skill logs for a specific batch_id
 func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -312,10 +312,10 @@ func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 	}
 
 	query := `
-		SELECT id, pull_id, skill_id, skill_name, operation, rows_processed,
+		SELECT id, batch_id, skill_id, skill_name, operation, rows_processed,
 			   status, error_message, duration_ms, created_at
 		FROM skill_logs
-		WHERE pull_id = ?
+		WHERE batch_id = ?
 		ORDER BY created_at DESC
 	`
 	if limit > 0 {
@@ -337,7 +337,7 @@ func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 		log := &SkillLog{}
 		var errMsg string
 		if err := rows.Scan(
-			&log.ID, &log.PullID, &log.SkillID, &log.SkillName, &log.Operation,
+			&log.ID, &log.BatchID, &log.SkillID, &log.SkillName, &log.Operation,
 			&log.RowsProcessed, &log.Status, &errMsg, &log.DurationMs, &log.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan skill_log: %w", err)
@@ -351,7 +351,7 @@ func (l *DB) ListSkillLogs(pullID string, limit int) ([]*SkillLog, error) {
 	return logs, rows.Err()
 }
 
-// ListSinkLogs retrieves sink logs for a specific pull_id
+// ListSinkLogs retrieves sink logs for a specific batch_id
 func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -361,10 +361,10 @@ func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 	}
 
 	query := `
-		SELECT id, pull_id, skill_name, sink_name, output_table, operation,
+		SELECT id, batch_id, skill_name, sink_name, output_table, operation,
 			   rows_written, status, error_message, duration_ms, created_at
 		FROM sink_logs
-		WHERE pull_id = ?
+		WHERE batch_id = ?
 		ORDER BY created_at DESC
 	`
 	if limit > 0 {
@@ -386,7 +386,7 @@ func (l *DB) ListSinkLogs(pullID string, limit int) ([]*SinkLog, error) {
 		log := &SinkLog{}
 		var errMsg string
 		if err := rows.Scan(
-			&log.ID, &log.PullID, &log.SkillName, &log.SinkName, &log.OutputTable,
+			&log.ID, &log.BatchID, &log.SkillName, &log.SinkName, &log.OutputTable,
 			&log.Operation, &log.RowsWritten, &log.Status, &errMsg,
 			&log.DurationMs, &log.CreatedAt,
 		); err != nil {
@@ -426,7 +426,7 @@ func (l *DB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
 	// Total pulls
 	var totalPulls int
 	err := l.db.Reader.QueryRow(`
-		SELECT COUNT(*) FROM pull_logs WHERE created_at >= ?
+		SELECT COUNT(*) FROM batch_logs WHERE created_at >= ?
 	`, since).Scan(&totalPulls)
 	if err != nil {
 		return nil, fmt.Errorf("count pulls: %w", err)
@@ -439,7 +439,7 @@ func (l *DB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
 			SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END),
 			SUM(CASE WHEN status = 'PARTIAL' THEN 1 ELSE 0 END),
 			SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END)
-		FROM pull_logs WHERE created_at >= ?
+		FROM batch_logs WHERE created_at >= ?
 	`, since).Scan(&success, &partial, &failed)
 	if err != nil {
 		return nil, fmt.Errorf("count by status: %w", err)
@@ -453,7 +453,7 @@ func (l *DB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
 			SUM(fetched_rows),
 			SUM(dlq_count),
 			AVG(duration_ms)
-		FROM pull_logs WHERE created_at >= ?
+		FROM batch_logs WHERE created_at >= ?
 	`, since).Scan(&totalRows, &totalDLQ, &avgDurationMs)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate stats: %w", err)

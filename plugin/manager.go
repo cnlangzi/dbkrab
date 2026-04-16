@@ -104,10 +104,10 @@ func (m *Manager) Unload(name string) error {
 }
 
 // Handle processes a transaction through all SQL plugins with pull context.
-// PullCtx provides pull_id for observability logging.
+// PullCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
 // Sink logs are written by the sinker for each sink write (per sink × table × operation).
-func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *core.PullContext) error {
+func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -116,7 +116,7 @@ func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *cor
 	if m.sqlPlugin != nil {
 		// Process transaction through SQL plugin
 		// Skill logs are written internally by engine.HandleWithPull
-		sinks, err := m.sqlPlugin.HandleWithPull(tx, pullCtx, m.monitorDB)
+		sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
 		if err != nil {
 			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
 		}
@@ -125,7 +125,7 @@ func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *cor
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
-		if err := m.swManager.Write(ctx, allSinks, pullCtx, m.monitorDB); err != nil {
+		if err := m.swManager.Write(ctx, allSinks, batchCtx, m.monitorDB); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}

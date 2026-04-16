@@ -135,9 +135,9 @@ type Store interface {
 }
 
 // Handler interface for custom processing.
-// PullCtx provides observability context (pull_id) for logging correlation.
+// PullCtx provides observability context (batch_id) for logging correlation.
 type Handler interface {
-	Handle(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
+	Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -149,11 +149,11 @@ type CDCQuerier interface {
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
+type PluginHandler func(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, pullCtx *PullContext) error {
-	return h(ctx, tx, pullCtx)
+func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
+	return h(ctx, tx, batchCtx)
 }
 
 type tablePollResult struct {
@@ -517,8 +517,8 @@ func (p *Poller) poll(ctx context.Context) error {
 
 // processDirect processes changes without transaction buffer (legacy behavior)
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
-	// Create PullContext for this poll cycle
-	pullCtx := NewPullContext()
+	// Create BatchContext for this poll cycle
+	batchCtx := NewBatchContext()
 	
 	syncStartTime := time.Now()
 
@@ -539,12 +539,12 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, &tx, pullCtx)
+				handlerErr = p.handler.Handle(ctx, &tx, batchCtx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
 				slog.Error("handler error",
-					"pull_id", pullCtx.PullID,
+					"batch_id", batchCtx.BatchID,
 					"tx_id", tx.ID,
 					"error", err)
 				p.writeToDLQ(&tx, err, "handler")
@@ -602,7 +602,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		return err
 	}
 
-	// Write pull_log to logs.db for observability
+	// Write batch_log to logs.db for observability
 	if p.monitorDB != nil {
 		pullStatus := monitor.PullStatusSuccess
 		if dlqCount > 0 {
@@ -614,7 +614,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 
 		totalDuration := time.Since(fetchTime)
 		pullLog := &monitor.PullLog{
-			PullID:      pullCtx.PullID,
+			BatchID:      batchCtx.BatchID,
 			FetchedRows: len(allChanges),
 			TxCount:     len(txs),
 			DLQCount:    dlqCount,
@@ -623,7 +623,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			CreatedAt:   fetchTime,
 		}
 		if err := p.monitorDB.WritePullLog(pullLog); err != nil {
-			slog.Warn("failed to write pull_log", "pull_id", pullCtx.PullID, "error", err)
+			slog.Warn("failed to write batch_log", "batch_id", batchCtx.BatchID, "error", err)
 		}
 		// Flush logs db to ensure observability data is persisted
 		if err := p.monitorDB.Flush(); err != nil {
@@ -749,12 +749,12 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 		p.metricsMu.Unlock()
 
 		// Emit structured INFO summary log for non-empty polls
-		// Includes pull_ms, write_ms (store_ms), and flush_ms for bottleneck analysis
+		// Includes batch_ms, write_ms (store_ms), and flush_ms for bottleneck analysis
 		slog.Info("[poll cycle]",
 			"cdc_fetched", len(allChanges),
 			"inserted", actualInserted,
 			"tx_count", txCount,
-			"pull_ms", pullDuration.Milliseconds(),
+			"batch_ms", pullDuration.Milliseconds(),
 			"write_ms", storeDuration.Milliseconds(),
 			"flush_ms", flushDuration.Milliseconds(),
 			"dlq", dlqCount,
@@ -1189,7 +1189,7 @@ func (p *Poller) GetMetrics() map[string]interface{} {
 		"last_processed_tx":     m.ProcessedTx,
 		"last_sync_tps":         m.SyncTPS,
 		"last_sync_duration_ms": m.SyncDurationMs,
-		"last_pull_ms":          m.PullDurationMs,
+		"last_batch_ms":          m.PullDurationMs,
 		"last_write_ms":         m.StoreDurationMs,
 		"last_flush_ms":         m.FlushDurationMs,
 		"last_dlq_count":        m.DLQCount,
