@@ -1,4 +1,4 @@
-package observe
+package monitor
 
 import (
 	"context"
@@ -115,7 +115,7 @@ func New(ctx context.Context, dbPath string) (*LogsDB, error) {
 func runMigrations(db *sqlite.DB) error {
 	sqleDB := sqle.Open(db.Writer.DB)
 	migrator := migrate.New(sqleDB)
-	if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-logs")); err != nil {
+	if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-monitor")); err != nil {
 		return fmt.Errorf("discover migrations: %w", err)
 	}
 

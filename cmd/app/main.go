@@ -17,7 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/logging"
 	"github.com/cnlangzi/dbkrab/internal/offset"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
@@ -156,18 +156,18 @@ func main() {
 	}()
 	slog.Info("dead letter queue initialized", "path", cfg.App.DB.DLQ)
 
-	// Create observability logs DB
-	logsDB, err := observe.New(ctx, cfg.App.DB.Logs)
+	// Create monitor DB
+	monitorDB, err := monitor.New(ctx, cfg.App.DB.Monitor)
 	if err != nil {
-		slog.Error("failed to create logs DB", "error", err)
+		slog.Error("failed to create monitor DB", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := logsDB.Close(); err != nil {
-			slog.Warn("logsDB.Close error", "error", err)
+		if err := monitorDB.Close(); err != nil {
+			slog.Warn("monitorDB.Close error", "error", err)
 		}
 	}()
-	slog.Info("observability logs initialized", "path", cfg.App.DB.Logs)
+	slog.Info("monitor initialized", "path", cfg.App.DB.Monitor)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
@@ -181,7 +181,7 @@ func main() {
 
 	// Create plugin manager
 	pluginManager := plugin.NewManager()
-	pluginManager.SetLogsDB(logsDB)
+	pluginManager.SetMonitorDB(monitorDB)
 
 	// Create config watcher for hot reload
 	configWatcher, err := config.NewWatcher(*configPath, cfg)
@@ -198,7 +198,7 @@ func main() {
 
 	// Create poller with dynamic plugin support
 	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore)
-	poller.SetLogsDB(logsDB)
+	poller.SetMonitorDB(monitorDB)
 	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction, pullCtx *core.PullContext) error {
 		return pluginManager.Handle(ctx, tx, pullCtx)
 	}))

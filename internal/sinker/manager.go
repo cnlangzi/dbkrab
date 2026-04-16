@@ -11,7 +11,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -97,7 +97,7 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 // Write routes sink operations to appropriate sinkers based on Database field.
 // PullCtx provides pull_id for sink_logs correlation.
 // LogsDB receives sink_logs for each sink × table × operation.
-func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *observe.LogsDB) error {
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.PullContext, logsDB *monitor.LogsDB) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil
@@ -148,15 +148,15 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, pullCtx *core.Pu
 					rowsWritten = len(sink.DataSet.Rows)
 				}
 
-				sinkStatus := observe.SinkStatusSuccess
+				sinkStatus := monitor.SinkStatusSuccess
 				var errMsg string
 				if writeErr != nil {
-					sinkStatus = observe.SinkStatusError
+					sinkStatus = monitor.SinkStatusError
 					errMsg = writeErr.Error()
 				}
 
 				// Note: SkillName is not available at sinker level, only sink config name
-				sinkLog := &observe.SinkLog{
+				sinkLog := &monitor.SinkLog{
 					PullID:       pullCtx.PullID,
 					SkillName:    "",
 					SinkName:     sink.Config.Name,

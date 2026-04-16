@@ -10,7 +10,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/plugin/sql"
 )
@@ -20,7 +20,7 @@ type Manager struct {
 	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
 	sqlPlugin *sql.Plugin        // direct reference to SQLPlugin for fast access
 	swManager *sinker.Manager    // Routes sinks to appropriate writers
-	logsDB    *observe.LogsDB    // Observability logs database
+	monitorDB *monitor.LogsDB    // Observability logs database
 	mu        sync.RWMutex
 }
 
@@ -32,11 +32,11 @@ func NewManager() *Manager {
 	}
 }
 
-// SetLogsDB sets the observability logs database
-func (m *Manager) SetLogsDB(logsDB *observe.LogsDB) {
+// SetMonitorDB sets the observability logs database
+func (m *Manager) SetMonitorDB(monitorDB *monitor.LogsDB) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.logsDB = logsDB
+	m.monitorDB = monitorDB
 }
 
 // Init initializes all SQL plugins based on the provided config.
@@ -121,7 +121,7 @@ func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *cor
 	if m.sqlPlugin != nil {
 		// Process transaction through SQL plugin
 		// Skill logs are written internally by engine.HandleWithPull
-		sinks, err := m.sqlPlugin.HandleWithPull(tx, pullCtx, m.logsDB)
+		sinks, err := m.sqlPlugin.HandleWithPull(tx, pullCtx, m.monitorDB)
 		if err != nil {
 			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
 		}
@@ -130,14 +130,14 @@ func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *cor
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
-		if err := m.swManager.Write(ctx, allSinks, pullCtx, m.logsDB); err != nil {
+		if err := m.swManager.Write(ctx, allSinks, pullCtx, m.monitorDB); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}
 
 	// Flush logs db
-	if m.logsDB != nil {
-		if err := m.logsDB.Flush(); err != nil {
+	if m.monitorDB != nil {
+		if err := m.monitorDB.Flush(); err != nil {
 			slog.Warn("failed to flush logs_db", "error", err)
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 )
 
 // Engine is the SQL Plugin execution engine
@@ -43,7 +43,7 @@ func (e *Engine) HandleWithSkill(tx *core.Transaction, skill *Skill) ([]core.Sin
 // Skill log is written with EXECUTED status and rows_processed from returned sinks.
 // If no sinks are produced (if condition not met), SKIP is logged with rows_processed=0.
 // If execution fails, ERROR is logged.
-func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *core.PullContext, logsDB *observe.LogsDB) ([]core.Sink, error) {
+func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *core.PullContext, logsDB *monitor.LogsDB) ([]core.Sink, error) {
 	original := e.skill
 	e.skill = skill
 	defer func() { e.skill = original }()
@@ -55,13 +55,13 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *cor
 	if err != nil {
 		// Execution error
 		if logsDB != nil && pullCtx != nil {
-			skillLog := &observe.SkillLog{
+			skillLog := &monitor.SkillLog{
 				PullID:        pullCtx.PullID,
 				SkillID:       skill.Id,
 				SkillName:     skill.Name,
 				Operation:     "",
 				RowsProcessed: 0,
-				Status:        observe.SkillStatusError,
+				Status:        monitor.SkillStatusError,
 				ErrorMessage:  err.Error(),
 				DurationMs:   duration.Milliseconds(),
 				CreatedAt:     time.Now(),
@@ -82,13 +82,13 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, pullCtx *cor
 	}
 
 	// Determine status: EXECUTED (had sinks) or SKIP (matched but no sinks)
-	status := observe.SkillStatusExecuted
+	status := monitor.SkillStatusExecuted
 	if rowsProcessed == 0 {
-		status = observe.SkillStatusSkip
+		status = monitor.SkillStatusSkip
 	}
 
 	if logsDB != nil && pullCtx != nil {
-		skillLog := &observe.SkillLog{
+		skillLog := &monitor.SkillLog{
 			PullID:        pullCtx.PullID,
 			SkillID:       skill.Id,
 			SkillName:     skill.Name,

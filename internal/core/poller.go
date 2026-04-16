@@ -17,7 +17,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/offset"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
@@ -101,7 +101,7 @@ type Poller struct {
 	store        Store
 	handler       Handler
 	dlq           *dlq.DLQ           // DLQ store
-	logsDB        *observe.LogsDB     // Observability logs database
+	monitorDB *monitor.LogsDB     // Observability logs database
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	paused        bool
@@ -259,9 +259,9 @@ func (p *Poller) SetHandler(h Handler) {
 	p.handler = h
 }
 
-// SetLogsDB sets the observability logs database
-func (p *Poller) SetLogsDB(logsDB *observe.LogsDB) {
-	p.logsDB = logsDB
+// SetMonitorDB sets the observability logs database
+func (p *Poller) SetMonitorDB(monitorDB *monitor.LogsDB) {
+	p.monitorDB = monitorDB
 }
 
 // SetReloadChan sets the config reload channel for hot reload
@@ -607,17 +607,17 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	}
 
 	// Write pull_log to logs.db for observability
-	if p.logsDB != nil {
-		pullStatus := observe.PullStatusSuccess
+	if p.monitorDB != nil {
+		pullStatus := monitor.PullStatusSuccess
 		if dlqCount > 0 {
-			pullStatus = observe.PullStatusPartial
+			pullStatus = monitor.PullStatusPartial
 		}
 		if len(handlerErrors) > 0 || len(processErrors) > 0 {
-			pullStatus = observe.PullStatusFailed
+			pullStatus = monitor.PullStatusFailed
 		}
 
 		totalDuration := time.Since(fetchTime)
-		pullLog := &observe.PullLog{
+		pullLog := &monitor.PullLog{
 			PullID:      pullCtx.PullID,
 			FetchedRows: len(allChanges),
 			TxCount:     len(txs),
@@ -626,11 +626,11 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			Status:      pullStatus,
 			CreatedAt:   fetchTime,
 		}
-		if err := p.logsDB.WritePullLog(pullLog); err != nil {
+		if err := p.monitorDB.WritePullLog(pullLog); err != nil {
 			slog.Warn("failed to write pull_log", "pull_id", pullCtx.PullID, "error", err)
 		}
 		// Flush logs db to ensure observability data is persisted
-		if err := p.logsDB.Flush(); err != nil {
+		if err := p.monitorDB.Flush(); err != nil {
 			slog.Warn("failed to flush logs_db", "error", err)
 		}
 	}

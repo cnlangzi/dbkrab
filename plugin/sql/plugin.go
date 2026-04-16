@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/observe"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -422,7 +422,7 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 //   - EXECUTED: skill matched and produced sinks
 //   - ERROR: skill matched but execution failed
 // Sinks are returned for the caller to write.
-func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *observe.LogsDB) ([]core.Sink, error) {
+func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *monitor.LogsDB) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
 		return nil, nil
 	}
@@ -460,13 +460,13 @@ func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext,
 				"skill", skill.Name,
 				"table", table)
 			if logsDB != nil && pullCtx != nil {
-				skillLog := &observe.SkillLog{
+				skillLog := &monitor.SkillLog{
 					PullID:        pullCtx.PullID,
 					SkillID:       skill.Id,
 					SkillName:     skill.Name,
 					Operation:     "",
 					RowsProcessed: 0,
-					Status:        observe.SkillStatusSkip,
+					Status:        monitor.SkillStatusSkip,
 					ErrorMessage:  "",
 					DurationMs:    0,
 					CreatedAt:     time.Now(),
