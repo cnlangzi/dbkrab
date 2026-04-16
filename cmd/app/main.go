@@ -196,8 +196,7 @@ func main() {
 	slog.Info("config watcher initialized", "path", *configPath)
 
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore)
-	poller.SetMonitorDB(monitorDB)
+	poller := core.NewPoller(cfg, mssqlDB, appStore, offsetStore, dlqStore, monitorDB)
 	poller.SetHandler(core.PluginHandler(func(ctx context.Context, tx *core.Transaction, pullCtx *core.PullContext) error {
 		return pluginManager.Handle(ctx, tx, pullCtx)
 	}))

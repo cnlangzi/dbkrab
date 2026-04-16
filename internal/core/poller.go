@@ -222,19 +222,20 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.LogsDB) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
-		cfg:      cfg,
-		db:       db,
-		querier:  cdc.NewQuerier(db, mssqlTimezone),
-		cdcAdmin: cdcadmin.NewAdmin(&cfg.MSSQL),
-		offsets:  offsetStore,
-		store:    store,
-		dlq:      dlqStore,
-		stopCh:   make(chan struct{}),
+		cfg:       cfg,
+		db:        db,
+		querier:   cdc.NewQuerier(db, mssqlTimezone),
+		cdcAdmin:  cdcadmin.NewAdmin(&cfg.MSSQL),
+		offsets:   offsetStore,
+		store:     store,
+		dlq:       dlqStore,
+		monitorDB: monitorDB,
+		stopCh:    make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
 
@@ -257,11 +258,6 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 // SetHandler sets a custom handler
 func (p *Poller) SetHandler(h Handler) {
 	p.handler = h
-}
-
-// SetMonitorDB sets the observability logs database
-func (p *Poller) SetMonitorDB(monitorDB *monitor.LogsDB) {
-	p.monitorDB = monitorDB
 }
 
 // SetReloadChan sets the config reload channel for hot reload
