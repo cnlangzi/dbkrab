@@ -347,12 +347,18 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 			if len(hexStr) >= 2 && hexStr[:2] == "0x" {
 				hexStr = hexStr[2:]
 			}
-			lsnBytes, _ = hex.DecodeString(hexStr)
+			if decoded, err := hex.DecodeString(hexStr); err != nil {
+				slog.Warn("failed to decode LSN hex", "lsn", lsnStr, "error", err)
+				lsnBytes = nil
+			} else {
+				lsnBytes = decoded
+			}
 		}
 
 		// Parse JSON data to map
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+			slog.Warn("failed to parse JSON data", "id", id, "lsn", lsnStr, "error", err)
 			data = make(map[string]interface{})
 		}
 

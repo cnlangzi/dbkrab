@@ -50,6 +50,17 @@ func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
 
 	// Process each LSN in order
 	for i, lsn := range lsns {
+		// Honor caller cancellation between LSNs
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			slog.Warn("replay cancelled",
+				"error", ctxErr,
+				"processed", result.ProcessedLSNs,
+				"failed", result.FailedLSNs,
+				"total", len(lsns),
+			)
+			return result, ctxErr
+		}
+
 		if err := r.replayLSN(ctx, lsn, result); err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
@@ -87,6 +98,12 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 
 	// Build transaction from changes
 	tx := r.buildTransaction(changes)
+
+	// Skip if transaction has no changes (all were UPDATE_BEFORE)
+	if len(tx.Changes) == 0 {
+		slog.Debug("replayLSN: skip LSN with no valid changes after filtering UPDATE_BEFORE", "lsn", lsn)
+		return nil
+	}
 
 	// Handle the transaction
 	if err := r.handler.Handle(ctx, tx); err != nil {
