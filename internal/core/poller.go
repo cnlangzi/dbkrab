@@ -613,7 +613,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		}
 
 		totalDuration := time.Since(fetchTime)
-		pullLog := &monitor.PullLog{
+		batchLog := &monitor.BatchLog{
 			BatchID:      batchCtx.BatchID,
 			FetchedRows: len(allChanges),
 			TxCount:     len(txs),
@@ -622,7 +622,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			Status:      pullStatus,
 			CreatedAt:   fetchTime,
 		}
-		if err := p.monitorDB.WritePullLog(pullLog); err != nil {
+		if err := p.monitorDB.WriteBatchLog(batchLog); err != nil {
 			slog.Warn("failed to write batch_log", "batch_id", batchCtx.BatchID, "error", err)
 		}
 		// Flush logs db to ensure observability data is persisted

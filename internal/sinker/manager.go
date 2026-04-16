@@ -97,7 +97,7 @@ func (m *Manager) createSQLiteSinker(name string, dbConfig config.SinkConfig) (*
 // Write routes sink operations to appropriate sinkers based on Database field.
 // BatchCtx provides batch_id for sink_logs correlation.
 // LogsDB receives sink_logs for each sink × table × operation.
-func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext, logsDB *monitor.DB) error {
+func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext, monitorDB *monitor.DB) error {
 	if len(sinks) == 0 {
 		slog.Debug("SinkerManager.Write: no sinks to write")
 		return nil
@@ -141,7 +141,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.B
 		writeDuration := time.Since(writeStart)
 
 		// Write sink_logs for observability (per sink × table × operation)
-		if batchCtx != nil && logsDB != nil {
+		if batchCtx != nil && monitorDB != nil {
 			for _, sink := range dbSinks {
 				rowsWritten := 0
 				if sink.DataSet != nil {
@@ -168,7 +168,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.B
 					DurationMs:   writeDuration.Milliseconds(),
 					CreatedAt:    time.Now(),
 				}
-				if logWriteErr := logsDB.WriteSinkLog(sinkLog); logWriteErr != nil {
+				if logWriteErr := monitorDB.WriteSinkLog(sinkLog); logWriteErr != nil {
 					slog.Warn("failed to write sink_log", "batch_id", batchCtx.BatchID, "error", logWriteErr)
 				}
 			}

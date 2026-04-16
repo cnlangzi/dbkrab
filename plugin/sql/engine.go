@@ -43,7 +43,7 @@ func (e *Engine) HandleWithSkill(tx *core.Transaction, skill *Skill) ([]core.Sin
 // Skill log is written with EXECUTED status and rows_processed from returned sinks.
 // If no sinks are produced (if condition not met), SKIP is logged with rows_processed=0.
 // If execution fails, ERROR is logged.
-func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *core.BatchContext, logsDB *monitor.DB) ([]core.Sink, error) {
+func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *core.BatchContext, monitorDB *monitor.DB) ([]core.Sink, error) {
 	original := e.skill
 	e.skill = skill
 	defer func() { e.skill = original }()
@@ -54,7 +54,7 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 
 	if err != nil {
 		// Execution error
-		if logsDB != nil && batchCtx != nil {
+		if monitorDB != nil && batchCtx != nil {
 			skillLog := &monitor.SkillLog{
 				BatchID:        batchCtx.BatchID,
 				SkillID:       skill.Id,
@@ -66,7 +66,7 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 				DurationMs:   duration.Milliseconds(),
 				CreatedAt:     time.Now(),
 			}
-			if writeErr := logsDB.WriteSkillLog(skillLog); writeErr != nil {
+			if writeErr := monitorDB.WriteSkillLog(skillLog); writeErr != nil {
 				slog.Warn("failed to write skill_log", "skill", skill.Name, "error", writeErr)
 			}
 		}
@@ -87,7 +87,7 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 		status = monitor.SkillStatusSkip
 	}
 
-	if logsDB != nil && batchCtx != nil {
+	if monitorDB != nil && batchCtx != nil {
 		skillLog := &monitor.SkillLog{
 			BatchID:        batchCtx.BatchID,
 			SkillID:       skill.Id,
@@ -99,7 +99,7 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 			DurationMs:    duration.Milliseconds(),
 			CreatedAt:     time.Now(),
 		}
-		if writeErr := logsDB.WriteSkillLog(skillLog); writeErr != nil {
+		if writeErr := monitorDB.WriteSkillLog(skillLog); writeErr != nil {
 			slog.Warn("failed to write skill_log", "skill", skill.Name, "error", writeErr)
 		}
 	}

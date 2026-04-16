@@ -42,8 +42,8 @@ const (
 	SinkStatusError   SinkStatus = "ERROR"
 )
 
-// PullLog represents a batch log entry
-type PullLog struct {
+// BatchLog represents a batch log entry
+type BatchLog struct {
 	BatchID       string     `json:"batch_id"`       // UUID with short timestamp (primary key)
 	FetchedRows  int        `json:"fetched_rows"`  // Total CDC rows fetched
 	TxCount      int        `json:"tx_count"`      // Number of transactions
@@ -138,8 +138,8 @@ func (l *DB) Flush() error {
 	return l.db.Flush()
 }
 
-// WritePullLog writes a pull cycle log entry
-func (l *DB) WritePullLog(log *PullLog) error {
+// WriteBatchLog writes a pull cycle log entry
+func (l *DB) WriteBatchLog(log *BatchLog) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -259,8 +259,8 @@ func (l *DB) WriteSinkLog(log *SinkLog) error {
 	return nil
 }
 
-// ListPullLogs retrieves pull logs with optional limit
-func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
+// ListBatchLogs retrieves pull logs with optional limit
+func (l *DB) ListBatchLogs(limit int) ([]*BatchLog, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -287,9 +287,9 @@ func (l *DB) ListPullLogs(limit int) ([]*PullLog, error) {
 		}
 	}()
 
-	var logs []*PullLog
+	var logs []*BatchLog
 	for rows.Next() {
-		log := &PullLog{}
+		log := &BatchLog{}
 		if err := rows.Scan(
 			&log.BatchID, &log.FetchedRows, &log.TxCount, &log.DLQCount,
 			&log.DurationMs, &log.Status, &log.CreatedAt,
@@ -414,8 +414,8 @@ func (l *DB) Close() error {
 	return l.db.Close()
 }
 
-// GetPullLogStats returns statistics for recent pull logs
-func (l *DB) GetPullLogStats(since time.Time) (map[string]interface{}, error) {
+// GetBatchLogStats returns statistics for recent pull logs
+func (l *DB) GetBatchLogStats(since time.Time) (map[string]interface{}, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 

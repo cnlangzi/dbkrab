@@ -14,11 +14,11 @@ func TestDB_New(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Check that file was created
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -26,19 +26,19 @@ func TestDB_New(t *testing.T) {
 	}
 }
 
-func TestDB_WritePullLog(t *testing.T) {
+func TestDB_WriteBatchLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Test successful pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-001",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -48,17 +48,17 @@ func TestDB_WritePullLog(t *testing.T) {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
 	// Flush to ensure data is committed before reading
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
 	// Verify the log was written
-	logs, err := logsDB.ListPullLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10)
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -76,19 +76,19 @@ func TestDB_WritePullLog(t *testing.T) {
 	}
 }
 
-func TestDB_WritePullLog_Partial(t *testing.T) {
+func TestDB_WriteBatchLog_Partial(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Test partial pull log (with DLQ entries)
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-002",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -98,15 +98,15 @@ func TestDB_WritePullLog_Partial(t *testing.T) {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListPullLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10)
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -124,19 +124,19 @@ func TestDB_WritePullLog_Partial(t *testing.T) {
 	}
 }
 
-func TestDB_WritePullLog_Failed(t *testing.T) {
+func TestDB_WriteBatchLog_Failed(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Test failed pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-003",
 		FetchedRows: 0,
 		TxCount:     0,
@@ -146,15 +146,15 @@ func TestDB_WritePullLog_Failed(t *testing.T) {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListPullLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10)
 	if err != nil {
 		t.Fatalf("Failed to list pull logs: %v", err)
 	}
@@ -173,14 +173,14 @@ func TestDB_WriteSkillLog(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// First write a pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-004",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -189,7 +189,7 @@ func TestDB_WriteSkillLog(t *testing.T) {
 		Status:      PullStatusSuccess,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
@@ -205,15 +205,15 @@ func TestDB_WriteSkillLog(t *testing.T) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := logsDB.WriteSkillLog(skillLog); err != nil {
+	if err := monitorDB.WriteSkillLog(skillLog); err != nil {
 		t.Fatalf("Failed to write skill log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListSkillLogs("test-pull-004", 10)
+	logs, err := monitorDB.ListSkillLogs("test-pull-004", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -236,14 +236,14 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-005",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -252,7 +252,7 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 		Status:      PullStatusSuccess,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
@@ -268,15 +268,15 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := logsDB.WriteSkillLog(skillLog); err != nil {
+	if err := monitorDB.WriteSkillLog(skillLog); err != nil {
 		t.Fatalf("Failed to write skill log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListSkillLogs("test-pull-005", 10)
+	logs, err := monitorDB.ListSkillLogs("test-pull-005", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -295,14 +295,14 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-006",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -311,7 +311,7 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 		Status:      PullStatusPartial,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
@@ -328,15 +328,15 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := logsDB.WriteSkillLog(skillLog); err != nil {
+	if err := monitorDB.WriteSkillLog(skillLog); err != nil {
 		t.Fatalf("Failed to write skill log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListSkillLogs("test-pull-006", 10)
+	logs, err := monitorDB.ListSkillLogs("test-pull-006", 10)
 	if err != nil {
 		t.Fatalf("Failed to list skill logs: %v", err)
 	}
@@ -359,14 +359,14 @@ func TestDB_WriteSinkLog(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-007",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -375,7 +375,7 @@ func TestDB_WriteSinkLog(t *testing.T) {
 		Status:      PullStatusSuccess,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
@@ -392,15 +392,15 @@ func TestDB_WriteSinkLog(t *testing.T) {
 		CreatedAt:    time.Now(),
 	}
 
-	if err := logsDB.WriteSinkLog(sinkLog); err != nil {
+	if err := monitorDB.WriteSinkLog(sinkLog); err != nil {
 		t.Fatalf("Failed to write sink log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListSinkLogs("test-pull-007", 10)
+	logs, err := monitorDB.ListSinkLogs("test-pull-007", 10)
 	if err != nil {
 		t.Fatalf("Failed to list sink logs: %v", err)
 	}
@@ -423,14 +423,14 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write pull log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-008",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -439,7 +439,7 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 		Status:      PullStatusPartial,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
@@ -457,15 +457,15 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 		CreatedAt:    time.Now(),
 	}
 
-	if err := logsDB.WriteSinkLog(sinkLog); err != nil {
+	if err := monitorDB.WriteSinkLog(sinkLog); err != nil {
 		t.Fatalf("Failed to write sink log: %v", err)
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
-	logs, err := logsDB.ListSinkLogs("test-pull-008", 10)
+	logs, err := monitorDB.ListSinkLogs("test-pull-008", 10)
 	if err != nil {
 		t.Fatalf("Failed to list sink logs: %v", err)
 	}
@@ -483,16 +483,16 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 	}
 }
 
-func TestDB_GetPullLogStats(t *testing.T) {
+func TestDB_GetBatchLogStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write multiple pull logs with different statuses
 	now := time.Now()
@@ -505,7 +505,7 @@ func TestDB_GetPullLogStats(t *testing.T) {
 			status = PullStatusFailed
 		}
 
-		pullLog := &PullLog{
+		pullLog := &BatchLog{
 			BatchID:      string(rune('a' + i)),
 			FetchedRows: 100,
 			TxCount:     5,
@@ -514,17 +514,17 @@ func TestDB_GetPullLogStats(t *testing.T) {
 			Status:      status,
 			CreatedAt:   now.Add(time.Duration(i) * time.Minute),
 		}
-		if err := logsDB.WritePullLog(pullLog); err != nil {
+		if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 			t.Fatalf("Failed to write pull log: %v", err)
 		}
 	}
 
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
 	// Get stats for all time
-	stats, err := logsDB.GetPullLogStats(now.Add(-10 * time.Minute))
+	stats, err := monitorDB.GetBatchLogStats(now.Add(-10 * time.Minute))
 	if err != nil {
 		t.Fatalf("Failed to get pull log stats: %v", err)
 	}
@@ -551,16 +551,16 @@ func TestDB_Closed(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
 
 	// Close the database
-	logsDB.Close()
+	monitorDB.Close()
 
 	// Try to write after close - should fail
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-closed",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -570,7 +570,7 @@ func TestDB_Closed(t *testing.T) {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := logsDB.WritePullLog(pullLog); err != ErrLogsClosed {
+	if err := monitorDB.WriteBatchLog(pullLog); err != ErrLogsClosed {
 		t.Errorf("Expected ErrLogsClosed, got %v", err)
 	}
 }
@@ -580,14 +580,14 @@ func TestDB_Flush(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "logs.db")
 
 	ctx := context.Background()
-	logsDB, err := New(ctx, dbPath)
+	monitorDB, err := New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create DB: %v", err)
 	}
-	defer logsDB.Close()
+	defer monitorDB.Close()
 
 	// Write a log
-	pullLog := &PullLog{
+	pullLog := &BatchLog{
 		BatchID:      "test-pull-flush",
 		FetchedRows: 100,
 		TxCount:     5,
@@ -596,17 +596,17 @@ func TestDB_Flush(t *testing.T) {
 		Status:      PullStatusSuccess,
 		CreatedAt:   time.Now(),
 	}
-	if err := logsDB.WritePullLog(pullLog); err != nil {
+	if err := monitorDB.WriteBatchLog(pullLog); err != nil {
 		t.Fatalf("Failed to write pull log: %v", err)
 	}
 
 	// Flush
-	if err := logsDB.Flush(); err != nil {
+	if err := monitorDB.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 
 	// Read should work after flush
-	logs, err := logsDB.ListPullLogs(10)
+	logs, err := monitorDB.ListBatchLogs(10)
 	if err != nil {
 		t.Fatalf("Failed to list pull logs after flush: %v", err)
 	}
