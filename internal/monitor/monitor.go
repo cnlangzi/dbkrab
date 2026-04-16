@@ -103,6 +103,14 @@ func New(ctx context.Context, dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
+	// Flush to ensure migrations are committed
+	if err := db.Flush(); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			slog.Warn("logs db close error", "error", closeErr)
+		}
+		return nil, fmt.Errorf("flush after migrations: %w", err)
+	}
+
 	slog.Info("observability logs database initialized", "path", dbPath)
 
 	return &DB{
