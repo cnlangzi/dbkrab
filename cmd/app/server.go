@@ -18,6 +18,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
@@ -43,41 +44,37 @@ type PollMetricsProvider interface {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager       *plugin.Manager
-	dlq           *dlq.DLQ
-	cdcAdmin      *cdcadmin.Admin
-	store         store.Store
-	sinkerManager *sinker.Manager
-	port          int
-	app           *xun.App
-	mux           *http.ServeMux
-	configPath    string
-	config        *config.Config
-	configWatcher *config.Watcher
-	sinksRoot     *os.Root // Secure root for sinks directory access
-	skillsPath    string   // Path to SQL skills directory from config
+	manager        *plugin.Manager
+	dlq            *dlq.DLQ
+	cdcAdmin       *cdcadmin.Admin
+	store          store.Store
+	sinkerManager  *sinker.Manager
+	monitorDB      *monitor.DB
+	port           int
+	app            *xun.App
+	mux            *http.ServeMux
+	configPath     string
+	config         *config.Config
+	configWatcher  *config.Watcher
+	sinksRoot      *os.Root // Secure root for sinks directory access
+	skillsPath     string   // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 }
 
-// NewServer creates a new API server
-func NewServer(manager *plugin.Manager, port int) *Server {
-	return &Server{
-		manager: manager,
-		port:    port,
-	}
-}
-
-// NewServerWithDLQ creates a new API server with DLQ support
-func NewServerWithDLQ(manager *plugin.Manager, dlqStore *dlq.DLQ, port int) *Server {
-	return &Server{
-		manager: manager,
-		dlq:     dlqStore,
-		port:    port,
-	}
-}
-
-// NewServerWithCDC creates a new API server with CDC admin support
-func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store store.Store, sinkerMgr *sinker.Manager, port int, configPath string, cfg *config.Config, watcher *config.Watcher) *Server {
+// NewServer creates a new API server with all features
+func NewServer(
+	manager *plugin.Manager,
+	dlqStore *dlq.DLQ,
+	cdcAdmin *cdcadmin.Admin,
+	store store.Store,
+	sinkerMgr *sinker.Manager,
+	monitorDB *monitor.DB,
+	port int,
+	configPath string,
+	cfg *config.Config,
+	watcher *config.Watcher,
+	metricsProvider PollMetricsProvider,
+) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
 	if skillsPath == "" {
@@ -85,38 +82,17 @@ func NewServerWithCDC(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdca
 	}
 
 	return &Server{
-		manager:       manager,
-		dlq:           dlqStore,
-		cdcAdmin:      cdcAdmin,
-		store:         store,
-		sinkerManager: sinkerMgr,
-		port:          port,
-		configPath:    configPath,
-		config:        cfg,
-		configWatcher: watcher,
-		skillsPath:    skillsPath,
-	}
-}
-
-// NewServerWithCDCAndMetrics creates a new API server with CDC admin and metrics support
-func NewServerWithCDCAndMetrics(manager *plugin.Manager, dlqStore *dlq.DLQ, cdcAdmin *cdcadmin.Admin, store store.Store, sinkerMgr *sinker.Manager, port int, configPath string, cfg *config.Config, watcher *config.Watcher, metricsProvider PollMetricsProvider) *Server {
-	// Get skills path from config, default to ./skills/sql if not configured
-	skillsPath := cfg.Plugins.SQL.Path
-	if skillsPath == "" {
-		skillsPath = "./skills/sql"
-	}
-
-	return &Server{
-		manager:        manager,
-		dlq:            dlqStore,
-		cdcAdmin:       cdcAdmin,
-		store:          store,
-		sinkerManager:  sinkerMgr,
-		port:           port,
-		configPath:     configPath,
-		config:         cfg,
-		configWatcher:  watcher,
-		skillsPath:     skillsPath,
+		manager:         manager,
+		dlq:             dlqStore,
+		cdcAdmin:        cdcAdmin,
+		store:           store,
+		sinkerManager:   sinkerMgr,
+		monitorDB:       monitorDB,
+		port:            port,
+		configPath:      configPath,
+		config:          cfg,
+		configWatcher:   watcher,
+		skillsPath:      skillsPath,
 		metricsProvider: metricsProvider,
 	}
 }
@@ -238,6 +214,13 @@ func (s *Server) registerAPIRoutes() {
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
+
+	// Monitor routes
+	if s.monitorDB != nil {
+		api.Get("/monitor/batches", s.handleMonitorBatches, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/monitor/skills", s.handleMonitorSkills, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/monitor/sinks", s.handleMonitorSinks, xun.WithViewer(&xun.JsonViewer{}))
+	}
 }
 
 // registerPageRoutes registers page routes
@@ -1371,4 +1354,83 @@ func formatFileSize(size int64) string {
 	default:
 		return fmt.Sprintf("%d B", size)
 	}
+}
+
+// handleMonitorBatches handles GET /api/monitor/batches
+func (s *Server) handleMonitorBatches(c *xun.Context) error {
+	if s.monitorDB == nil {
+		return c.View(map[string]any{"success": false, "error": "monitor DB not initialized"})
+	}
+
+	limit := 50
+	if l := c.Request.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	since := time.Now().AddDate(0, 0, -7) // Default: last 7 days
+	if s := c.Request.URL.Query().Get("since"); s != "" {
+		// Try parsing as RFC3339 first
+		if parsed, err := time.Parse(time.RFC3339, s); err == nil {
+			since = parsed
+		} else if days, err := strconv.Atoi(s); err == nil && days > 0 {
+			// Fallback: treat as number of days
+			since = time.Now().AddDate(0, 0, -days)
+		}
+	}
+
+	logs, err := s.monitorDB.ListBatchLogs(limit, since)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "logs": logs})
+}
+
+// handleMonitorSkills handles GET /api/monitor/skills
+func (s *Server) handleMonitorSkills(c *xun.Context) error {
+	if s.monitorDB == nil {
+		return c.View(map[string]any{"success": false, "error": "monitor DB not initialized"})
+	}
+
+	limit := 50
+	if l := c.Request.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	skillID := c.Request.URL.Query().Get("skill_id")
+
+	logs, err := s.monitorDB.ListSkillLogs(skillID, "", limit)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "logs": logs})
+}
+
+// handleMonitorSinks handles GET /api/monitor/sinks
+func (s *Server) handleMonitorSinks(c *xun.Context) error {
+	if s.monitorDB == nil {
+		return c.View(map[string]any{"success": false, "error": "monitor DB not initialized"})
+	}
+
+	limit := 50
+	if l := c.Request.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	sinkName := c.Request.URL.Query().Get("sink_name")
+	database := c.Request.URL.Query().Get("database")
+
+	logs, err := s.monitorDB.ListSinkLogs(sinkName, database, limit)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "logs": logs})
 }

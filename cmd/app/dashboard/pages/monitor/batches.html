@@ -1,0 +1,100 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-text">Monitor - Batch</h2>
+    
+    <!-- Filters -->
+    <div class="bg-surface rounded-xl shadow-lg p-6 border border-border">
+        <form class="flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Limit</label>
+                <select id="limit" class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-textMuted text-sm mb-1">Since</label>
+                <select id="since" class="bg-bg border border-border rounded-lg px-3 py-2 text-text">
+                    <option value="1">Last 1 day</option>
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                </select>
+            </div>
+            <button type="button" onclick="loadBatches()" 
+                    class="bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-lg transition-colors">
+                Refresh
+            </button>
+        </form>
+    </div>
+
+    <!-- Batch Logs Table -->
+    <div class="bg-surface rounded-xl shadow-lg border border-border overflow-hidden">
+        <div id="batches-container" class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-bg text-textMuted text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">Batch ID</th>
+                        <th class="px-4 py-3 font-medium">Fetched Rows</th>
+                        <th class="px-4 py-3 font-medium">TX Count</th>
+                        <th class="px-4 py-3 font-medium">DLQ Count</th>
+                        <th class="px-4 py-3 font-medium">Duration (ms)</th>
+                        <th class="px-4 py-3 font-medium">Status</th>
+                        <th class="px-4 py-3 font-medium">Created At</th>
+                    </tr>
+                </thead>
+                <tbody id="batches-tbody" class="divide-y divide-border">
+                    <tr>
+                        <td colspan="7" class="px-4 py-8 text-center text-textMuted">
+                            Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Load on page load
+    document.addEventListener('DOMContentLoaded', loadBatches);
+
+    function loadBatches() {
+        const limit = document.getElementById('limit').value;
+        const since = document.getElementById('since').value;
+        const url = `/api/monitor/batches?limit=${limit}&since=${since}`;
+        
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('batches-tbody');
+                if (!data.success || !data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-textMuted">No data</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="hover:bg-surfaceHover transition-colors">
+                        <td class="px-4 py-3 text-text font-mono text-sm">${log.batch_id || ''}</td>
+                        <td class="px-4 py-3 text-text">${log.fetched_rows || 0}</td>
+                        <td class="px-4 py-3 text-text">${log.tx_count || 0}</td>
+                        <td class="px-4 py-3 text-text">${log.dlq_count || 0}</td>
+                        <td class="px-4 py-3 text-text">${log.duration_ms || 0}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 rounded text-xs font-medium ${
+                                log.status === 'SUCCESS' ? 'bg-success/20 text-success' :
+                                log.status === 'PARTIAL' ? 'bg-warning/20 text-warning' :
+                                'bg-error/20 text-error'
+                            }">${log.status || ''}</span>
+                        </td>
+                        <td class="px-4 py-3 text-textMuted text-sm">${log.created_at ? new Date(log.created_at).toLocaleString() : ''}</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                document.getElementById('batches-tbody').innerHTML = 
+                    '<tr><td colspan="7" class="px-4 py-8 text-center text-error">Error loading data</td></tr>';
+            });
+    }
+</script>
+{{ end }}
