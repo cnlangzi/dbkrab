@@ -87,12 +87,7 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 	return totalLatency / int64(len(w.samples))
 }
 
-// PullHandler extends Handler to support PullContext for observability
-// Handlers implementing this interface receive pull_id for logging correlation.
-type PullHandler interface {
-	Handler
-	HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
-}
+
 
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
@@ -139,12 +134,10 @@ type Store interface {
 	Close() error
 }
 
-// Handler interface for custom processing
-// Handle processes a transaction with the given context for cancellation/timeout.
+// Handler interface for custom processing.
 // PullCtx provides observability context (pull_id) for logging correlation.
 type Handler interface {
-	Handle(ctx context.Context, tx *Transaction) error
-	HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
+	Handle(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -156,17 +149,11 @@ type CDCQuerier interface {
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(ctx context.Context, tx *Transaction) error
+type PluginHandler func(ctx context.Context, tx *Transaction, pullCtx *PullContext) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, tx *Transaction) error {
-	return h(ctx, tx)
-}
-
-// HandleWithPull implements Handler interface with pull context
-// Default implementation: just calls Handle (backward compatible)
-func (h PluginHandler) HandleWithPull(ctx context.Context, tx *Transaction, pullCtx *PullContext) error {
-	return h(ctx, tx)
+func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, pullCtx *PullContext) error {
+	return h(ctx, tx, pullCtx)
 }
 
 type tablePollResult struct {
@@ -235,7 +222,7 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 }
 
 // NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, logsDB *observe.LogsDB) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
@@ -247,7 +234,6 @@ func NewPoller(cfg *config.Config, db *sql.DB, store Store, offsetStore offset.S
 		offsets:  offsetStore,
 		store:    store,
 		dlq:      dlqStore,
-		logsDB:   logsDB,
 		stopCh:   make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
@@ -557,12 +543,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				// Try HandleWithPull first (for observability), fall back to Handle
-				if pullHandler, ok := p.handler.(PullHandler); ok {
-					handlerErr = pullHandler.HandleWithPull(ctx, &tx, pullCtx)
-				} else {
-					handlerErr = p.handler.Handle(ctx, &tx)
-				}
+				handlerErr = p.handler.Handle(ctx, &tx, pullCtx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {

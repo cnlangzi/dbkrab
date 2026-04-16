@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/observe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -409,6 +410,95 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 	}
 
 	slog.Info("Plugin.Handle: completed",
+		"tx_id", tx.ID,
+		"total_sinks", len(allSinks))
+
+	return allSinks, nil
+}
+
+// HandleWithPull processes a CDC transaction with pull context for observability.
+// Skill logs are written for each skill:
+//   - SKIP: skill did not match the transaction table
+//   - EXECUTED: skill matched and produced sinks
+//   - ERROR: skill matched but execution failed
+// Sinks are returned for the caller to write.
+func (p *Plugin) HandleWithPull(tx *core.Transaction, pullCtx *core.PullContext, logsDB *observe.LogsDB) ([]core.Sink, error) {
+	if tx == nil || len(tx.Changes) == 0 {
+		return nil, nil
+	}
+
+	if p.engine == nil {
+		slog.Error("Plugin.HandleWithPull: engine not initialized")
+		return nil, fmt.Errorf("engine not initialized, call AttachDB first")
+	}
+
+	var allSinks []core.Sink
+
+	// Get table from first change (all changes in a tx are for the same table)
+	var table string
+	if len(tx.Changes) > 0 {
+		table = tx.Changes[0].Table
+	}
+
+	slog.Info("Plugin.HandleWithPull: processing CDC transaction",
+		"tx_id", tx.ID,
+		"table", table,
+		"changes", len(tx.Changes),
+		"skills_count", len(p.Skills.List()),
+		"pull_id", pullCtx.PullID)
+
+	// Iterate over all skills
+	for _, skill := range p.Skills.List() { // internal RLock
+		slog.Debug("Plugin.HandleWithPull: checking skill match",
+			"skill", skill.Name,
+			"skill.On", skill.On,
+			"table", table)
+
+		if !p.matchTable(skill, table) {
+			// Skill did not match → record SKIP
+			slog.Debug("Plugin.HandleWithPull: skill does not match table, recording SKIP",
+				"skill", skill.Name,
+				"table", table)
+			if logsDB != nil && pullCtx != nil {
+				skillLog := &observe.SkillLog{
+					PullID:        pullCtx.PullID,
+					SkillID:       skill.Id,
+					SkillName:     skill.Name,
+					Operation:     "",
+					RowsProcessed: 0,
+					Status:        observe.SkillStatusSkip,
+					ErrorMessage:  "",
+					DurationMs:    0,
+					CreatedAt:     time.Now(),
+				}
+				if writeErr := logsDB.WriteSkillLog(skillLog); writeErr != nil {
+					slog.Warn("failed to write skill_log", "skill", skill.Name, "error", writeErr)
+				}
+			}
+			continue
+		}
+
+		slog.Debug("Plugin.HandleWithPull: skill matched, executing engine",
+			"skill", skill.Name)
+
+		// engine.HandleWithPull writes skill log (EXECUTED/SKIP/ERROR)
+		sinks, err := p.engine.HandleWithPull(tx, skill, pullCtx, logsDB)
+		if err != nil {
+			slog.Error("Plugin.HandleWithPull: skill execution failed, skipping skill",
+				"skill", skill.Name,
+				"error", err)
+			// Error is already logged by engine.HandleWithPull
+			continue
+		}
+
+		slog.Debug("Plugin.HandleWithPull: skill execution completed",
+			"skill", skill.Name,
+			"sinks_count", len(sinks))
+
+		allSinks = append(allSinks, sinks...)
+	}
+
+	slog.Info("Plugin.HandleWithPull: completed",
 		"tx_id", tx.ID,
 		"total_sinks", len(allSinks))
 

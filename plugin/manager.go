@@ -4,6 +4,7 @@ import (
 	"context"
 	dbsql "database/sql"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -107,95 +108,29 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Handle processes a transaction through all SQL plugins.
-// Each plugin transforms data and returns sinks with Database field set.
-// The sink manager routes sinks to appropriate writers based on Database field.
-// This method does not support pull observability - use HandleWithPull for that.
-func (m *Manager) Handle(ctx context.Context, tx *core.Transaction) error {
-	return m.HandleWithPull(ctx, tx, nil)
-}
-
-// HandleWithPull processes a transaction through all SQL plugins with pull context.
+// Handle processes a transaction through all SQL plugins with pull context.
 // PullCtx provides pull_id for observability logging.
-// Skill logs are written for each skill execution (per skill × operation).
-// Sink logs are written for each sink write (per sink × table × operation).
-func (m *Manager) HandleWithPull(ctx context.Context, tx *core.Transaction, pullCtx *core.PullContext) error {
+// Skill logs are written by the engine for each skill (per skill × operation).
+// Sink logs are written by the sinker for each sink write (per sink × table × operation).
+func (m *Manager) Handle(ctx context.Context, tx *core.Transaction, pullCtx *core.PullContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Collect all sink operations from all plugins
 	var allSinks []core.Sink
 
 	if m.sqlPlugin != nil {
 		// Process transaction through SQL plugin
-		sinks, err := m.sqlPlugin.Handle(tx)
+		// Skill logs are written internally by engine.HandleWithPull
+		sinks, err := m.sqlPlugin.HandleWithPull(tx, pullCtx, m.logsDB)
 		if err != nil {
 			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
 		}
 		allSinks = append(allSinks, sinks...)
-
-		// Write skill_logs for observability (per skill × operation)
-		if pullCtx != nil && m.logsDB != nil {
-			// Get table from first change
-			var table string
-			if len(tx.Changes) > 0 {
-				table = tx.Changes[0].Table
-			}
-
-			// Process each skill that matched this transaction
-			for _, skill := range m.sqlPlugin.Skills.List() {
-				// Check if skill matches table
-				matches := false
-				if len(skill.On) == 0 {
-					matches = true // Empty On matches all
-				} else {
-					for _, t := range skill.On {
-						if t == table {
-							matches = true
-							break
-						}
-					}
-				}
-
-				if !matches {
-					continue
-				}
-
-				// Track per-operation stats for this skill
-				operationStats := make(map[string]int) // operation -> rows_processed
-				for _, sink := range sinks {
-					if sink.Config.Database == skill.Database {
-						op := sink.OpType.String()
-						if sink.DataSet != nil {
-							operationStats[op] += len(sink.DataSet.Rows)
-						}
-					}
-				}
-
-				// Write skill_logs per operation
-				for op, rowsProcessed := range operationStats {
-					skillLog := &observe.SkillLog{
-						PullID:        pullCtx.PullID,
-						SkillID:       skill.Id,
-						SkillName:     skill.Name,
-						Operation:     op,
-						RowsProcessed: rowsProcessed,
-						Status:        observe.SkillStatusExecuted,
-						DurationMs:    0, // TODO: track actual duration
-						CreatedAt:     time.Now(),
-					}
-					if writeErr := m.logsDB.WriteSkillLog(skillLog); writeErr != nil {
-						fmt.Printf("Warning: failed to write skill_log: %v\n", writeErr)
-					}
-				}
-			}
-		}
 	}
 
 	// Route sinks to appropriate writers based on Database field
-	// Pass pullCtx for sink observability logging
 	if len(allSinks) > 0 {
-		if err := m.swManager.WriteWithPull(ctx, allSinks, pullCtx, m.logsDB); err != nil {
+		if err := m.swManager.Write(ctx, allSinks, pullCtx, m.logsDB); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}
@@ -203,7 +138,7 @@ func (m *Manager) HandleWithPull(ctx context.Context, tx *core.Transaction, pull
 	// Flush logs db
 	if m.logsDB != nil {
 		if err := m.logsDB.Flush(); err != nil {
-			fmt.Printf("Warning: failed to flush logs_db: %v\n", err)
+			slog.Warn("failed to flush logs_db", "error", err)
 		}
 	}
 
