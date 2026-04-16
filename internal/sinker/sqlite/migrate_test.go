@@ -3,16 +3,20 @@ package sqlite
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestMigration(t *testing.T) {
-	// 使用 business.db
-	os.Remove("/opt/dbkrab/data/sinks/business/business.db")
-	os.Remove("/opt/dbkrab/data/sinks/business/business.db-shm")
-	os.Remove("/opt/dbkrab/data/sinks/business/business.db-wal")
+	// 使用临时目录
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "business.db")
+	migrationsDir := filepath.Join(tmpDir, "migrations")
+	
+	// 创建 migrations 目录
+	os.MkdirAll(migrationsDir, 0755)
 
-	s, err := NewSinker("business", "/opt/dbkrab/data/sinks/business/business.db", "/opt/dbkrab/data/sinks/business/migrations")
+	s, err := NewSinker("business", dbPath, migrationsDir)
 	if err != nil {
 		t.Fatalf("Error creating sinker: %v", err)
 	}
