@@ -117,15 +117,15 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	return nil
 }
 
-// buildTransaction builds a core.Transaction from core.Change slice
+// buildTransaction builds a Transaction from Change slice
 // It groups changes by transaction ID and filters out UPDATE_BEFORE operations
-func (r *ReplayService) buildTransaction(changes []core.Change) *Transaction {
+func (r *ReplayService) buildTransaction(changes []Change) *Transaction {
 	// Group by transaction ID, filtering out UPDATE_BEFORE
 	txMap := make(map[string]*Transaction)
 
 	for _, c := range changes {
-		// Filter out UPDATE_BEFORE operations (operation == 3)
-		if c.Operation == core.OpUpdateBefore { // OpUpdateBefore
+		// Filter out UPDATE_BEFORE operations
+		if c.Operation == OpUpdateBefore {
 			slog.Debug("buildTransaction: silently dropping UPDATE_BEFORE change",
 				"table", c.Table,
 				"tx_id", c.TransactionID,
@@ -139,7 +139,7 @@ func (r *ReplayService) buildTransaction(changes []core.Change) *Transaction {
 			txMap[c.TransactionID] = tx
 		}
 
-		// Already core.Change, add directly
+		// Already Change, add directly
 		tx.AddChange(c)
 	}
 
