@@ -282,5 +282,124 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	return results, rows.Err()
 }
 
+// GetLSNs returns all unique LSNs from the store, ordered by LSN
+func (s *Store) GetLSNs() ([]string, error) {
+	rows, err := s.db.Reader.Query(`
+		SELECT DISTINCT lsn
+		FROM changes
+		WHERE lsn IS NOT NULL AND lsn != ''
+		ORDER BY lsn ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Warn("rows.Close error", "error", err)
+		}
+	}()
+
+	var lsns []string
+	for rows.Next() {
+		var lsn string
+		if err := rows.Scan(&lsn); err != nil {
+			return nil, err
+		}
+		lsns = append(lsns, lsn)
+	}
+
+	return lsns, rows.Err()
+}
+
+// GetChangesWithLSN returns all changes for a specific LSN, as core.Change
+func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
+	rows, err := s.db.Reader.Query(`
+		SELECT id, transaction_id, table_name, operation, data, lsn, changed_at
+		FROM changes
+		WHERE lsn = ?
+		ORDER BY id
+	`, lsn)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Warn("rows.Close error", "error", err)
+		}
+	}()
+
+	var changes []core.Change
+	for rows.Next() {
+		var id, txID, tableName, operation, dataStr, lsnStr string
+		var changedAt interface{}
+
+		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &lsnStr, &changedAt); err != nil {
+			return nil, err
+		}
+
+		// Convert operation string to core.Operation
+		op := core.Operation(operationStringToInt(operation))
+
+		// Convert LSN hex string to bytes
+		var lsnBytes []byte
+		if lsnStr != "" && len(lsnStr) > 2 {
+			hexStr := lsnStr
+			if len(hexStr) >= 2 && hexStr[:2] == "0x" {
+				hexStr = hexStr[2:]
+			}
+			if decoded, err := hex.DecodeString(hexStr); err != nil {
+				slog.Warn("failed to decode LSN hex", "lsn", lsnStr, "error", err)
+				lsnBytes = nil
+			} else {
+				lsnBytes = decoded
+			}
+		}
+
+		// Parse JSON data to map
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+			slog.Warn("failed to parse JSON data", "id", id, "lsn", lsnStr, "error", err)
+			data = make(map[string]interface{})
+		}
+
+		// Parse commit time
+		var commitTime time.Time
+		if changedAt != nil {
+			if t, ok := changedAt.(time.Time); ok {
+				commitTime = t
+			}
+		}
+
+		changes = append(changes, core.Change{
+			Table:         tableName,
+			TransactionID: txID,
+			LSN:           lsnBytes,
+			Operation:     op,
+			CommitTime:    commitTime,
+			Data:          data,
+			ID:            id, // Use the stored ID
+		})
+	}
+
+	return changes, rows.Err()
+}
+
+// operationStringToInt converts operation string to int
+// INSERT→2, DELETE→1, UPDATE_BEFORE→3, UPDATE_AFTER→4
+func operationStringToInt(op string) int {
+	switch op {
+	case "INSERT":
+		return 2
+	case "DELETE":
+		return 1
+	case "UPDATE_BEFORE":
+		return 3
+	case "UPDATE_AFTER":
+		return 4
+	default:
+		return 2 // Default to INSERT for safety
+	}
+}
+
 // Ensure the Store implements the store.Store interface
 var _ store.Store = (*Store)(nil)
