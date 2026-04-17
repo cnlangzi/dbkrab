@@ -135,8 +135,7 @@ type Store interface {
 // Handler interface for custom processing.
 // BatchCtx provides observability context (batch_id) for logging correlation.
 // Handler receives the full LSN batch of changes (one LSN = one target-side transaction).
-// Note: groupByTransaction was previously used for handler-level business logic only,
-// not for persistence semantics. Handler may reconstruct transactions internally if needed.
+// Handler may reconstruct transactions internally if needed for business logic.
 type Handler interface {
 	Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 }
@@ -872,42 +871,6 @@ func min(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
-}
-
-// groupByTransaction groups changes by transaction ID
-// It also defensively filters out OpUpdateBefore changes which should not reach
-// the sink writer or internal store. UPDATE_BEFORE rows are silently dropped
-// to prevent "unknown operation type: UPDATE_BEFORE" errors.
-func (p *Poller) groupByTransaction(changes []Change) []Transaction {
-	txMap := make(map[string]*Transaction)
-
-	for _, c := range changes {
-		// Defensively filter out UPDATE_BEFORE changes - they should not be
-		// captured when using net_changes mode, but we filter as a safeguard
-		// to prevent DLQ errors from reaching the sink writer.
-		if c.Operation == OpUpdateBefore {
-			slog.Debug("groupByTransaction: silently dropping UPDATE_BEFORE change",
-				"table", c.Table,
-				"tx_id", c.TransactionID,
-				"lsn", fmt.Sprintf("%x", c.LSN))
-			continue
-		}
-
-		tx, exists := txMap[c.TransactionID]
-		if !exists {
-			tx = NewTransaction(c.TransactionID)
-			txMap[c.TransactionID] = tx
-		}
-		tx.AddChange(c)
-	}
-
-	// Convert map to slice
-	result := make([]Transaction, 0, len(txMap))
-	for _, tx := range txMap {
-		result = append(result, *tx)
-	}
-
-	return result
 }
 
 // checkGaps checks for CDC gaps across all monitored tables
