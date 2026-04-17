@@ -217,9 +217,6 @@ func (r *ReplayService) writeChangesToDLQ(changes []Change, err error, lsn strin
 		return
 	}
 
-	// Generate a trace ID for this batch
-	batchTraceID := fmt.Sprintf("replay-%s", lsn)
-
 	// Write each change as a separate DLQ entry (change-scoped)
 	for i, c := range changes {
 		// Encode change data as JSON
@@ -232,8 +229,10 @@ func (r *ReplayService) writeChangesToDLQ(changes []Change, err error, lsn strin
 			changeJSON = []byte("{}")
 		}
 
+		// Use Change.ID for trace correlation (content-based, deterministic)
+		// This allows tracing the same change across multiple DLQ entries if retried
 		entry := &dlq.DLQEntry{
-			TraceID:      fmt.Sprintf("%s-%d", batchTraceID, i),
+			TraceID:      c.ID,
 			Source:       source,
 			LSN:          fmt.Sprintf("%x", c.LSN),
 			TableName:    c.Table,

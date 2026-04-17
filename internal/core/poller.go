@@ -1056,9 +1056,6 @@ func (p *Poller) writeChangesToDLQ(changes []Change, err error, source string) {
 		retryCount = retryErr.RetryCount
 	}
 
-	// Generate a trace ID for this batch
-	batchTraceID := fmt.Sprintf("batch-%d", time.Now().UnixNano())
-
 	// Write each change as a separate DLQ entry (change-scoped)
 	for i, c := range changes {
 		// Encode change data as JSON
@@ -1071,8 +1068,10 @@ func (p *Poller) writeChangesToDLQ(changes []Change, err error, source string) {
 			changeJSON = []byte("{}")
 		}
 
+		// Use Change.ID for trace correlation (content-based, deterministic)
+		// This allows tracing the same change across multiple DLQ entries if retried
 		entry := &dlq.DLQEntry{
-			TraceID:      fmt.Sprintf("%s-%d", batchTraceID, i),
+			TraceID:      c.ID,
 			Source:       source,
 			LSN:          fmt.Sprintf("%x", c.LSN),
 			TableName:    c.Table,
