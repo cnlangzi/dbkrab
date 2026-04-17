@@ -1,7 +1,9 @@
 package sql
 
 import (
+	"context"
 	"database/sql"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/scanner"
 )
@@ -85,7 +87,11 @@ func (e *MSSQLExecutor) DB() *sql.DB {
 }
 
 func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, error) {
-	rows, err := e.db.Query(sqlStr, args...)
+	// Use context with timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rows, err := e.db.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 	}

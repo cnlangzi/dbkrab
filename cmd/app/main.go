@@ -70,10 +70,31 @@ func main() {
 	}()
 
 	// Configure connection pool (P0-5: prevent connection exhaustion and stale connections)
-	mssqlDB.SetMaxOpenConns(10)                     // Max concurrent connections to MSSQL
-	mssqlDB.SetMaxIdleConns(5)                      // Keep warm connections for fast response
-	mssqlDB.SetConnMaxLifetime(30 * time.Minute)   // Recycle connections to prevent server-side timeouts
-	mssqlDB.SetConnMaxIdleTime(5 * time.Minute)    // Close idle connections
+	// Use config values with defaults
+	maxOpenConns := cfg.MSSQL.PoolMaxOpenConns
+	if maxOpenConns <= 0 {
+		maxOpenConns = 30 // default
+	}
+	maxIdleConns := cfg.MSSQL.PoolMaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 15 // default
+	}
+	connMaxLifetime := 30 * time.Minute
+	if cfg.MSSQL.PoolConnMaxLifetime != "" {
+		if d, err := time.ParseDuration(cfg.MSSQL.PoolConnMaxLifetime); err == nil {
+			connMaxLifetime = d
+		}
+	}
+	connMaxIdleTime := 5 * time.Minute
+	if cfg.MSSQL.PoolConnMaxIdleTime != "" {
+		if d, err := time.ParseDuration(cfg.MSSQL.PoolConnMaxIdleTime); err == nil {
+			connMaxIdleTime = d
+		}
+	}
+	mssqlDB.SetMaxOpenConns(maxOpenConns)
+	mssqlDB.SetMaxIdleConns(maxIdleConns)
+	mssqlDB.SetConnMaxLifetime(connMaxLifetime)
+	mssqlDB.SetConnMaxIdleTime(connMaxIdleTime)
 
 	if err := mssqlDB.Ping(); err != nil {
 		slog.Error("failed to ping MSSQL", "error", err)
@@ -85,10 +106,10 @@ func main() {
 		"host", cfg.MSSQL.Host,
 		"port", cfg.MSSQL.Port,
 		"database", cfg.MSSQL.Database,
-		"pool_max_open", 10,
-		"pool_max_idle", 5,
-		"pool_max_lifetime", "30m",
-		"pool_max_idle_time", "5m")
+		"pool_max_open", maxOpenConns,
+		"pool_max_idle", maxIdleConns,
+		"pool_max_lifetime", connMaxLifetime,
+		"pool_max_idle_time", connMaxIdleTime)
 
 	// Create CDC store DB and Offset DB as separate databases
 	ctx := context.Background()

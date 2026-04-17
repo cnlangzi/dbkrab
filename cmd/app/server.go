@@ -63,6 +63,7 @@ type Server struct {
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	replayService *core.ReplayService  // Replay service for CDC changes replay
 	replayStatus  *replayStatus       // Current replay status (protected by mutex)
+	replayCancel  context.CancelFunc   // Cancel function to stop replay
 }
 
 // replayStatus tracks the status of a replay operation
@@ -210,6 +211,7 @@ func (s *Server) registerAPIRoutes() {
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
 		// CDC replay routes
 		api.Post("/cdc/replay", s.handleCDCReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Post("/cdc/replay/stop", s.handleCDCReplayStop, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/replay/status", s.handleCDCReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC changes/status routes registered")
 	} else {
@@ -628,8 +630,13 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 
 	// Start replay in background
 	go func() {
+		// Use stored cancel function for graceful stop
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		s.replayCancel = cancel
+		defer func() {
+			cancel()
+			s.replayCancel = nil
+		}()
 
 		// Debug: log store type
 		slog.Debug("replay: store type", "type", fmt.Sprintf("%T", s.store))
@@ -701,6 +708,35 @@ func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
 		"total":     s.replayStatus.Total,
 		"processed": s.replayStatus.Processed,
 		"failed":    s.replayStatus.Failed,
+	})
+}
+
+// handleCDCReplayStop handles POST /api/cdc/replay/stop
+// Stops a running replay operation
+func (s *Server) handleCDCReplayStop(c *xun.Context) error {
+	s.replayStatus.mutex.Lock()
+	defer s.replayStatus.mutex.Unlock()
+
+	if !s.replayStatus.isRunning {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "no replay is running",
+		})
+	}
+
+	// Cancel the replay context
+	if s.replayCancel != nil {
+		s.replayCancel()
+		s.replayCancel = nil
+	}
+
+	// Update status
+	s.replayStatus.Status = "stopped"
+	s.replayStatus.isRunning = false
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": "replay stopped",
 	})
 }
 
