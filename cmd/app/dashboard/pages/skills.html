@@ -103,6 +103,9 @@ function renderSkillsList(skills) {
         const statusClass = skill.status === 'error' ? 'bg-error/20 text-error' : 'bg-success/20 text-success';
         const statusText = skill.status === 'error' ? 'Error' : 'Active';
         
+        // Build error message if present
+        const errorHtml = skill.error ? `<p class="text-xs text-error mt-1 truncate" title="${skill.error}">⚠️ ${skill.error}</p>` : '';
+        
         html += `
             <a href="/skills/edit/${skill.id}" class="block p-4 hover:bg-surfaceHover transition-colors">
                 <div class="flex items-start justify-between">
@@ -112,9 +115,10 @@ function renderSkillsList(skills) {
                             <h4 class="text-base font-semibold text-text truncate">${skill.name}</h4>
                         </div>
                         ${skill.description ? `<p class="text-sm text-textMuted truncate">${skill.description}</p>` : ''}
+                        ${errorHtml}
                         <div class="flex items-center gap-3 mt-2 text-xs text-textMuted">
                             <span>📊 ${skill.tables ? skill.tables.length : 0} tables</span>
-                            <span>📄 ${skill.files ? skill.files.length : 0} files</span>
+                            ${skill.load_time ? `<span>🕐 ${skill.load_time}</span>` : ''}
                         </div>
                     </div>
                     <svg class="w-5 h-5 text-textMuted flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
