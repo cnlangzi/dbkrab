@@ -57,6 +57,9 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 		"database", s.name,
 		"operations", len(ops))
 
+	// Set busy_timeout to 5 seconds to handle concurrent writes (e.g., from poller)
+	_, _ = s.db.Writer.ExecContext(ctx, "PRAGMA busy_timeout = 5000")
+
 	tx, err := s.db.Writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
