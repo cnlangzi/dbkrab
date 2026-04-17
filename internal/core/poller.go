@@ -1090,7 +1090,8 @@ func (p *Poller) writeChangesToDLQ(changes []Change, err error, source string) {
 }
 
 // writeToDLQ writes a failed transaction to the dead letter queue (deprecated, use writeChangesToDLQ).
-// Kept for backward compatibility with replay service.
+// Kept for backward compatibility.
+//lint:ignore U1000 Kept for backward compatibility
 func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	if p.dlq == nil {
 		slog.Warn("cannot write to DLQ: not initialized",

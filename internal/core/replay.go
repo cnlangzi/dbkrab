@@ -161,51 +161,6 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	return nil
 }
 
-// buildTransaction builds a Transaction from Change slice
-// It groups changes by transaction ID and filters out UPDATE_BEFORE operations
-func (r *ReplayService) buildTransaction(changes []Change) *Transaction {
-	// Group by transaction ID, filtering out UPDATE_BEFORE
-	txMap := make(map[string]*Transaction)
-
-	for _, c := range changes {
-		// Filter out UPDATE_BEFORE operations
-		if c.Operation == OpUpdateBefore {
-			slog.Debug("buildTransaction: silently dropping UPDATE_BEFORE change",
-				"table", c.Table,
-				"tx_id", c.TransactionID,
-				"lsn", fmt.Sprintf("%x", c.LSN))
-			continue
-		}
-
-		tx, exists := txMap[c.TransactionID]
-		if !exists {
-			tx = NewTransaction(c.TransactionID)
-			txMap[c.TransactionID] = tx
-		}
-
-		// Already Change, add directly
-		tx.AddChange(c)
-	}
-
-	// Convert map to slice - should only have one transaction per LSN
-	if len(txMap) == 0 {
-		return &Transaction{
-			ID:      "",
-			Changes: []Change{},
-		}
-	}
-
-	// Get the first (and only) transaction
-	for _, tx := range txMap {
-		return tx
-	}
-
-	return &Transaction{
-		ID:      "",
-		Changes: []Change{},
-	}
-}
-
 // writeChangesToDLQ writes failed changes to the dead letter queue (change-scoped).
 // Each change is written as a separate DLQ entry for granular retry.
 func (r *ReplayService) writeChangesToDLQ(changes []Change, err error, lsn string, source string) {
@@ -250,62 +205,4 @@ func (r *ReplayService) writeChangesToDLQ(changes []Change, err error, lsn strin
 				"error", writeErr)
 		}
 	}
-}
-
-// writeToDLQ writes a failed transaction to the dead letter queue (deprecated, change-scoped preferred).
-func (r *ReplayService) writeToDLQ(tx *Transaction, handlerErr error, lsn string, source string) {
-	if r.dlq == nil {
-		slog.Warn("cannot write to DLQ: not initialized",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID)
-		return
-	}
-
-	// Get the first change to extract table name and operation
-	var tableName, operation string
-	if len(tx.Changes) > 0 {
-		tableName = tx.Changes[0].Table
-		operation = tx.Changes[0].Operation.String()
-	}
-
-	// Encode transaction data as JSON
-	txData := map[string]interface{}{
-		"transaction_id": tx.ID,
-		"changes":        tx.Changes,
-	}
-	changeJSON, encodeErr := json.Marshal(txData)
-	if encodeErr != nil {
-		slog.Error("failed to encode transaction data",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID,
-			"error", encodeErr)
-		changeJSON = []byte("{}")
-	}
-
-	entry := &dlq.DLQEntry{
-		TraceID:      tx.TraceID,
-		Source:       source,
-		LSN:          lsn,
-		TableName:    tableName,
-		Operation:    operation,
-		ChangeData:   string(changeJSON),
-		ErrorMessage: fmt.Sprintf("%s error: %v", source, handlerErr),
-		RetryCount:   0,
-		Status:       dlq.StatusPending,
-	}
-
-	if writeErr := r.dlq.Write(entry); writeErr != nil {
-		slog.Error("failed to write DLQ entry",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID,
-			"error", writeErr)
-		return
-	}
-
-	slog.Warn("transaction written to DLQ during replay",
-		"trace_id", tx.TraceID,
-		"tx_id", tx.ID,
-		"table", tableName,
-		"operation", operation,
-		"lsn", lsn)
 }
