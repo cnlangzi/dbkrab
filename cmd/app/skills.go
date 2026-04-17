@@ -48,7 +48,6 @@ type SkillInfo struct {
 	Status      string   `json:"status"`        // loaded, error, not_loaded
 	Version     string   `json:"version"`
 	LoadTime    string   `json:"load_time,omitempty"`
-	Files       []string `json:"files"`
 	Error       string   `json:"error,omitempty"`
 }
 
@@ -117,15 +116,19 @@ func (s *Server) handleSkillsList(c *xun.Context) error {
 			File:        skill.File,
 			Description: skill.Description,
 			Tables:      skill.On,
-			Status:      "loaded",
-			Files:       []string{skill.File},
 		}
 
-		// Collect SQL files referenced in the skill
-		for _, sink := range skill.Sinks {
-			if sink.SQLFile != "" {
-				skillInfo.Files = append(skillInfo.Files, sink.SQLFile)
-			}
+		// Set status based on Error field
+		if skill.Error != "" {
+			skillInfo.Status = "error"
+			skillInfo.Error = skill.Error
+		} else {
+			skillInfo.Status = "loaded"
+		}
+
+		// Set load time from LastLoadedAt (if available)
+		if !skill.LastLoadedAt.IsZero() {
+			skillInfo.LoadTime = skill.LastLoadedAt.Format("2006-01-02 15:04:05")
 		}
 
 		skills = append(skills, skillInfo)

@@ -79,9 +79,11 @@ type Skill struct {
 	Sinks       []Sink      `yaml:"sinks"`
 	Outputs     map[string][]string `yaml:"-"` // key = output table name, value = field names
 
-	File string `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
-	Id   string `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
-	Raw  string `yaml:"-"` // Auto-assigned: raw YAML content
+	File         string    `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
+	Id           string    `yaml:"-"` // Auto-assigned: SHA256(File)[:12]
+	Raw          string    `yaml:"-"` // Auto-assigned: raw YAML content
+	Error        string    `yaml:"-"` // last load/parsing error message (if any)
+	LastLoadedAt time.Time `yaml:"-"` // last successful load time
 }
 
 // Sink represents a single sink configuration with operation filter

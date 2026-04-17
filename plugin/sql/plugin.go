@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,10 +89,22 @@ func (p *Plugin) loadAllSkills() error {
 		filePath := filepath.Join(p.watchDir, entry.Name())
 		skill, err := p.loadSkillFile(filePath)
 		if err != nil {
-			slog.Warn("failed to load skill", "file", entry.Name(), "error", err)
+			// Create a placeholder skill with error information
+			id := hashFile(filePath)
+			relPath, _ := filepath.Rel(p.watchDir, filePath)
+			placeholder := &Skill{
+				Id:    id,
+				File:  relPath,
+				Name: strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+				Error: err.Error(),
+			}
+			p.Skills.Set(placeholder)
+			slog.Warn("failed to load skill, stored as placeholder", "file", entry.Name(), "error", err)
 			continue
 		}
 
+		// Set successful load time
+		skill.LastLoadedAt = time.Now()
 		p.Skills.Set(skill)
 	}
 
@@ -294,10 +307,19 @@ func (p *Plugin) checkChanges() {
 
 				skill, err := p.loadSkillFile(path)
 				if err != nil {
-				slog.Warn("failed to reload skill", "path", path, "error", err)
+					// Load failed - look up existing skill and update its Error
+					id := hashFile(path)
+					if existing, ok := p.Skills.Get(id); ok {
+						existing.Error = err.Error()
+						p.Skills.Set(existing)
+					}
+					slog.Warn("failed to reload skill, error stored", "path", path, "error", err)
 					continue
 				}
 
+				// Successful load - clear Error and set LastLoadedAt
+				skill.Error = ""
+				skill.LastLoadedAt = time.Now()
 				p.Skills.Set(skill)
 			slog.Info("skill reloaded", "path", path, "skill_id", skill.Id)
 			} else {
