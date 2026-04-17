@@ -256,13 +256,13 @@ type mockSink struct {
 	mu   sync.Mutex
 }
 
-func (s *mockSink) Write(tx *Transaction) (int, error) {
+func (s *mockSink) Write(changes []Change) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
 		return 0, errors.New("simulated sink failure")
 	}
-	return len(tx.Changes), nil
+	return len(changes), nil
 }
 
 func (s *mockSink) WriteOps(ops []Sink) error {
@@ -333,7 +333,7 @@ type mockHandler struct {
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
+func (h *mockHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {

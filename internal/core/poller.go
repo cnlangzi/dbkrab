@@ -126,9 +126,9 @@ type Poller struct {
 }
 
 // Store interface for storing changes
+// Write writes the full LSN batch of changes and returns the number of rows actually inserted.
 type Store interface {
-	// Write writes a transaction and returns the number of rows actually inserted.
-	Write(tx *Transaction) (int, error)
+	Write(changes []Change) (int, error)
 	// Flush ensures all buffered writes are committed to durable storage.
 	Flush() error
 	Close() error
@@ -136,8 +136,11 @@ type Store interface {
 
 // Handler interface for custom processing.
 // BatchCtx provides observability context (batch_id) for logging correlation.
+// Handler receives the full LSN batch of changes (one LSN = one target-side transaction).
+// Note: groupByTransaction was previously used for handler-level business logic only,
+// not for persistence semantics. Handler may reconstruct transactions internally if needed.
 type Handler interface {
-	Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
+	Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -149,11 +152,12 @@ type CDCQuerier interface {
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
+// Handler receives the full LSN batch of changes (not individual transactions).
+type PluginHandler func(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
-	return h(ctx, tx, batchCtx)
+func (h PluginHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
+	return h(ctx, changes, batchCtx)
 }
 
 type tablePollResult struct {
@@ -540,7 +544,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 		if p.handler != nil {
 			var handlerErr error
 			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, &tx, batchCtx)
+				handlerErr = p.handler.Handle(ctx, tx.Changes, batchCtx)
 				return handlerErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
 			if err != nil {
@@ -560,7 +564,7 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 			var inserted int
 			err := retry.DoWithName(ctx, func() error {
 				var writeErr error
-				inserted, writeErr = p.store.Write(&tx)
+				inserted, writeErr = p.store.Write(tx.Changes)
 				return writeErr
 			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
 			storeDuration := time.Since(storeStart)

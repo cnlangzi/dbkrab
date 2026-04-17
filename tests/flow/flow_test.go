@@ -65,34 +65,36 @@ func (s *memOffsetStore) GetAll() (map[string]offset.Offset, error) {
 
 // In-memory store for testing
 type memStore struct {
-	writes   []*core.Transaction
+	writes   [][]core.Change
 	writeErr error
 	closeErr error
 }
 
 func newMemStore() *memStore {
 	return &memStore{
-		writes: make([]*core.Transaction, 0),
+		writes: make([][]core.Change, 0),
 	}
 }
 
-func (s *memStore) Write(tx *core.Transaction) error {
+func (s *memStore) Write(changes []core.Change) (int, error) {
 	if s.writeErr != nil {
-		return s.writeErr
+		return 0, s.writeErr
 	}
-	s.writes = append(s.writes, tx)
-	return nil
+	s.writes = append(s.writes, changes)
+	return len(changes), nil
 }
+
+func (s *memStore) Flush() error { return nil }
 
 func (s *memStore) Close() error { return s.closeErr }
 
 // simpleHandler implements core.Handler with a simple function
 type simpleHandler struct {
-	fn func(tx *core.Transaction) error
+	fn func(changes []core.Change) error
 }
 
-func (h *simpleHandler) Handle(tx *core.Transaction) error {
-	return h.fn(tx)
+func (h *simpleHandler) Handle(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+	return h.fn(changes)
 }
 
 // testHarness holds test components
@@ -238,13 +240,14 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 
 	var handlerCalled bool
 	var handlerErr error
+	var err error
 
 	// Create handler that tracks calls
 	handler := &simpleHandler{
-		fn: func(tx *core.Transaction) error {
+		fn: func(changes []core.Change) error {
 			handlerCalled = true
 			// Call plugin manager to process
-			handlerErr = pluginMgr.Handle(context.Background(), tx, nil)
+			handlerErr = pluginMgr.Handle(context.Background(), changes, nil)
 			return handlerErr
 		},
 	}
@@ -274,17 +277,18 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	require.Len(t, tx.Changes, 1, "transaction should have one change")
 
 	// Call handler
-	handler.Handle(&tx) //nolint:errcheck
+	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
 	// Note: pluginMgr.Handle may fail without real MSSQL, but that's OK for this test
 
 	assert.True(t, handlerCalled, "handler should be called")
 
 	// Call store
-	err := h.store.Write(&tx)
+	_, err = h.store.Write(tx.Changes)
 	require.NoError(t, err, "store should not error")
 
 	// Verify store was called
 	assert.Len(t, h.store.writes, 1, "store should have one write")
+	assert.Len(t, h.store.writes[0], 1, "stored changes should have one change")
 
 	// Update offsets
 	for _, r := range results {
@@ -313,9 +317,10 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 		pluginMgr.Stop()
 	}()
 
+	var err error
 	handler := &simpleHandler{
-		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(context.Background(), tx, nil)
+		fn: func(changes []core.Change) error {
+			return pluginMgr.Handle(context.Background(), changes, nil)
 		},
 	}
 
@@ -377,11 +382,11 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	assert.Equal(t, core.OpDelete, tx.Changes[2].Operation)
 
 	// Call handler
-	handler.Handle(&tx) //nolint:errcheck
+	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
 	// May fail without MSSQL, but ordering is preserved
 
 	// Store
-	err := h.store.Write(&tx)
+	_, err = h.store.Write(tx.Changes)
 	require.NoError(t, err, "store should not error")
 
 	// Update offsets
@@ -394,7 +399,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 
 	// Verify store has transaction with all changes
 	require.Len(t, h.store.writes, 1)
-	assert.Len(t, h.store.writes[0].Changes, 3, "stored transaction should have 3 changes")
+	assert.Len(t, h.store.writes[0], 3, "stored changes should have 3 changes")
 
 	// Verify offset advanced
 	off, err := h.offsetStore.Get("dbo.orders")
@@ -421,11 +426,12 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	}()
 
 	handler := &simpleHandler{
-		fn: func(tx *core.Transaction) error {
-			return pluginMgr.Handle(context.Background(), tx, nil)
+		fn: func(changes []core.Change) error {
+			return pluginMgr.Handle(context.Background(), changes, nil)
 		},
 	}
 
+	var err error
 	txID := "tx-003"
 	commitTime := time.Now()
 
@@ -483,15 +489,15 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	assert.Len(t, tables, 3, "should have changes from 3 tables")
 
 	// Process through handler
-	handler.Handle(&tx) //nolint:errcheck
+	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
 	// May fail without MSSQL, but transaction grouping is validated
 
 	// Store
-	err := h.store.Write(&tx)
+	_, err = h.store.Write(tx.Changes)
 	require.NoError(t, err)
 
 	require.Len(t, h.store.writes, 1)
-	assert.Len(t, h.store.writes[0].Changes, 3)
+	assert.Len(t, h.store.writes[0], 3)
 }
 
 // TestFlow_ExactlyOnce_SinkFailure tests that offsets are NOT advanced on sink failure
@@ -505,7 +511,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	var sinkFailed bool
 
 	handler := &simpleHandler{
-		fn: func(tx *core.Transaction) error {
+		fn: func(changes []core.Change) error {
 			if !sinkFailed {
 				sinkFailed = true
 				return fmt.Errorf("sink write error: disk full")
@@ -534,7 +540,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	h.offsetStore.Set("dbo.orders", "0000000001000000", "") //nolint:errcheck
 
 	// Call handler - should fail
-	err := handler.Handle(&tx)
+	err := handler.Handle(context.Background(), tx.Changes, nil)
 	assert.Error(t, err, "handler should return error on sink failure")
 
 	// Store should NOT be called because handler failed
@@ -562,12 +568,12 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	var callCount int
 
 	handler := &simpleHandler{
-		fn: func(tx *core.Transaction) error {
+		fn: func(changes []core.Change) error {
 			callCount++
 			if callCount == 1 {
 				return fmt.Errorf("transient handler error")
 			}
-			return pluginMgr.Handle(context.Background(), tx, nil)
+			return pluginMgr.Handle(context.Background(), changes, nil)
 		},
 	}
 
@@ -588,12 +594,12 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	tx := txs[0]
 
 	// Call handler - first call fails
-	err := handler.Handle(&tx)
+	err := handler.Handle(context.Background(), tx.Changes, nil)
 	assert.Error(t, err, "first handler call should fail")
 
 	// In real pipeline: retry would happen, then store/offset would advance
 	// For this test: we verify store can be called independently
-	err = h.store.Write(&tx)
+	_, err = h.store.Write(tx.Changes)
 	require.NoError(t, err, "store should succeed")
 
 	// Update offsets
@@ -627,6 +633,7 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 		//nolint:errcheck
 		pluginMgr.Stop()
 	}()
+	var err error
 
 	txID := "tx-006"
 	commitTime := time.Now()
@@ -672,12 +679,12 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 	assert.Equal(t, "dbo.inventory", tx.Changes[1].Table)
 
 	// Store should receive the transaction with both changes
-	err := h.store.Write(&tx)
+	_, err = h.store.Write(tx.Changes)
 	require.NoError(t, err)
 
 	// Verify both changes in stored transaction
 	require.Len(t, h.store.writes, 1)
-	assert.Len(t, h.store.writes[0].Changes, 2)
+	assert.Len(t, h.store.writes[0], 2)
 }
 
 // TestFlow_PluginSkillLoading tests that skills are loaded from fixtures
@@ -745,17 +752,17 @@ func TestFlow_InMemoryStore(t *testing.T) {
 	})
 
 	// Write
-	err := store.Write(tx)
+	count, err := store.Write(tx.Changes)
 	require.NoError(t, err)
+	assert.Equal(t, 1, count)
 
 	// Verify
 	assert.Len(t, store.writes, 1)
-	assert.Equal(t, "tx-test", store.writes[0].ID)
-	assert.Len(t, store.writes[0].Changes, 1)
+	assert.Len(t, store.writes[0], 1)
 
 	// Test error injection
 	store.writeErr = fmt.Errorf("store error")
-	err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	assert.Error(t, err)
 }
 

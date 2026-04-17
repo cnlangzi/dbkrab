@@ -623,8 +623,8 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 			handler = s.manager
 		} else {
 			// Fallback: log only
-			handler = core.PluginHandler(func(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
-				slog.Debug("replaying transaction", "tx_id", tx.ID, "changes", len(tx.Changes))
+			handler = core.PluginHandler(func(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+				slog.Debug("replaying changes", "batch_id", batchCtx.BatchID, "count", len(changes))
 				return nil
 			})
 		}

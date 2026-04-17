@@ -128,7 +128,7 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 
 	// Handle the transaction
 	batchCtx := NewBatchContext()
-	if err := r.handler.Handle(ctx, tx, batchCtx); err != nil {
+	if err := r.handler.Handle(ctx, tx.Changes, batchCtx); err != nil {
 		// Write to DLQ on failure (same logic as Poller)
 		r.writeToDLQ(tx, err, lsn, "replay_handler")
 		return fmt.Errorf("handle transaction %s: %w", tx.ID, err)

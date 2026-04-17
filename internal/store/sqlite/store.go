@@ -85,9 +85,9 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 	return state, nil
 }
 
-// Write writes a transaction to SQLite.
+// Write writes changes to SQLite.
 // Returns the number of rows actually inserted (0 for rows skipped by INSERT OR IGNORE dedup).
-func (s *Store) Write(tx *core.Transaction) (int, error) {
+func (s *Store) Write(changes []core.Change) (int, error) {
 	sqlTx, err := s.db.Writer.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin transaction: %w", err)
@@ -109,7 +109,12 @@ func (s *Store) Write(tx *core.Transaction) (int, error) {
 	`
 
 	rowsInserted := 0
-	for _, change := range tx.Changes {
+	// Derive transaction ID from changes if available
+	txID := ""
+	if len(changes) > 0 && changes[0].TransactionID != "" {
+		txID = changes[0].TransactionID
+	}
+	for _, change := range changes {
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
 			dataJSON = []byte("{}")
@@ -131,7 +136,7 @@ func (s *Store) Write(tx *core.Transaction) (int, error) {
 		id := change.ID
 		if id == "" {
 			// Fallback: compute hash (should not happen for CDC-sourced changes)
-			hashInput := tx.ID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
+			hashInput := txID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
 			hash := sha256.Sum256([]byte(hashInput))
 			id = hex.EncodeToString(hash[:16])
 		}
@@ -139,7 +144,7 @@ func (s *Store) Write(tx *core.Transaction) (int, error) {
 		res, err := sqlTx.Exec(
 			insertSQL,
 			id,
-			tx.ID,
+			txID,
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
