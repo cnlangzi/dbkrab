@@ -19,6 +19,15 @@ mssql:
   # Default: empty string means use local timezone
   timezone: ""  # Set to match your SQL Server's timezone
 
+  # Connection pool settings (optional - defaults will be used if not specified)
+  # pool_max_open_conns: 30      # Max concurrent connections (default: 30)
+  # pool_max_idle_conns: 15      # Max idle connections (default: 15)
+  # pool_conn_max_lifetime: 30m   # Connection max lifetime (default: 30m)
+  # pool_conn_max_idle_time: 5m  # Idle connection max time (default: 5m)
+
+  # Query timeout for MSSQL queries (default: 30s)
+  # query_timeout: 30s
+
 # -----------------------------------------------------------------------------
 # CDC Monitored Tables
 # -----------------------------------------------------------------------------

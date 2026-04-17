@@ -74,6 +74,14 @@ type MSSQLConfig struct {
 	Password string `yaml:"password"`
 	Database string `yaml:"database"`
 	Timezone string `yaml:"timezone"` // SQL Server timezone (e.g., "Asia/Shanghai", "UTC+8") for CDC timestamp conversion
+
+	// Connection pool settings
+	PoolMaxOpenConns    int `yaml:"pool_max_open_conns"`    // Max concurrent connections (default: 30)
+	PoolMaxIdleConns    int `yaml:"pool_max_idle_conns"`    // Max idle connections (default: 15)
+	PoolConnMaxLifetime string `yaml:"pool_conn_max_lifetime"` // Connection max lifetime (default: 30m)
+	PoolConnMaxIdleTime string `yaml:"pool_conn_max_idle_time"` // Idle connection max time (default: 5m)
+	// Query timeout for MSSQL queries
+	QueryTimeout string `yaml:"query_timeout"` // Query timeout (default: 30s)
 }
 
 // GracefulDegradationConfig contains graceful degradation settings for MSSQL disconnection
