@@ -109,11 +109,6 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 	`
 
 	rowsInserted := 0
-	// Derive transaction ID from changes if available
-	txID := ""
-	if len(changes) > 0 && changes[0].TransactionID != "" {
-		txID = changes[0].TransactionID
-	}
 	for _, change := range changes {
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
@@ -135,7 +130,9 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 		// If not available (e.g., changes from other sources), compute it here
 		id := change.ID
 		if id == "" {
-			// Fallback: compute hash (should not happen for CDC-sourced changes)
+			// Fallback: compute hash using the change's own TransactionID
+			// Preserve original transaction identity, don't derive from batch
+			txID := change.TransactionID
 			hashInput := txID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
 			hash := sha256.Sum256([]byte(hashInput))
 			id = hex.EncodeToString(hash[:16])
@@ -144,7 +141,7 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 		res, err := sqlTx.Exec(
 			insertSQL,
 			id,
-			txID,
+			change.TransactionID, // Use each change's own TransactionID
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
