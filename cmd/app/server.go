@@ -64,6 +64,7 @@ type Server struct {
 	replayService *core.ReplayService  // Replay service for CDC changes replay
 	replayStatus  *replayStatus       // Current replay status (protected by mutex)
 	replayCancel  context.CancelFunc   // Cancel function to stop replay
+	poller        *core.Poller        // CDC poller reference for pause/resume during replay
 }
 
 // replayStatus tracks the status of a replay operation
@@ -89,6 +90,7 @@ func NewServer(
 	cfg *config.Config,
 	watcher *config.Watcher,
 	metricsProvider PollMetricsProvider,
+	poller *core.Poller,
 ) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
@@ -110,6 +112,7 @@ func NewServer(
 		skillsPath:      skillsPath,
 		metricsProvider: metricsProvider,
 		replayStatus:   &replayStatus{Status: "idle"},
+		poller:         poller,
 	}
 }
 
@@ -630,6 +633,27 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 
 	// Start replay in background
 	go func() {
+		// Pause poller to prevent concurrent writes to sink databases
+		if s.poller != nil {
+			slog.Info("replay: pausing poller to prevent concurrent writes")
+			s.poller.Pause()
+			defer func() {
+				slog.Info("replay: resuming poller after completion")
+				s.poller.Resume()
+			}()
+		}
+
+		// Flush all pending writes to disk before starting replay
+		if s.sinkerManager != nil {
+			slog.Info("replay: flushing sinker writes before starting")
+			// Close all sinkers to flush pending writes (they will be reopened on next poll)
+			_ = s.sinkerManager.Close()
+		}
+		if s.monitorDB != nil {
+			slog.Info("replay: flushing monitor logs before starting")
+			_ = s.monitorDB.Flush()
+		}
+
 		// Use stored cancel function for graceful stop
 		ctx, cancel := context.WithCancel(context.Background())
 		s.replayCancel = cancel
