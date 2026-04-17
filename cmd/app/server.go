@@ -12,11 +12,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
+	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
@@ -59,6 +61,18 @@ type Server struct {
 	sinksRoot      *os.Root // Secure root for sinks directory access
 	skillsPath     string   // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
+	replayService *core.ReplayService  // Replay service for CDC changes replay
+	replayStatus  *replayStatus       // Current replay status (protected by mutex)
+}
+
+// replayStatus tracks the status of a replay operation
+type replayStatus struct {
+	mutex       sync.Mutex
+	isRunning   bool
+	Total       int
+	Processed   int
+	Failed      int
+	Status      string // "idle", "running", "completed", "failed"
 }
 
 // NewServer creates a new API server with all features
@@ -94,6 +108,7 @@ func NewServer(
 		configWatcher:   watcher,
 		skillsPath:      skillsPath,
 		metricsProvider: metricsProvider,
+		replayStatus:   &replayStatus{Status: "idle"},
 	}
 }
 
@@ -193,6 +208,9 @@ func (s *Server) registerAPIRoutes() {
 	if s.store != nil {
 		api.Get("/cdc/changes", s.handleCDCChanges, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
+		// CDC replay routes
+		api.Post("/cdc/replay", s.handleCDCReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/cdc/replay/status", s.handleCDCReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC changes/status routes registered")
 	} else {
 		slog.Warn("CDC changes/status routes skipped - store is nil")
@@ -564,6 +582,126 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 	}
 
 	return c.View(response)
+}
+
+// handleCDCReplay handles POST /api/cdc/replay
+// Starts replay of all CDC changes from the store
+func (s *Server) handleCDCReplay(c *xun.Context) error {
+	if s.store == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "store not initialized",
+		})
+	}
+
+	// Check if replay is already running
+	s.replayStatus.mutex.Lock()
+	if s.replayStatus.isRunning {
+		s.replayStatus.mutex.Unlock()
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "replay already in progress",
+		})
+	}
+	s.replayStatus.isRunning = true
+	s.replayStatus.Status = "running"
+	s.replayStatus.Processed = 0
+	s.replayStatus.Failed = 0
+	s.replayStatus.Total = 0
+	s.replayStatus.mutex.Unlock()
+
+	// Create replay service if not exists
+	if s.replayService == nil {
+		// Create handler that uses the actual plugin manager to execute skills
+		var handler core.Handler
+		if s.manager != nil {
+			handler = s.manager
+		} else {
+			// Fallback: log only
+			handler = core.PluginHandler(func(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
+				slog.Debug("replaying transaction", "tx_id", tx.ID, "changes", len(tx.Changes))
+				return nil
+			})
+		}
+		s.replayService = core.NewReplayService(s.store, handler, s.dlq, s.monitorDB)
+	}
+
+	// Start replay in background
+	go func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Debug: log store type
+		slog.Debug("replay: store type", "type", fmt.Sprintf("%T", s.store))
+
+		// Get LSN count first to set total
+		lsns, err := s.store.GetLSNs()
+		if err != nil {
+			slog.Error("failed to get LSNs for replay", "error", err)
+			s.replayStatus.mutex.Lock()
+			s.replayStatus.Status = "failed"
+			s.replayStatus.isRunning = false
+			s.replayStatus.mutex.Unlock()
+			return
+		}
+
+		slog.Info("replay: got LSNs", "count", len(lsns))
+
+		s.replayStatus.mutex.Lock()
+		s.replayStatus.Total = len(lsns)
+		s.replayStatus.mutex.Unlock()
+
+		result, err := s.replayService.Execute(ctx, func(processed, total int) {
+			s.replayStatus.mutex.Lock()
+			s.replayStatus.Processed = processed
+			s.replayStatus.mutex.Unlock()
+		})
+
+		s.replayStatus.mutex.Lock()
+		defer s.replayStatus.mutex.Unlock()
+
+		if err != nil {
+			s.replayStatus.Status = "failed"
+			slog.Error("replay failed", "error", err)
+		} else {
+			s.replayStatus.Status = "completed"
+			s.replayStatus.Processed = result.ProcessedLSNs
+			s.replayStatus.Failed = result.FailedLSNs
+			slog.Info("replay completed",
+				"total_lsns", result.TotalLSNs,
+				"processed", result.ProcessedLSNs,
+				"failed", result.FailedLSNs,
+				"total_changes", result.TotalChanges)
+		}
+		s.replayStatus.isRunning = false
+	}()
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": "replay started",
+	})
+}
+
+// handleCDCReplayStatus handles GET /api/cdc/replay/status
+// Returns current replay status
+func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
+	if s.store == nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "store not initialized",
+		})
+	}
+
+	s.replayStatus.mutex.Lock()
+	defer s.replayStatus.mutex.Unlock()
+
+	return c.View(map[string]any{
+		"success":   true,
+		"status":    s.replayStatus.Status,
+		"total":     s.replayStatus.Total,
+		"processed": s.replayStatus.Processed,
+		"failed":    s.replayStatus.Failed,
+	})
 }
 
 // handleCDCGap handles GET /api/cdc/gap
