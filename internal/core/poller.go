@@ -520,65 +520,63 @@ func (p *Poller) poll(ctx context.Context) error {
 	return p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, time.Duration(0), time.Duration(0), time.Duration(0), 0, 0, 0)
 }
 
-// processDirect processes changes without transaction buffer (legacy behavior)
+// processDirect processes changes without transaction grouping.
+// One LSN batch => one target-side transaction (per-LSN semantics).
+// Handler and Store receive the full []Change for the batch.
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
 	// Create BatchContext for this poll cycle
 	batchCtx := NewBatchContext()
 	
 	syncStartTime := time.Now()
 
-	// Group by transaction ID and deliver
-	txs := p.groupByTransaction(allChanges)
-
 	// Track DLQ count, store duration, and actual rows inserted
 	dlqCount := 0
 	actualInserted := 0
 	var totalStoreDuration time.Duration
 	var handlerErrors []error
-
-	// Process all transactions
 	var processErrors []error
-	for _, tx := range txs {
-		// Handler processing with retry (non-blocking: continue even if handler fails)
-		// Plugin writes to its own sink
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, tx.Changes, batchCtx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("handler error",
-					"batch_id", batchCtx.BatchID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(&tx, err, "handler")
-				dlqCount++
-				handlerErrors = append(handlerErrors, err)
-			}
-		}
 
-		// Store processing with retry (blocking: must succeed for offset advancement)
-		if p.store != nil {
-			storeStart := time.Now()
-			var inserted int
-			err := retry.DoWithName(ctx, func() error {
-				var writeErr error
-				inserted, writeErr = p.store.Write(tx.Changes)
-				return writeErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
-			storeDuration := time.Since(storeStart)
-			totalStoreDuration += storeDuration
-			if err != nil {
-				slog.Error("store error",
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(&tx, err, "store")
-				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-				dlqCount++
-			} else {
-				actualInserted += inserted
-			}
+	// Handler processing with retry (non-blocking: continue even if handler fails)
+	// Plugin receives the full LSN batch and may reconstruct transactions internally if needed
+	if p.handler != nil {
+		var handlerErr error
+		err := retry.DoWithName(ctx, func() error {
+			handlerErr = p.handler.Handle(ctx, allChanges, batchCtx)
+			return handlerErr
+		}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_batch_%s", batchCtx.BatchID))
+		if err != nil {
+			slog.Error("handler error",
+				"batch_id", batchCtx.BatchID,
+				"error", err)
+			// Write each failed change to DLQ (change-scoped)
+			p.writeChangesToDLQ(allChanges, err, "handler")
+			dlqCount += len(allChanges)
+			handlerErrors = append(handlerErrors, err)
+		}
+	}
+
+	// Store processing with retry (blocking: must succeed for offset advancement)
+	// Store writes the full LSN batch in one operation
+	if p.store != nil {
+		storeStart := time.Now()
+		var inserted int
+		err := retry.DoWithName(ctx, func() error {
+			var writeErr error
+			inserted, writeErr = p.store.Write(allChanges)
+			return writeErr
+		}, retry.DefaultRetryConfig(), fmt.Sprintf("store_batch_%s", batchCtx.BatchID))
+		storeDuration := time.Since(storeStart)
+		totalStoreDuration += storeDuration
+		if err != nil {
+			slog.Error("store error",
+				"batch_id", batchCtx.BatchID,
+				"error", err)
+			// Write each failed change to DLQ (change-scoped)
+			p.writeChangesToDLQ(allChanges, err, "store")
+			processErrors = append(processErrors, fmt.Errorf("store batch %s: %w", batchCtx.BatchID, err))
+			dlqCount += len(allChanges)
+		} else {
+			actualInserted = inserted
 		}
 	}
 
@@ -603,7 +601,8 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	}
 
 	// Then: update offsets after successful flush
-	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, len(txs), actualInserted); err != nil {
+	// Note: TxCount is 0 since we no longer group by transaction at poller level
+	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, 0, actualInserted); err != nil {
 		return err
 	}
 
@@ -619,9 +618,9 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 
 		totalDuration := time.Since(fetchTime)
 		batchLog := &monitor.BatchLog{
-			BatchID:      batchCtx.BatchID,
+			BatchID:     batchCtx.BatchID,
 			FetchedRows: len(allChanges),
-			TxCount:     len(txs),
+			TxCount:     0, // No transaction grouping at poller level
 			DLQCount:    dlqCount,
 			DurationMs:  totalDuration.Milliseconds(),
 			Status:      pullStatus,
@@ -1040,7 +1039,61 @@ func (p *Poller) recordGapCheck() {
 	p.gapCheckMu.Unlock()
 }
 
-// writeToDLQ writes a failed transaction to the dead letter queue
+// writeChangesToDLQ writes failed changes to the dead letter queue (change-scoped).
+// Each change is written as a separate DLQ entry for granular retry.
+func (p *Poller) writeChangesToDLQ(changes []Change, err error, source string) {
+	if p.dlq == nil {
+		slog.Warn("cannot write to DLQ: not initialized",
+			"source", source,
+			"changes", len(changes))
+		return
+	}
+
+	// Determine retry count from error if it's a RetryError
+	retryCount := 0
+	var retryErr *retry.RetryError
+	if errors.As(err, &retryErr) {
+		retryCount = retryErr.RetryCount
+	}
+
+	// Generate a trace ID for this batch
+	batchTraceID := fmt.Sprintf("batch-%d", time.Now().UnixNano())
+
+	// Write each change as a separate DLQ entry (change-scoped)
+	for i, c := range changes {
+		// Encode change data as JSON
+		changeJSON, encodeErr := json.Marshal(c)
+		if encodeErr != nil {
+			slog.Error("failed to encode change data",
+				"table", c.Table,
+				"lsn", fmt.Sprintf("%x", c.LSN),
+				"error", encodeErr)
+			changeJSON = []byte("{}")
+		}
+
+		entry := &dlq.DLQEntry{
+			TraceID:      fmt.Sprintf("%s-%d", batchTraceID, i),
+			Source:       source,
+			LSN:          fmt.Sprintf("%x", c.LSN),
+			TableName:    c.Table,
+			Operation:    c.Operation.String(),
+			ChangeData:   string(changeJSON),
+			ErrorMessage: fmt.Sprintf("%s error (batch[%d]): %v", source, i, err),
+			RetryCount:   retryCount,
+			Status:       dlq.StatusPending,
+		}
+
+		if writeErr := p.dlq.Write(entry); writeErr != nil {
+			slog.Error("failed to write DLQ entry",
+				"table", c.Table,
+				"lsn", fmt.Sprintf("%x", c.LSN),
+				"error", writeErr)
+		}
+	}
+}
+
+// writeToDLQ writes a failed transaction to the dead letter queue (deprecated, use writeChangesToDLQ).
+// Kept for backward compatibility with replay service.
 func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 	if p.dlq == nil {
 		slog.Warn("cannot write to DLQ: not initialized",
