@@ -16,27 +16,27 @@ import (
 type AlertLevel string
 
 const (
-	AlertLevelInfo     AlertLevel = "info"
-	AlertLevelWarning  AlertLevel = "warning"
-	AlertLevelCritical AlertLevel = "critical"
+	AlertLevelInfo      AlertLevel = "info"
+	AlertLevelWarning   AlertLevel = "warning"
+	AlertLevelCritical  AlertLevel = "critical"
 	AlertLevelEmergency AlertLevel = "emergency"
 )
 
 // Alert represents an alert notification
 type Alert struct {
-	Level     AlertLevel  `json:"level"`
-	Title     string      `json:"title"`
-	Message   string      `json:"message"`
-	Table     string      `json:"table,omitempty"`
+	Level     AlertLevel   `json:"level"`
+	Title     string       `json:"title"`
+	Message   string       `json:"message"`
+	Table     string       `json:"table,omitempty"`
 	GapInfo   *cdc.GapInfo `json:"gap_info,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
+	Timestamp time.Time    `json:"timestamp"`
 }
 
 // AlertConfig contains alert configuration
 type AlertConfig struct {
-	Enabled   bool            `yaml:"enabled"`
+	Enabled    bool           `yaml:"enabled"`
 	WebhookURL string         `yaml:"webhook_url,omitempty"`
-	Channels  []AlertChannel `yaml:"channels"`
+	Channels   []AlertChannel `yaml:"channels"`
 }
 
 // AlertChannel represents a notification channel
@@ -48,10 +48,10 @@ type AlertChannel struct {
 
 // AlertManager handles alert notifications
 type AlertManager struct {
-	config  AlertConfig
-	client  *http.Client
-	wg      sync.WaitGroup
-	sem     chan struct{} // Bounded concurrency for async alerts
+	config AlertConfig
+	client *http.Client
+	wg     sync.WaitGroup
+	sem    chan struct{} // Bounded concurrency for async alerts
 }
 
 // NewAlertManager creates a new alert manager
@@ -198,7 +198,7 @@ func (m *AlertManager) sendFeishu(url string, alert Alert) error {
 		"card": map[string]interface{}{
 			"header": map[string]interface{}{
 				"title": map[string]interface{}{
-					"tag":   "plain_text",
+					"tag":     "plain_text",
 					"content": fmt.Sprintf("[%s] %s", alert.Level, alert.Title),
 				},
 				"template": getFeishuTemplate(alert.Level),

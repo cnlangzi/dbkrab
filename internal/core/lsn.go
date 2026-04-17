@@ -38,7 +38,7 @@ func (l LSN) Compare(other LSN) int {
 		}
 		return 1
 	}
-	
+
 	for i := 0; i < len(l); i++ {
 		if l[i] < other[i] {
 			return -1
@@ -64,7 +64,7 @@ func MinLSN(lsns []LSN) (LSN, error) {
 	if len(lsns) == 0 {
 		return nil, fmt.Errorf("empty LSN slice")
 	}
-	
+
 	min := lsns[0]
 	for _, l := range lsns[1:] {
 		if l.Compare(min) < 0 {

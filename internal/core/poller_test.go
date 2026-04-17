@@ -301,32 +301,32 @@ func (s *mockOffsetStore) Flush() error {
 }
 
 func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		offsetVal, ok := s.data[table]
-		if !ok {
-			return offset.Offset{}, nil
-		}
-		return offsetVal, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	offsetVal, ok := s.data[table]
+	if !ok {
+		return offset.Offset{}, nil
 	}
+	return offsetVal, nil
+}
 
 func (s *mockOffsetStore) Set(table string, lastLSN string, nextLSN string) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.setCalled = true
-		s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, UpdatedAt: time.Now()}
-		return nil
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setCalled = true
+	s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, UpdatedAt: time.Now()}
+	return nil
+}
 
 func (s *mockOffsetStore) GetAll() (map[string]offset.Offset, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		result := make(map[string]offset.Offset)
-		for k, v := range s.data {
-			result[k] = v
-		}
-		return result, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[string]offset.Offset)
+	for k, v := range s.data {
+		result[k] = v
 	}
+	return result, nil
+}
 
 type mockHandler struct {
 	fail bool
@@ -418,13 +418,13 @@ func TestPollMetricsWindowEmpty(t *testing.T) {
 // TestPollMetricsFlushDuration tests that PollMetrics includes FlushDurationMs field
 func TestPollMetricsFlushDuration(t *testing.T) {
 	pm := PollMetrics{
-		FetchedChanges:    100,
-		ProcessedTx:       5,
-		PullDurationMs:    23,
-		StoreDurationMs:   12,
-		FlushDurationMs:   3,
-		DLQCount:          0,
-		LastLSN:           "0x00123:00004567",
+		FetchedChanges:  100,
+		ProcessedTx:     5,
+		PullDurationMs:  23,
+		StoreDurationMs: 12,
+		FlushDurationMs: 3,
+		DLQCount:        0,
+		LastLSN:         "0x00123:00004567",
 	}
 
 	// Verify all duration fields are present

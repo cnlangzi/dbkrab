@@ -21,8 +21,8 @@ type ReplayStore interface {
 type ReplayService struct {
 	store     ReplayStore
 	handler   Handler
-	dlq       *dlq.DLQ      // DLQ for recording failures
-	monitorDB *monitor.DB  // For writing batch logs
+	dlq       *dlq.DLQ    // DLQ for recording failures
+	monitorDB *monitor.DB // For writing batch logs
 }
 
 // ReplayResult contains the replay statistics
@@ -302,7 +302,7 @@ func (r *ReplayService) writeToDLQ(tx *Transaction, handlerErr error, lsn string
 		return
 	}
 
-		slog.Warn("transaction written to DLQ during replay",
+	slog.Warn("transaction written to DLQ during replay",
 		"trace_id", tx.TraceID,
 		"tx_id", tx.ID,
 		"table", tableName,

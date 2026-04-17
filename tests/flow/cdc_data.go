@@ -37,23 +37,23 @@ func hexCharToByte(a, b byte, out *byte) {
 
 // ChangeBuilder helps build mock CDC changes
 type ChangeBuilder struct {
-	table         string
-	txID         string
-	lsn          []byte
-	operation    core.Operation
-	data         map[string]interface{}
-	commitTime   time.Time
+	table      string
+	txID       string
+	lsn        []byte
+	operation  core.Operation
+	data       map[string]interface{}
+	commitTime time.Time
 }
 
 // NewChange creates a new change builder
 func NewChange(table, txID string) *ChangeBuilder {
 	return &ChangeBuilder{
-		table:       table,
-		txID:        txID,
-		lsn:         BuildLSN("0000000001000000"),
-		operation:   core.OpInsert,
-		data:        make(map[string]interface{}),
-		commitTime:  time.Now(),
+		table:      table,
+		txID:       txID,
+		lsn:        BuildLSN("0000000001000000"),
+		operation:  core.OpInsert,
+		data:       make(map[string]interface{}),
+		commitTime: time.Now(),
 	}
 }
 
@@ -154,8 +154,8 @@ func MockProductChange(txID string, productID int64, productName string, price f
 // SingleTransactionChanges creates changes all in the same transaction
 // Useful for building cross-table transaction test data
 type TransactionBuilder struct {
-	txID      string
-	changes   []core.Change
+	txID       string
+	changes    []core.Change
 	commitTime time.Time
 }
 

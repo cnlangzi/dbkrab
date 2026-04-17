@@ -24,21 +24,21 @@ var migrationsFS embed.FS
 type Status string
 
 const (
-	StatusPending   Status = "pending"
-	StatusResolved  Status = "resolved"
-	StatusIgnored   Status = "ignored"
-	StatusRetrying  Status = "retrying"
+	StatusPending  Status = "pending"
+	StatusResolved Status = "resolved"
+	StatusIgnored  Status = "ignored"
+	StatusRetrying Status = "retrying"
 )
 
 // DLQEntry represents a dead letter queue entry
 type DLQEntry struct {
 	ID           int64     `json:"id"`
-	TraceID      string    `json:"trace_id"`      // Trace ID for log correlation
-	Source       string    `json:"source"`        // Error source: handler, store, flush_handler, etc.
+	TraceID      string    `json:"trace_id"` // Trace ID for log correlation
+	Source       string    `json:"source"`   // Error source: handler, store, flush_handler, etc.
 	LSN          string    `json:"lsn"`
 	TableName    string    `json:"table_name"`
 	Operation    string    `json:"operation"`
-	ChangeData   string    `json:"change_data"`   // JSON-encoded change data
+	ChangeData   string    `json:"change_data"` // JSON-encoded change data
 	ErrorMessage string    `json:"error_message"`
 	RetryCount   int       `json:"retry_count"`
 	Status       Status    `json:"status"`

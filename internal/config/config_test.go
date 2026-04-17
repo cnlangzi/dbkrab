@@ -162,8 +162,8 @@ func TestParseTimezone(t *testing.T) {
 			wantOff: 8 * 3600, // UTC+8
 		},
 		{
-			name:    "IANA timezone America/New_York",
-			tzStr:   "America/New_York",
+			name:  "IANA timezone America/New_York",
+			tzStr: "America/New_York",
 			// Offset varies by DST, skip exact offset check
 		},
 		{

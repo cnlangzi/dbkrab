@@ -15,8 +15,8 @@ import (
 type Operation int
 
 const (
-	OpDelete Operation = 1
-	OpInsert Operation = 2
+	OpDelete       Operation = 1
+	OpInsert       Operation = 2
 	OpUpdateBefore Operation = 3
 	OpUpdateAfter  Operation = 4
 )
@@ -45,18 +45,18 @@ type Change struct {
 	Operation     Operation              `json:"operation"`
 	Data          map[string]interface{} `json:"data"`
 	CommitTime    time.Time              `json:"commit_time"` // Transaction commit time from source database
-	ID            string                 `json:"id"`         // Content-based hash ID for deduplication
+	ID            string                 `json:"id"`          // Content-based hash ID for deduplication
 }
 
 // Transaction represents a group of changes in the same transaction
 type Transaction struct {
-	TraceID        string      `json:"trace_id"`         // Human-readable trace ID for log correlation
-	ID             string      `json:"id"`              // Internal transaction ID
-	Changes        []Change    `json:"changes"`
-	CreatedAt      time.Time   `json:"created_at"`
-	CommitTime     time.Time   `json:"commit_time"`     // Transaction commit time (from first change)
-	FirstSeenTime  time.Time   `json:"first_seen_time"` // When first change was added to buffer
-	InvolvedTables []string    `json:"involved_tables"` // Tables that have changes in this transaction
+	TraceID        string    `json:"trace_id"` // Human-readable trace ID for log correlation
+	ID             string    `json:"id"`       // Internal transaction ID
+	Changes        []Change  `json:"changes"`
+	CreatedAt      time.Time `json:"created_at"`
+	CommitTime     time.Time `json:"commit_time"`     // Transaction commit time (from first change)
+	FirstSeenTime  time.Time `json:"first_seen_time"` // When first change was added to buffer
+	InvolvedTables []string  `json:"involved_tables"` // Tables that have changes in this transaction
 }
 
 // AddChange adds a change to the transaction
@@ -67,9 +67,9 @@ func (t *Transaction) AddChange(c Change) {
 // NewTransaction creates a new transaction with a unique trace ID
 func NewTransaction(id string) *Transaction {
 	return &Transaction{
-		TraceID:  generateTraceID(),
-		ID:      id,
-		Changes: make([]Change, 0),
+		TraceID:   generateTraceID(),
+		ID:        id,
+		Changes:   make([]Change, 0),
 		CreatedAt: time.Now(),
 	}
 }

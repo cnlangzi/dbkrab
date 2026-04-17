@@ -25,7 +25,7 @@ const (
 	TypeDateTime2        = scanner.TypeDateTime2
 	TypeSmallDateTime    = scanner.TypeSmallDateTime
 	TypeDate             = scanner.TypeDate
-	TypeTime            = scanner.TypeTime
+	TypeTime             = scanner.TypeTime
 	TypeDateTimeOffset   = scanner.TypeDateTimeOffset
 	TypeUniqueIdentifier = scanner.TypeUniqueIdentifier
 	TypeChar             = scanner.TypeChar

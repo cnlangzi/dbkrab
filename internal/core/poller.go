@@ -16,26 +16,26 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
-	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
+	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
 // PollMetrics holds per-poll performance metrics
 type PollMetrics struct {
-	FetchedChanges    int           // total CDC changes fetched this poll
-	ProcessedTx       int           // number of transactions processed
-	SyncDurationMs    int64         // time spent in sync (handler + store) in milliseconds
-	PullDurationMs    int64         // time spent pulling changes from CDC source (GetChanges loop)
-	StoreDurationMs   int64         // time spent in store write in milliseconds (write_ms)
-	FlushDurationMs   int64         // time spent in store flush in milliseconds
-	DLQCount          int           // number of transactions sent to DLQ
-	LastPollTime      time.Time     // when the poll cycle started (fetch time)
-	LastFetchTime     time.Time     // when changes were fetched (same as LastPollTime)
-	LastSyncTime      time.Time     // when sync completed
-	LastLSN           string        // LSN after this poll
-	SyncTPS           float64       // computed TPS (fetched_changes / sync_duration_seconds)
-	EndToEndLatencyMs int64         // end-to-end latency from fetch to sync complete
+	FetchedChanges    int       // total CDC changes fetched this poll
+	ProcessedTx       int       // number of transactions processed
+	SyncDurationMs    int64     // time spent in sync (handler + store) in milliseconds
+	PullDurationMs    int64     // time spent pulling changes from CDC source (GetChanges loop)
+	StoreDurationMs   int64     // time spent in store write in milliseconds (write_ms)
+	FlushDurationMs   int64     // time spent in store flush in milliseconds
+	DLQCount          int       // number of transactions sent to DLQ
+	LastPollTime      time.Time // when the poll cycle started (fetch time)
+	LastFetchTime     time.Time // when changes were fetched (same as LastPollTime)
+	LastSyncTime      time.Time // when sync completed
+	LastLSN           string    // LSN after this poll
+	SyncTPS           float64   // computed TPS (fetched_changes / sync_duration_seconds)
+	EndToEndLatencyMs int64     // end-to-end latency from fetch to sync complete
 }
 
 // pollMetricsWindow maintains a sliding window of recent poll metrics
@@ -87,42 +87,40 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 	return totalLatency / int64(len(w.samples))
 }
 
-
-
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
-	cfg           *config.Config
-	db            *sql.DB
-	querier       CDCQuerier
-	cdcAdmin      *cdcadmin.Admin
-	gapDetector   *cdc.GapDetector
-	alertManager  *alert.AlertManager
-	offsets       offset.StoreInterface
+	cfg          *config.Config
+	db           *sql.DB
+	querier      CDCQuerier
+	cdcAdmin     *cdcadmin.Admin
+	gapDetector  *cdc.GapDetector
+	alertManager *alert.AlertManager
+	offsets      offset.StoreInterface
 	store        Store
-	handler       Handler
-	dlq           *dlq.DLQ           // DLQ store
-	monitorDB *monitor.DB     // Observability logs database
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	paused        bool
-	pausedMu      sync.RWMutex
-	polling       bool  // true when poll is running, prevents overlapping polls
-	lastGapCheck  time.Time
-	gapCheckMu    sync.RWMutex
-	txBuffer      *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
-	
+	handler      Handler
+	dlq          *dlq.DLQ    // DLQ store
+	monitorDB    *monitor.DB // Observability logs database
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	paused       bool
+	pausedMu     sync.RWMutex
+	polling      bool // true when poll is running, prevents overlapping polls
+	lastGapCheck time.Time
+	gapCheckMu   sync.RWMutex
+	txBuffer     *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
+
 	// Graceful degradation fields
 	disconnectStart time.Time
 	disconnectMu    sync.RWMutex
-	
+
 	// Hot reload fields
-	reloadCh      <-chan *config.Config  // Channel for config reload signals
-	pendingCfg    *config.Config         // Pending config to apply
-	
+	reloadCh   <-chan *config.Config // Channel for config reload signals
+	pendingCfg *config.Config        // Pending config to apply
+
 	// Metrics fields
-	metricsMu        sync.RWMutex        // protects metrics
-	metrics          PollMetrics          // last poll metrics
-	metricsWindow    *pollMetricsWindow   // 1-minute sliding window (~60 samples at 1s interval)
+	metricsMu     sync.RWMutex       // protects metrics
+	metrics       PollMetrics        // last poll metrics
+	metricsWindow *pollMetricsWindow // 1-minute sliding window (~60 samples at 1s interval)
 }
 
 // Store interface for storing changes
@@ -161,10 +159,10 @@ func (h PluginHandler) Handle(ctx context.Context, changes []Change, batchCtx *B
 }
 
 type tablePollResult struct {
-	table       string
-	changes     []Change
-	lastLSN     LSN
-	err         error
+	table   string
+	changes []Change
+	lastLSN LSN
+	err     error
 }
 
 var ErrNoNewData = errors.New("no new data available for table")
@@ -174,9 +172,9 @@ var ErrNoNewData = errors.New("no new data available for table")
 // ensuring all tables see the same boundary for cross-table transaction consistency.
 //
 // Logic:
-//   1. If last_lsn is empty → getMinLSN() as cold start
-//   2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
-//   3. If last_lsn == max_lsn → no new data
+//  1. If last_lsn is empty → getMinLSN() as cold start
+//  2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
+//  3. If last_lsn == max_lsn → no new data
 func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset, globalMaxLSN LSN) ([]byte, error) {
 	// Case 1: Cold start - no stored last_lsn
 	if stored.LastLSN == "" {
@@ -231,16 +229,16 @@ func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, off
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
-		handler:     handler,
-		cfg:       cfg,
-		db:        db,
-		querier:   cdc.NewQuerier(db, mssqlTimezone),
-		cdcAdmin:  cdcadmin.NewAdmin(&cfg.MSSQL),
-		offsets:   offsetStore,
-		store:     store,
-		dlq:       dlqStore,
-		monitorDB: monitorDB,
-		stopCh:    make(chan struct{}),
+		handler:       handler,
+		cfg:           cfg,
+		db:            db,
+		querier:       cdc.NewQuerier(db, mssqlTimezone),
+		cdcAdmin:      cdcadmin.NewAdmin(&cfg.MSSQL),
+		offsets:       offsetStore,
+		store:         store,
+		dlq:           dlqStore,
+		monitorDB:     monitorDB,
+		stopCh:        make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
 
@@ -288,8 +286,8 @@ func (p *Poller) Start(ctx context.Context) error {
 	for _, status := range statuses {
 		if status.CDCEnabled {
 			if status.EnableError != "" {
-				slog.Warn("CDC enable attempted but failed (requires DBO privileges)", 
-					"table", status.Schema+"."+status.Table, 
+				slog.Warn("CDC enable attempted but failed (requires DBO privileges)",
+					"table", status.Schema+"."+status.Table,
 					"capture_instance", status.CaptureInstance,
 					"error", status.EnableError)
 			} else if status.NeedsEnable {
@@ -399,7 +397,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	// P0-6: Use timeout context for CDC queries to prevent blocking
 	const queryTimeout = 10 * time.Second
 	const changesTimeout = 10 * time.Second // Separate timeout for GetChanges
-	
+
 	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
@@ -526,7 +524,7 @@ func (p *Poller) poll(ctx context.Context) error {
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
 	// Create BatchContext for this poll cycle
 	batchCtx := NewBatchContext()
-	
+
 	syncStartTime := time.Now()
 
 	// Track DLQ count, store duration, and actual rows inserted
@@ -724,7 +722,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	if len(allChanges) > 0 {
 		syncEndTime := time.Now()
 		endToEndLatency := syncEndTime.Sub(fetchTime)
-		
+
 		// Compute TPS: fetched_changes / sync_duration_seconds
 		var syncTPS float64
 		if syncDuration.Seconds() > 0 {
@@ -808,7 +806,7 @@ func (p *Poller) handleDisconnection(ctx context.Context, err error, reconnectDe
 	p.disconnectMu.Lock()
 	if p.disconnectStart.IsZero() {
 		p.disconnectStart = time.Now()
-		slog.Warn("MSSQL disconnection detected, entering reconnection mode", 
+		slog.Warn("MSSQL disconnection detected, entering reconnection mode",
 			"error", err)
 	}
 	p.disconnectMu.Unlock()
@@ -1243,23 +1241,22 @@ func tablesEqual(a, b []string) bool {
 	return true
 }
 
-
 // GetMetrics returns the current poll metrics and 1-minute window averages
 func (p *Poller) GetMetrics() map[string]interface{} {
 	p.metricsMu.RLock()
 	m := p.metrics
 	p.metricsMu.RUnlock()
-	
+
 	// Get window averages
 	avgTPS := p.metricsWindow.avgTPS()
 	avgLatency := p.metricsWindow.avgLatencyMs()
-	
+
 	return map[string]interface{}{
 		"last_fetched":          m.FetchedChanges,
 		"last_processed_tx":     m.ProcessedTx,
 		"last_sync_tps":         m.SyncTPS,
 		"last_sync_duration_ms": m.SyncDurationMs,
-		"last_batch_ms":          m.PullDurationMs,
+		"last_batch_ms":         m.PullDurationMs,
 		"last_write_ms":         m.StoreDurationMs,
 		"last_flush_ms":         m.FlushDurationMs,
 		"last_dlq_count":        m.DLQCount,

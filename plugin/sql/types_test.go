@@ -726,7 +726,7 @@ func TestSinkConfigEvalIf(t *testing.T) {
 			ifExpr: "cdc_table = 'orders'",
 			cdcParams: CDCParameters{
 				CDCTable: "orders",
-				Fields:  map[string]interface{}{},
+				Fields:   map[string]interface{}{},
 			},
 			wantResult: true,
 		},

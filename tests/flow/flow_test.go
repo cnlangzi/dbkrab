@@ -2,7 +2,8 @@
 // These tests run entirely in-memory without MSSQL dependencies.
 //
 // Run tests with:
-//   go test -v ./tests/flow
+//
+//	go test -v ./tests/flow
 //
 // The test package exercises:
 //   - Transaction grouping from []core.Change
@@ -39,8 +40,8 @@ func newMemOffsetStore() *memOffsetStore {
 	}
 }
 
-func (s *memOffsetStore) Load() error   { return nil }
-func (s *memOffsetStore) Save() error   { return nil }
+func (s *memOffsetStore) Load() error { return nil }
+func (s *memOffsetStore) Save() error { return nil }
 func (s *memOffsetStore) Get(table string) (offset.Offset, error) {
 	if o, ok := s.offsets[table]; ok {
 		return o, nil
@@ -157,11 +158,11 @@ func (h *testHarness) setupSkillFixtures() {
 func (h *testHarness) setupPluginManager(dbConfigs map[string]config.SinkConfig) *plugin.Manager {
 	mgr := plugin.NewManager(nil)
 	if err := mgr.Init(context.Background(), nil, struct {
-		Enabled      bool
-		Path         string
+		Enabled bool
+		Path    string
 	}{
 		Enabled: true,
-		Path:   h.skillPath,
+		Path:    h.skillPath,
 	}, dbConfigs); err != nil {
 		h.t.Fatalf("plugin manager init failed: %v", err)
 	}
@@ -196,7 +197,7 @@ func buildDBConfigs(dbNames ...string) map[string]config.SinkConfig {
 		configs[name] = config.SinkConfig{
 			Name: name,
 			Type: "sqlite",
-			DSN: "", // Will be set by sink writer
+			DSN:  "", // Will be set by sink writer
 		}
 	}
 	return configs
@@ -259,9 +260,9 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 			WithLSN("0000000001000001").
 			WithOperation(core.OpInsert).
 			WithData(map[string]interface{}{
-				"order_id":  1,
-				"amount":    100.50,
-				"status":    "pending",
+				"order_id":   1,
+				"amount":     100.50,
+				"status":     "pending",
 				"created_at": time.Now(),
 			}).
 			Build(),
@@ -334,9 +335,9 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 			LSN:           BuildLSN("0000000001000001"),
 			Operation:     core.OpInsert,
 			Data: map[string]interface{}{
-				"order_id":  2,
-				"amount":    200.00,
-				"status":    "pending",
+				"order_id":   2,
+				"amount":     200.00,
+				"status":     "pending",
 				"created_at": commitTime,
 			},
 			CommitTime: commitTime,
@@ -347,9 +348,9 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 			LSN:           BuildLSN("0000000001000002"),
 			Operation:     core.OpUpdateAfter,
 			Data: map[string]interface{}{
-				"order_id":  2,
-				"amount":    200.00,
-				"status":    "confirmed",
+				"order_id":   2,
+				"amount":     200.00,
+				"status":     "confirmed",
 				"created_at": commitTime,
 			},
 			CommitTime: commitTime,
@@ -442,9 +443,9 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 			LSN:           BuildLSN("0000000001000001"),
 			Operation:     core.OpInsert,
 			Data: map[string]interface{}{
-				"order_id":  3,
-				"amount":    300.00,
-				"status":    "pending",
+				"order_id":   3,
+				"amount":     300.00,
+				"status":     "pending",
 				"created_at": commitTime,
 			},
 			CommitTime: commitTime,
@@ -646,9 +647,9 @@ func TestFlow_MultiDatabaseRouting(t *testing.T) {
 			LSN:           BuildLSN("0000000001000001"),
 			Operation:     core.OpInsert,
 			Data: map[string]interface{}{
-				"order_id":  6,
-				"amount":    600.00,
-				"status":    "pending",
+				"order_id":   6,
+				"amount":     600.00,
+				"status":     "pending",
 				"created_at": commitTime,
 			},
 			CommitTime: commitTime,

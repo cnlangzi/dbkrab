@@ -10,20 +10,20 @@ import (
 
 // RetryConfig defines the retry configuration
 type RetryConfig struct {
-	MaxRetries    int           // Maximum number of retry attempts
-	InitialDelay  time.Duration // Initial delay between retries
-	MaxDelay      time.Duration // Maximum delay between retries
-	Multiplier    float64       // Delay multiplier for exponential backoff
-	RetryableErrors []string    // Additional retryable error patterns
+	MaxRetries      int           // Maximum number of retry attempts
+	InitialDelay    time.Duration // Initial delay between retries
+	MaxDelay        time.Duration // Maximum delay between retries
+	Multiplier      float64       // Delay multiplier for exponential backoff
+	RetryableErrors []string      // Additional retryable error patterns
 }
 
 // DefaultRetryConfig returns the default retry configuration
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxRetries:    5,
-		InitialDelay:  1 * time.Second,
-		MaxDelay:      60 * time.Second,
-		Multiplier:    2.0,
+		MaxRetries:   5,
+		InitialDelay: 1 * time.Second,
+		MaxDelay:     60 * time.Second,
+		Multiplier:   2.0,
 	}
 }
 

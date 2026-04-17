@@ -17,10 +17,10 @@ import (
 
 // Manager manages SQL plugins.
 type Manager struct {
-	plugins   map[string]Plugin  // SQL plugin registry (key="sql" for single SQLPlugin)
-	sqlPlugin *sql.Plugin        // direct reference to SQLPlugin for fast access
-	swManager *sinker.Manager    // Routes sinks to appropriate writers
-	monitorDB *monitor.DB    // Observability logs database
+	plugins   map[string]Plugin // SQL plugin registry (key="sql" for single SQLPlugin)
+	sqlPlugin *sql.Plugin       // direct reference to SQLPlugin for fast access
+	swManager *sinker.Manager   // Routes sinks to appropriate writers
+	monitorDB *monitor.DB       // Observability logs database
 	mu        sync.RWMutex
 }
 
@@ -36,8 +36,8 @@ func NewManager(monitorDB *monitor.DB) *Manager {
 
 // Init initializes all SQL plugins based on the provided config.
 func (m *Manager) Init(_ context.Context, db *dbsql.DB, sqlCfg struct {
-	Enabled       bool
-	Path          string
+	Enabled bool
+	Path    string
 }, dbConfigs map[string]config.SinkConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -186,12 +186,12 @@ func (m *Manager) HasWASMPlugins() bool {
 
 // PluginInfo contains plugin metadata (used by API)
 type PluginInfo struct {
-	Name     string    `json:"name"`        // YAML name field
-	Id       string    `json:"id"`          // SHA256(file)[:12]
-	File     string    `json:"file"`        // Relative file path
+	Name     string    `json:"name"` // YAML name field
+	Id       string    `json:"id"`   // SHA256(file)[:12]
+	File     string    `json:"file"` // Relative file path
 	Path     string    `json:"path"`
 	LoadedAt time.Time `json:"loaded_at"`
-	Type     string    `json:"type"`        // "sql"
+	Type     string    `json:"type"` // "sql"
 }
 
 // HandleAPI handles plugin management via HTTP API
