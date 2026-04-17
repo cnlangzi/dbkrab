@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/monitor"
 )
 
 // ReplayStore defines the interface for replay operations
@@ -18,9 +19,10 @@ type ReplayStore interface {
 
 // ReplayService replays CDC changes from the store
 type ReplayService struct {
-	store   ReplayStore
-	handler Handler
-	dlq     *dlq.DLQ // DLQ for recording failures
+	store     ReplayStore
+	handler   Handler
+	dlq       *dlq.DLQ      // DLQ for recording failures
+	monitorDB *monitor.DB  // For writing batch logs
 }
 
 // ReplayResult contains the replay statistics
@@ -32,16 +34,21 @@ type ReplayResult struct {
 }
 
 // NewReplayService creates a new ReplayService with DLQ support
-func NewReplayService(store ReplayStore, handler Handler, dlq *dlq.DLQ) *ReplayService {
+func NewReplayService(store ReplayStore, handler Handler, dlq *dlq.DLQ, monitorDB *monitor.DB) *ReplayService {
 	return &ReplayService{
-		store:   store,
-		handler: handler,
-		dlq:     dlq,
+		store:     store,
+		handler:   handler,
+		dlq:       dlq,
+		monitorDB: monitorDB,
 	}
 }
 
+// ProgressCallback is called after each LSN is processed
+type ProgressCallback func(processed int, total int)
+
 // Execute replays all CDC changes from the store in LSN order
-func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
+// progressCb is optional - if provided, it's called after each LSN with current progress
+func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
@@ -78,6 +85,11 @@ func (r *ReplayService) Execute(ctx context.Context) (*ReplayResult, error) {
 
 		result.ProcessedLSNs++
 		slog.Debug("replayed LSN", "lsn", lsn, "index", i+1, "total", len(lsns))
+
+		// Call progress callback if provided
+		if progressCb != nil {
+			progressCb(result.ProcessedLSNs, len(lsns))
+		}
 	}
 
 	slog.Info("replay completed",
@@ -120,6 +132,21 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 		// Write to DLQ on failure (same logic as Poller)
 		r.writeToDLQ(tx, err, lsn, "replay_handler")
 		return fmt.Errorf("handle transaction %s: %w", tx.ID, err)
+	}
+
+	// Write batch_log for observability (like Poller does)
+	if r.monitorDB != nil && batchCtx.BatchID != "" {
+		batchLog := &monitor.BatchLog{
+			BatchID:      batchCtx.BatchID,
+			FetchedRows:  len(changes),
+			TxCount:      1,
+			DLQCount:     0,
+			DurationMs:   0,
+			Status:       monitor.PullStatusSuccess,
+		}
+		if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
+			slog.Warn("failed to write batch_log for replay", "batch_id", batchCtx.BatchID, "error", err)
+		}
 	}
 
 	return nil
