@@ -138,7 +138,8 @@ func (s *SQLiteSink) insertInTx(tx txExecutor, config core.SinkConfig, ds *core.
 
 		switch config.OnConflict {
 		case "overwrite":
-			// INSERT OR REPLACE
+			// Use proper UPSERT: INSERT ... ON CONFLICT(pk) DO UPDATE SET col = excluded.col
+			// This updates only the columns provided, not the entire row
 			escapedCols := make([]string, len(ds.Columns))
 			for i, col := range ds.Columns {
 				escapedCols[i] = fmt.Sprintf("[%s]", col)
@@ -147,10 +148,29 @@ func (s *SQLiteSink) insertInTx(tx txExecutor, config core.SinkConfig, ds *core.
 			for i := range ds.Columns {
 				placeholders[i] = "?"
 			}
-			sqlStr = fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-				config.Output,
-				strings.Join(escapedCols, ", "),
-				strings.Join(placeholders, ", "))
+			colList := strings.Join(escapedCols, ", ")
+			valuesList := strings.Join(placeholders, ", ")
+
+			// Build SET clause with excluded. prefix for non-PK columns
+			pk := config.PrimaryKey
+			var setClauses []string
+			for _, col := range ds.Columns {
+				if col == pk {
+					continue
+				}
+				setClauses = append(setClauses, fmt.Sprintf("[%s] = excluded.[%s]", col, col))
+			}
+
+			if len(setClauses) == 0 {
+				// Only PK provided - no columns to update on conflict
+				sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+					config.Output, colList, valuesList)
+			} else {
+				setClause := strings.Join(setClauses, ", ")
+				pkEscaped := fmt.Sprintf("[%s]", pk)
+				sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(%s) DO UPDATE SET %s",
+					config.Output, colList, valuesList, pkEscaped, setClause)
+			}
 			args = row
 		case "skip":
 			// INSERT OR IGNORE
