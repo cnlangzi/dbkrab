@@ -19,7 +19,8 @@ type Config struct {
 	MSSQL  MSSQLConfig `yaml:"mssql"`
 	Tables []string    `yaml:"tables"`
 
-	CDC CDCConfig `yaml:"cdc"`
+	CDC      CDCConfig      `yaml:"cdc"`
+	Snapshot SnapshotConfig `yaml:"snapshot"`
 
 	Listen              int                       `yaml:"listen"`
 	App                 AppConfig                 `yaml:"app"`
@@ -27,6 +28,11 @@ type Config struct {
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
 	Plugins             PluginsConfig             `yaml:"plugins"`
 	Logging             logging.LoggingConfig     `yaml:"logging"`
+}
+
+// SnapshotConfig contains snapshot sync settings
+type SnapshotConfig struct {
+	BatchSize int `yaml:"batch_size"` // Batch size for snapshot pagination (default: 10000)
 }
 
 // CDCConfig aggregates all CDC-related configuration
@@ -169,6 +175,11 @@ func Load(path string) (*Config, error) {
 	// Set defaults
 	if cfg.CDC.Interval == "" {
 		cfg.CDC.Interval = "500ms"
+	}
+
+	// Snapshot defaults
+	if cfg.Snapshot.BatchSize == 0 {
+		cfg.Snapshot.BatchSize = 10000
 	}
 
 	if cfg.App.Type == "" {
