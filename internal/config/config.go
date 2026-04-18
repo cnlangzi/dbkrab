@@ -19,7 +19,8 @@ type Config struct {
 	MSSQL  MSSQLConfig `yaml:"mssql"`
 	Tables []string    `yaml:"tables"`
 
-	CDC CDCConfig `yaml:"cdc"`
+	CDC      CDCConfig      `yaml:"cdc"`
+	Snapshot SnapshotConfig `yaml:"snapshot"`
 
 	Listen              int                       `yaml:"listen"`
 	App                 AppConfig                 `yaml:"app"`
@@ -29,19 +30,14 @@ type Config struct {
 	Logging             logging.LoggingConfig     `yaml:"logging"`
 }
 
-type SyncConfig struct {
-	Snapshot SnapshotSyncConfig `yaml:"snapshot"`
-}
-
-// SnapshotSyncConfig contains snapshot sync settings
-type SnapshotSyncConfig struct {
+// SnapshotConfig contains snapshot sync settings
+type SnapshotConfig struct {
 	BatchSize int `yaml:"batch_size"` // Batch size for snapshot pagination (default: 10000)
 }
 
 // CDCConfig aggregates all CDC-related configuration
 type CDCConfig struct {
-	Interval string    `yaml:"interval"`
-	Sync     SyncConfig `yaml:"sync"`
+	Interval string `yaml:"interval"`
 
 	Gap               CDCProtectionConfig     `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
@@ -182,8 +178,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Snapshot defaults
-	if cfg.CDC.Sync.Snapshot.BatchSize == 0 {
-		cfg.CDC.Sync.Snapshot.BatchSize = 10000
+	if cfg.Snapshot.BatchSize == 0 {
+		cfg.Snapshot.BatchSize = 10000
 	}
 
 	if cfg.App.Type == "" {
