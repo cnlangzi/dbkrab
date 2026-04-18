@@ -29,9 +29,19 @@ type Config struct {
 	Logging             logging.LoggingConfig     `yaml:"logging"`
 }
 
+type SyncConfig struct {
+	Snapshot SnapshotSyncConfig `yaml:"snapshot"`
+}
+
+// SnapshotSyncConfig contains snapshot sync settings
+type SnapshotSyncConfig struct {
+	BatchSize int `yaml:"batch_size"` // Batch size for snapshot pagination (default: 10000)
+}
+
 // CDCConfig aggregates all CDC-related configuration
 type CDCConfig struct {
-	Interval string `yaml:"interval"`
+	Interval string    `yaml:"interval"`
+	Sync     SyncConfig `yaml:"sync"`
 
 	Gap               CDCProtectionConfig     `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
@@ -169,6 +179,11 @@ func Load(path string) (*Config, error) {
 	// Set defaults
 	if cfg.CDC.Interval == "" {
 		cfg.CDC.Interval = "500ms"
+	}
+
+	// Snapshot defaults
+	if cfg.CDC.Sync.Snapshot.BatchSize == 0 {
+		cfg.CDC.Sync.Snapshot.BatchSize = 10000
 	}
 
 	if cfg.App.Type == "" {
