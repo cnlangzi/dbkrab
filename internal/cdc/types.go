@@ -98,10 +98,12 @@ func (d *DateTime) convertTime(driverTime time.Time) time.Time {
 }
 
 // Value implements driver.Valuer for DateTime.
-// Returns RFC3339Nano UTC string or nil for zero/Invalid time.
+// Returns RFC3339Nano UTC string for valid times, zero time for zero/invalid times.
 func (d DateTime) Value() (driver.Value, error) {
+	// Return zero time instead of nil to preserve the actual date
+	// This prevents NULL values in SQLite and distinguishes invalid from NULL
 	if !d.valid || d.val.IsZero() {
-		return nil, nil
+		return time.Time{}, nil
 	}
 	return d.val.Format(time.RFC3339Nano), nil
 }
