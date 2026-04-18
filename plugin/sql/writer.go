@@ -202,9 +202,28 @@ func (w *Writer) buildInsertSQL(table, pk string, columns []string, row []interf
 	var sql string
 	switch strategy {
 	case ConflictOverwrite:
-		// INSERT OR REPLACE - replaces existing record
-		sql = fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-			table, colList, valuesList)
+		// Use proper UPSERT: INSERT ... ON CONFLICT(pk) DO UPDATE SET col = excluded.col
+		// This updates only the columns provided, not the entire row
+		pkEscaped := fmt.Sprintf("[%s]", pk)
+
+		// Build SET clause with excluded. prefix for non-PK columns
+		var setClauses []string
+		for _, col := range columns {
+			if col == pk {
+				continue
+			}
+			setClauses = append(setClauses, fmt.Sprintf("[%s] = excluded.[%s]", col, col))
+		}
+
+		if len(setClauses) == 0 {
+			// Only PK provided - no columns to update on conflict, just insert
+			sql = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+				table, colList, valuesList)
+		} else {
+			setClause := strings.Join(setClauses, ", ")
+			sql = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(%s) DO UPDATE SET %s",
+				table, colList, valuesList, pkEscaped, setClause)
+		}
 	case ConflictSkip:
 		// INSERT OR IGNORE - does nothing if exists
 		sql = fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
