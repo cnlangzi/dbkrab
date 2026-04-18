@@ -4,16 +4,16 @@ import "fmt"
 
 // Plugin errors
 var (
-	ErrPluginNotFound    = fmt.Errorf("plugin not found")
-	ErrInvalidConfig     = fmt.Errorf("invalid plugin configuration")
-	ErrMissingField      = fmt.Errorf("missing required field")
-	ErrInvalidSQL        = fmt.Errorf("invalid SQL template")
+	ErrPluginNotFound   = fmt.Errorf("plugin not found")
+	ErrInvalidConfig    = fmt.Errorf("invalid plugin configuration")
+	ErrMissingField     = fmt.Errorf("missing required field")
+	ErrInvalidSQL       = fmt.Errorf("invalid SQL template")
 	ErrMissingParameter = fmt.Errorf("missing parameter in SQL template")
-	ErrSQLFileNotFound   = fmt.Errorf("SQL file not found")
+	ErrSQLFileNotFound  = fmt.Errorf("SQL file not found")
 	ErrExecutionFailed  = fmt.Errorf("SQL execution failed")
 	ErrRoutingFailed    = fmt.Errorf("result routing failed")
 	ErrWriteFailed      = fmt.Errorf("sink write failed")
-	ErrInvalidParameter  = fmt.Errorf("invalid parameter")
+	ErrInvalidParameter = fmt.Errorf("invalid parameter")
 )
 
 // ConfigError represents a configuration validation error

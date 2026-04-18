@@ -22,16 +22,16 @@ func NewAdmin(cfg *config.MSSQLConfig) *Admin {
 
 // TableInfo represents a table with CDC status
 type TableInfo struct {
-	Schema      string `json:"schema"`
-	Name        string `json:"name"`
-	CDCEnabled  bool   `json:"cdc_enabled"`
-	Tracked     bool   `json:"tracked"` // Whether table is in config.tables
+	Schema     string `json:"schema"`
+	Name       string `json:"name"`
+	CDCEnabled bool   `json:"cdc_enabled"`
+	Tracked    bool   `json:"tracked"` // Whether table is in config.tables
 }
 
 // DatabaseInfo represents a database with its tables
 type DatabaseInfo struct {
-	Name   string       `json:"name"`
-	Tables []TableInfo  `json:"tables"`
+	Name   string      `json:"name"`
+	Tables []TableInfo `json:"tables"`
 }
 
 // Connect creates a new database connection
@@ -315,7 +315,7 @@ func (a *Admin) CheckAndEnableCDC(configuredTables []string) ([]CDCStatus, error
 
 	// Log permission status
 	if len(enableErrors) > 0 && !isDBOwner {
-		slog.Warn("CDC auto-enable failed - user does not have db_owner role", 
+		slog.Warn("CDC auto-enable failed - user does not have db_owner role",
 			"is_db_owner", isDBOwner,
 			"errors", strings.Join(enableErrors, "; "))
 	}
@@ -342,9 +342,9 @@ func parseTableName(fullName string) (string, string) {
 const DefaultRetentionMinutes = 10080
 
 type CDCJobInfo struct {
-	JobType        string
-	JobName        string
-	Retention      int // in minutes
+	JobType         string
+	JobName         string
+	Retention       int // in minutes
 	PollingInterval int
 }
 
@@ -366,7 +366,7 @@ func (a *Admin) CheckAndSetCDCRetention() (int, error) {
 
 	var currentRetention int
 	var jobName string
-	
+
 	// Find cleanup job
 	for rows.Next() {
 		var jobID []byte
@@ -374,13 +374,13 @@ func (a *Admin) CheckAndSetCDCRetention() (int, error) {
 		var maxtrans, maxscans int
 		var continuous bool
 		var pollinginterval, retention, threshold int
-		
-		err = rows.Scan(&jobID, &jobType, &name, &maxtrans, &maxscans, 
+
+		err = rows.Scan(&jobID, &jobType, &name, &maxtrans, &maxscans,
 			&continuous, &pollinginterval, &retention, &threshold)
 		if err != nil {
 			return 0, fmt.Errorf("scan job info: %w", err)
 		}
-		
+
 		if jobType == "cleanup" {
 			currentRetention = retention
 			jobName = name
@@ -394,7 +394,7 @@ func (a *Admin) CheckAndSetCDCRetention() (int, error) {
 			"current", currentRetention,
 			"recommended", DefaultRetentionMinutes,
 			"job_name", jobName)
-		
+
 		_, err = db.Exec(`
 			EXEC sp_cdc_change_job 
 				@job_type = N'cleanup', 
@@ -403,7 +403,7 @@ func (a *Admin) CheckAndSetCDCRetention() (int, error) {
 		if err != nil {
 			return currentRetention, fmt.Errorf("update CDC retention: %w", err)
 		}
-		
+
 		slog.Info("CDC cleanup job retention updated successfully",
 			"old_retention_minutes", currentRetention,
 			"new_retention_minutes", DefaultRetentionMinutes)

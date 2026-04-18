@@ -113,6 +113,7 @@ func (d DateTime) Value() (driver.Value, error) {
 // The value is in SQL Server's local timezone (e.g., Beijing UTC+8),
 // but Go driver incorrectly treats it as UTC.
 // We reinterpret it using the configured timezone and convert to UTC for storage.
+//
 //nolint:unused
 func convertCommitTime(driverTime time.Time, timezone *time.Location) time.Time {
 	if timezone == nil || timezone == time.Local {

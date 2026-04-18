@@ -51,10 +51,10 @@ type Plugin struct {
 // Sink writing is handled by the platform layer - this plugin only handles SQL execution.
 func New(path string, db *sql.DB) *Plugin {
 	p := &Plugin{
-		name:       "sql",
-		db:         db,
-		watchDir:   path,
-		Skills:     NewSkills(),
+		name:         "sql",
+		db:           db,
+		watchDir:     path,
+		Skills:       NewSkills(),
 		watchPending: make(map[string]debounceEntry),
 	}
 
@@ -95,7 +95,7 @@ func (p *Plugin) loadAllSkills() error {
 			placeholder := &Skill{
 				Id:    id,
 				File:  relPath,
-				Name: strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+				Name:  strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
 				Error: err.Error(),
 			}
 			p.Skills.Set(placeholder)
@@ -287,7 +287,7 @@ func (p *Plugin) checkChanges() {
 
 				id := hashFile(path)
 				p.Skills.Delete(id)
-			slog.Info("skill removed", "path", path)
+				slog.Info("skill removed", "path", path)
 				continue
 			}
 
@@ -321,7 +321,7 @@ func (p *Plugin) checkChanges() {
 				skill.Error = ""
 				skill.LastLoadedAt = time.Now()
 				p.Skills.Set(skill)
-			slog.Info("skill reloaded", "path", path, "skill_id", skill.Id)
+				slog.Info("skill reloaded", "path", path, "skill_id", skill.Id)
 			} else {
 				// Hash unchanged, clear debounce
 				entry.debounceAt = time.Time{}
@@ -443,6 +443,7 @@ func (p *Plugin) Handle(tx *core.Transaction) ([]core.Sink, error) {
 //   - SKIP: skill did not match the transaction table
 //   - EXECUTED: skill matched and produced sinks
 //   - ERROR: skill matched but execution failed
+//
 // Sinks are returned for the caller to write.
 func (p *Plugin) HandleWithPull(tx *core.Transaction, batchCtx *core.BatchContext, monitorDB *monitor.DB) ([]core.Sink, error) {
 	if tx == nil || len(tx.Changes) == 0 {
@@ -483,7 +484,7 @@ func (p *Plugin) HandleWithPull(tx *core.Transaction, batchCtx *core.BatchContex
 				"table", table)
 			if monitorDB != nil && batchCtx != nil {
 				skillLog := &monitor.SkillLog{
-					BatchID:        batchCtx.BatchID,
+					BatchID:       batchCtx.BatchID,
 					SkillID:       skill.Id,
 					SkillName:     skill.Name,
 					Operation:     "",

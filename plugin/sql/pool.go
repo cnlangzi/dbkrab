@@ -16,10 +16,10 @@ import (
 // cnlangzi/sqlite provides read/write separation, buffered batch writes,
 // and automatic WAL checkpoint management.
 type Pool struct {
-	name string    // sink name, used for directory path
-	path string    // resolved base path (e.g., ./data/sinks/business)
-	db   *sqlite.DB
-	mu   sync.RWMutex
+	name   string // sink name, used for directory path
+	path   string // resolved base path (e.g., ./data/sinks/business)
+	db     *sqlite.DB
+	mu     sync.RWMutex
 	closed atomic.Bool
 }
 

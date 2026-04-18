@@ -256,13 +256,13 @@ type mockSink struct {
 	mu   sync.Mutex
 }
 
-func (s *mockSink) Write(tx *Transaction) (int, error) {
+func (s *mockSink) Write(changes []Change) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
 		return 0, errors.New("simulated sink failure")
 	}
-	return len(tx.Changes), nil
+	return len(changes), nil
 }
 
 func (s *mockSink) WriteOps(ops []Sink) error {
@@ -301,39 +301,39 @@ func (s *mockOffsetStore) Flush() error {
 }
 
 func (s *mockOffsetStore) Get(table string) (offset.Offset, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		offsetVal, ok := s.data[table]
-		if !ok {
-			return offset.Offset{}, nil
-		}
-		return offsetVal, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	offsetVal, ok := s.data[table]
+	if !ok {
+		return offset.Offset{}, nil
 	}
+	return offsetVal, nil
+}
 
 func (s *mockOffsetStore) Set(table string, lastLSN string, nextLSN string) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.setCalled = true
-		s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, UpdatedAt: time.Now()}
-		return nil
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setCalled = true
+	s.data[table] = offset.Offset{LastLSN: lastLSN, NextLSN: nextLSN, UpdatedAt: time.Now()}
+	return nil
+}
 
 func (s *mockOffsetStore) GetAll() (map[string]offset.Offset, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		result := make(map[string]offset.Offset)
-		for k, v := range s.data {
-			result[k] = v
-		}
-		return result, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[string]offset.Offset)
+	for k, v := range s.data {
+		result[k] = v
 	}
+	return result, nil
+}
 
 type mockHandler struct {
 	fail bool
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
+func (h *mockHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {
@@ -418,13 +418,13 @@ func TestPollMetricsWindowEmpty(t *testing.T) {
 // TestPollMetricsFlushDuration tests that PollMetrics includes FlushDurationMs field
 func TestPollMetricsFlushDuration(t *testing.T) {
 	pm := PollMetrics{
-		FetchedChanges:    100,
-		ProcessedTx:       5,
-		PullDurationMs:    23,
-		StoreDurationMs:   12,
-		FlushDurationMs:   3,
-		DLQCount:          0,
-		LastLSN:           "0x00123:00004567",
+		FetchedChanges:  100,
+		ProcessedTx:     5,
+		PullDurationMs:  23,
+		StoreDurationMs: 12,
+		FlushDurationMs: 3,
+		DLQCount:        0,
+		LastLSN:         "0x00123:00004567",
 	}
 
 	// Verify all duration fields are present
@@ -559,69 +559,3 @@ func TestEmptyPollMetrics(t *testing.T) {
 	}
 }
 
-// TestGroupByTransactionFiltersUpdateBefore tests that groupByTransaction
-// defensively filters out UPDATE_BEFORE changes to prevent DLQ errors.
-func TestGroupByTransactionFiltersUpdateBefore(t *testing.T) {
-	poller := &Poller{}
-
-	// Create changes including UPDATE_BEFORE and UPDATE_AFTER
-	changes := []Change{
-		{
-			Table:         "users",
-			TransactionID: "tx-1",
-			Operation:     OpUpdateBefore, // Should be filtered
-			Data:          map[string]interface{}{"id": 1, "name": "old-name"},
-			LSN:           []byte{0x01},
-		},
-		{
-			Table:         "users",
-			TransactionID: "tx-1",
-			Operation:     OpUpdateAfter, // Should remain
-			Data:          map[string]interface{}{"id": 1, "name": "new-name"},
-			LSN:           []byte{0x02},
-		},
-		{
-			Table:         "users",
-			TransactionID: "tx-1",
-			Operation:     OpInsert, // Should remain
-			Data:          map[string]interface{}{"id": 2, "name": "bob"},
-			LSN:           []byte{0x03},
-		},
-		{
-			Table:         "users",
-			TransactionID: "tx-1",
-			Operation:     OpDelete, // Should remain
-			Data:          map[string]interface{}{"id": 3},
-			LSN:           []byte{0x04},
-		},
-	}
-
-	txs := poller.groupByTransaction(changes)
-
-	// Should have 1 transaction
-	if len(txs) != 1 {
-		t.Fatalf("Expected 1 transaction, got %d", len(txs))
-	}
-
-	tx := txs[0]
-
-	// Should have 3 changes (UPDATE_BEFORE filtered out)
-	if len(tx.Changes) != 3 {
-		t.Errorf("Expected 3 changes after filtering UPDATE_BEFORE, got %d", len(tx.Changes))
-	}
-
-	// Verify UPDATE_BEFORE is not present
-	for _, c := range tx.Changes {
-		if c.Operation == OpUpdateBefore {
-			t.Error("UPDATE_BEFORE should have been filtered but was present")
-		}
-	}
-
-	// Verify remaining operations are correct
-	expectedOps := []Operation{OpUpdateAfter, OpInsert, OpDelete}
-	for i, expected := range expectedOps {
-		if tx.Changes[i].Operation != expected {
-			t.Errorf("Change[%d] expected %v, got %v", i, expected, tx.Changes[i].Operation)
-		}
-	}
-}

@@ -618,9 +618,9 @@ func TestDLQ_CountAll(t *testing.T) {
 func TestDLQ_EncodeDecodeChangeData(t *testing.T) {
 	t.Run("encode and decode", func(t *testing.T) {
 		data := map[string]interface{}{
-			"id":    123,
-			"name":  "test",
-			"value": 42.5,
+			"id":     123,
+			"name":   "test",
+			"value":  42.5,
 			"active": true,
 		}
 

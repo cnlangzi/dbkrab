@@ -61,14 +61,14 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 		// Execution error
 		if monitorDB != nil && batchCtx != nil {
 			skillLog := &monitor.SkillLog{
-				BatchID:        batchCtx.BatchID,
+				BatchID:       batchCtx.BatchID,
 				SkillID:       skill.Id,
 				SkillName:     skill.Name,
 				Operation:     "",
 				RowsProcessed: 0,
 				Status:        monitor.SkillStatusError,
 				ErrorMessage:  err.Error(),
-				DurationMs:   duration.Milliseconds(),
+				DurationMs:    duration.Milliseconds(),
 				CreatedAt:     time.Now(),
 			}
 			if writeErr := monitorDB.WriteSkillLog(skillLog); writeErr != nil {
@@ -94,7 +94,7 @@ func (e *Engine) HandleWithPull(tx *core.Transaction, skill *Skill, batchCtx *co
 
 	if monitorDB != nil && batchCtx != nil {
 		skillLog := &monitor.SkillLog{
-			BatchID:        batchCtx.BatchID,
+			BatchID:       batchCtx.BatchID,
 			SkillID:       skill.Id,
 			SkillName:     skill.Name,
 			Operation:     "",

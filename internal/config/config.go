@@ -16,24 +16,24 @@ import (
 )
 
 type Config struct {
-	MSSQL              MSSQLConfig            `yaml:"mssql"`
-	Tables             []string               `yaml:"tables"`
+	MSSQL  MSSQLConfig `yaml:"mssql"`
+	Tables []string    `yaml:"tables"`
 
-	CDC                CDCConfig              `yaml:"cdc"`
+	CDC CDCConfig `yaml:"cdc"`
 
-	Listen          int                    `yaml:"listen"`
-	App                AppConfig              `yaml:"app"`
-	Sinks              SinksConfig            `yaml:"sinks"`
+	Listen              int                       `yaml:"listen"`
+	App                 AppConfig                 `yaml:"app"`
+	Sinks               SinksConfig               `yaml:"sinks"`
 	GracefulDegradation GracefulDegradationConfig `yaml:"graceful_degradation"`
-	Plugins            PluginsConfig          `yaml:"plugins"`
-	Logging            logging.LoggingConfig  `yaml:"logging"`
+	Plugins             PluginsConfig             `yaml:"plugins"`
+	Logging             logging.LoggingConfig     `yaml:"logging"`
 }
 
 // CDCConfig aggregates all CDC-related configuration
 type CDCConfig struct {
-	Interval        string                 `yaml:"interval"`
+	Interval string `yaml:"interval"`
 
-	Gap            CDCProtectionConfig    `yaml:"gap"`
+	Gap               CDCProtectionConfig     `yaml:"gap"`
 	TransactionBuffer TransactionBufferConfig `yaml:"transaction_buffer"`
 }
 
@@ -50,12 +50,12 @@ type PluginConfig struct {
 
 // SinkConfig contains configuration for a business sink
 type SinkConfig struct {
-	Id              string `yaml:"-"`                // Auto-generated 12-char hash ID (not in YAML)
-	Name            string `yaml:"name"`             // Sink name (used as key in array format)
-	Description    string `yaml:"description"`     // Human-readable description
-	Type            string `yaml:"type"`            // sqlite, duckdb, mssql, etc.
-	DSN            string `yaml:"dsn"`             // Data Source Name (file path for sqlite, connection string for others)
-	Migrations  string `yaml:"migrations"`      // Path to migration SQL files
+	Id          string `yaml:"-"`           // Auto-generated 12-char hash ID (not in YAML)
+	Name        string `yaml:"name"`        // Sink name (used as key in array format)
+	Description string `yaml:"description"` // Human-readable description
+	Type        string `yaml:"type"`        // sqlite, duckdb, mssql, etc.
+	DSN         string `yaml:"dsn"`         // Data Source Name (file path for sqlite, connection string for others)
+	Migrations  string `yaml:"migrations"`  // Path to migration SQL files
 }
 
 // IsEnabled returns true only if val is explicitly set to true, "on", or "1"
@@ -76,9 +76,9 @@ type MSSQLConfig struct {
 	Timezone string `yaml:"timezone"` // SQL Server timezone (e.g., "Asia/Shanghai", "UTC+8") for CDC timestamp conversion
 
 	// Connection pool settings
-	PoolMaxOpenConns    int `yaml:"pool_max_open_conns"`    // Max concurrent connections (default: 30)
-	PoolMaxIdleConns    int `yaml:"pool_max_idle_conns"`    // Max idle connections (default: 15)
-	PoolConnMaxLifetime string `yaml:"pool_conn_max_lifetime"` // Connection max lifetime (default: 30m)
+	PoolMaxOpenConns    int    `yaml:"pool_max_open_conns"`     // Max concurrent connections (default: 30)
+	PoolMaxIdleConns    int    `yaml:"pool_max_idle_conns"`     // Max idle connections (default: 15)
+	PoolConnMaxLifetime string `yaml:"pool_conn_max_lifetime"`  // Connection max lifetime (default: 30m)
 	PoolConnMaxIdleTime string `yaml:"pool_conn_max_idle_time"` // Idle connection max time (default: 5m)
 	// Query timeout for MSSQL queries
 	QueryTimeout string `yaml:"query_timeout"` // Query timeout (default: 30s)
@@ -86,26 +86,26 @@ type MSSQLConfig struct {
 
 // GracefulDegradationConfig contains graceful degradation settings for MSSQL disconnection
 type GracefulDegradationConfig struct {
-	Enabled             bool   `yaml:"enabled"`
+	Enabled               bool   `yaml:"enabled"`
 	MaxDisconnectDuration string `yaml:"max_disconnect_duration"` // e.g., "30m"`
-	ReconnectBaseDelay  string `yaml:"reconnect_base_delay"`     // e.g., "5s"`
-	ReconnectMaxDelay   string `yaml:"reconnect_max_delay"`      // e.g., "60s"`
+	ReconnectBaseDelay    string `yaml:"reconnect_base_delay"`    // e.g., "5s"`
+	ReconnectMaxDelay     string `yaml:"reconnect_max_delay"`     // e.g., "60s"`
 }
 
 // DBConfig contains database paths for each component
 type DBConfig struct {
-	CDC    string `yaml:"cdc"`    // Path for CDC store DB (changes, poller_state)
-	Offset string `yaml:"offset"` // Path for offset DB (offsets table only)
-	DLQ    string `yaml:"dlq"`    // Path for DLQ DB (dlq_entries)
+	CDC     string `yaml:"cdc"`     // Path for CDC store DB (changes, poller_state)
+	Offset  string `yaml:"offset"`  // Path for offset DB (offsets table only)
+	DLQ     string `yaml:"dlq"`     // Path for DLQ DB (dlq_entries)
 	Monitor string `yaml:"monitor"` // Path for monitor DB (pull_logs, skill_logs, sink_logs)
 }
 
 // AppConfig contains the app-level database storage configuration
 type AppConfig struct {
-	Listen int       `yaml:"listen"`
-	Host   string    `yaml:"host"`
-	Type   string    `yaml:"type"`
-	DB     DBConfig  `yaml:"db"` // Database paths for CDC, Offset, and DLQ
+	Listen int      `yaml:"listen"`
+	Host   string   `yaml:"host"`
+	Type   string   `yaml:"type"`
+	DB     DBConfig `yaml:"db"` // Database paths for CDC, Offset, and DLQ
 }
 
 // SinksConfig is a slice of SinkConfig for business sinks.
@@ -130,26 +130,24 @@ func (s SinksConfig) BasePath() string {
 	return filepath.Dir(s[0].DSN)
 }
 
-
-
 // CDCProtectionConfig contains CDC gap protection settings
 type CDCProtectionConfig struct {
-	Enabled           bool                 `yaml:"enabled"`
-	CheckInterval     string               `yaml:"check_interval"`
-	WarningLagBytes   int64                `yaml:"warning_lag_bytes"`
-	CriticalLagBytes  int64                `yaml:"critical_lag_bytes"`
-	WarningLagDuration string              `yaml:"warning_lag_duration"`
-	CriticalLagDuration string             `yaml:"critical_lag_duration"`
-	Recovery          RecoveryConfig       `yaml:"recovery"`
-	Alert             alert.AlertConfig    `yaml:"alert"`
+	Enabled             bool              `yaml:"enabled"`
+	CheckInterval       string            `yaml:"check_interval"`
+	WarningLagBytes     int64             `yaml:"warning_lag_bytes"`
+	CriticalLagBytes    int64             `yaml:"critical_lag_bytes"`
+	WarningLagDuration  string            `yaml:"warning_lag_duration"`
+	CriticalLagDuration string            `yaml:"critical_lag_duration"`
+	Recovery            RecoveryConfig    `yaml:"recovery"`
+	Alert               alert.AlertConfig `yaml:"alert"`
 }
 
 // TransactionBufferConfig contains transaction buffer settings (DEPRECATED - not used)
 type TransactionBufferConfig struct {
-	Enabled              bool   `yaml:"enabled"` // Deprecated: not used
-	MaxWaitTime          string `yaml:"max_wait_time"`          // Deprecated: not used
-	MaxTransactionsPerBatch int   `yaml:"max_transactions_per_batch"` // Deprecated: not used
-	MaxBatchBytes        int    `yaml:"max_batch_bytes"`         // Deprecated: not used
+	Enabled                 bool   `yaml:"enabled"`                    // Deprecated: not used
+	MaxWaitTime             string `yaml:"max_wait_time"`              // Deprecated: not used
+	MaxTransactionsPerBatch int    `yaml:"max_transactions_per_batch"` // Deprecated: not used
+	MaxBatchBytes           int    `yaml:"max_batch_bytes"`            // Deprecated: not used
 }
 
 // RecoveryConfig contains recovery strategy settings
