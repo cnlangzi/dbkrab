@@ -20,9 +20,9 @@ var migrationsFS embed.FS
 type PullStatus string
 
 const (
-	PullStatusSuccess  PullStatus = "SUCCESS"
-	PullStatusPartial  PullStatus = "PARTIAL"
-	PullStatusFailed   PullStatus = "FAILED"
+	PullStatusSuccess PullStatus = "SUCCESS"
+	PullStatusPartial PullStatus = "PARTIAL"
+	PullStatusFailed  PullStatus = "FAILED"
 )
 
 // SkillStatus represents the status of a skill execution
@@ -44,40 +44,40 @@ const (
 
 // BatchLog represents a batch log entry
 type BatchLog struct {
-	BatchID       string     `json:"batch_id"`       // UUID with short timestamp (primary key)
-	FetchedRows  int        `json:"fetched_rows"`  // Total CDC rows fetched
-	TxCount      int        `json:"tx_count"`      // Number of transactions
-	DLQCount     int        `json:"dlq_count"`     // Number of DLQ entries
-	DurationMs   int64      `json:"duration_ms"`   // Total batch duration
-	Status       PullStatus `json:"status"`        // SUCCESS/PARTIAL/FAILED
-	CreatedAt    time.Time  `json:"created_at"`
+	BatchID     string     `json:"batch_id"`     // UUID with short timestamp (primary key)
+	FetchedRows int        `json:"fetched_rows"` // Total CDC rows fetched
+	TxCount     int        `json:"tx_count"`     // Number of transactions
+	DLQCount    int        `json:"dlq_count"`    // Number of DLQ entries
+	DurationMs  int64      `json:"duration_ms"`  // Total batch duration
+	Status      PullStatus `json:"status"`       // SUCCESS/PARTIAL/FAILED
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // SkillLog represents a skill execution log entry
 type SkillLog struct {
-	ID            int64      `json:"id"`
-	BatchID        string     `json:"batch_id"`        // Links to batch_logs
-	SkillID       string     `json:"skill_id"`       // Skill hash ID
-	SkillName     string     `json:"skill_name"`     // Skill name
-	Operation     string     `json:"operation"`      // INSERT/UPDATE/DELETE
-	RowsProcessed int        `json:"rows_processed"` // Rows processed by this skill
-	Status        SkillStatus `json:"status"`        // SKIP/EXECUTED/ERROR
-	ErrorMessage  string     `json:"error_message,omitempty"`
-	DurationMs    int64      `json:"duration_ms"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID            int64       `json:"id"`
+	BatchID       string      `json:"batch_id"`       // Links to batch_logs
+	SkillID       string      `json:"skill_id"`       // Skill hash ID
+	SkillName     string      `json:"skill_name"`     // Skill name
+	Operation     string      `json:"operation"`      // INSERT/UPDATE/DELETE
+	RowsProcessed int         `json:"rows_processed"` // Rows processed by this skill
+	Status        SkillStatus `json:"status"`         // SKIP/EXECUTED/ERROR
+	ErrorMessage  string      `json:"error_message,omitempty"`
+	DurationMs    int64       `json:"duration_ms"`
+	CreatedAt     time.Time   `json:"created_at"`
 }
 
 // SinkLog represents a sink write log entry
 type SinkLog struct {
 	ID           int64      `json:"id"`
-	BatchID       string     `json:"batch_id"`        // Links to batch_logs
-	SkillName    string     `json:"skill_name"`     // Skill that produced this sink
-	SinkName     string     `json:"sink_name"`      // Sink config name
-	Database     string     `json:"database"`      // Target database name
-	OutputTable  string     `json:"output_table"`   // Target table name
-	Operation    string     `json:"operation"`      // INSERT/UPDATE/DELETE
-	RowsWritten  int        `json:"rows_written"`   // Rows written to sink
-	Status       SinkStatus `json:"status"`         // SUCCESS/ERROR
+	BatchID      string     `json:"batch_id"`     // Links to batch_logs
+	SkillName    string     `json:"skill_name"`   // Skill that produced this sink
+	SinkName     string     `json:"sink_name"`    // Sink config name
+	Database     string     `json:"database"`     // Target database name
+	OutputTable  string     `json:"output_table"` // Target table name
+	Operation    string     `json:"operation"`    // INSERT/UPDATE/DELETE
+	RowsWritten  int        `json:"rows_written"` // Rows written to sink
+	Status       SinkStatus `json:"status"`       // SUCCESS/ERROR
 	ErrorMessage string     `json:"error_message,omitempty"`
 	DurationMs   int64      `json:"duration_ms"`
 	CreatedAt    time.Time  `json:"created_at"`

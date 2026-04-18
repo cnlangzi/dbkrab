@@ -16,8 +16,8 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/logging"
-	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
+	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
@@ -272,11 +272,11 @@ func main() {
 
 	// Initialize SQL plugins
 	if err := pluginManager.Init(ctx, mssqlDB, struct {
-		Enabled       bool
-		Path          string
+		Enabled bool
+		Path    string
 	}{
-		Enabled:   config.IsEnabled(cfg.Plugins.SQL.Enabled),
-		Path:      cfg.Plugins.SQL.Path,
+		Enabled: config.IsEnabled(cfg.Plugins.SQL.Enabled),
+		Path:    cfg.Plugins.SQL.Path,
 	}, cfg.Sinks.ToMap()); err != nil {
 		slog.Warn("plugin initialization failed", "error", err)
 	}

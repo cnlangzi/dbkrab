@@ -72,11 +72,11 @@ func (o Operation) String() string {
 
 // Skill represents a SQL plugin configuration
 type Skill struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description"`
-	On          []string    `yaml:"on"`            // Tables to monitor
-	Database    string      `yaml:"database"`      // Target database name (maps to platform-configured storage)
-	Sinks       []Sink      `yaml:"sinks"`
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description"`
+	On          []string            `yaml:"on"`       // Tables to monitor
+	Database    string              `yaml:"database"` // Target database name (maps to platform-configured storage)
+	Sinks       []Sink              `yaml:"sinks"`
 	Outputs     map[string][]string `yaml:"-"` // key = output table name, value = field names
 
 	File         string    `yaml:"-"` // Auto-assigned: relative path from config.plugins.sql.path
@@ -89,19 +89,19 @@ type Skill struct {
 // Sink represents a single sink configuration with operation filter
 type Sink struct {
 	SinkConfig `yaml:",inline"` // Embedded SinkConfig for backward compatibility
-	When       []string           `yaml:"when"` // Required: [insert, update] or [delete]
+	When       []string         `yaml:"when"` // Required: [insert, update] or [delete]
 }
 
 // SinkConfig represents a single job configuration
 type SinkConfig struct {
-	Name        string `yaml:"name"`          // Sink name
-	On          string `yaml:"on"`            // Table filter (required for multi-table)
-	If          string `yaml:"if"`            // SQL-style condition expression (govaluate)
-	SQL         string `yaml:"sql"`           // Inline SQL template
-	SQLFile     string `yaml:"sql_file"`      // External SQL file path
-	Output      string `yaml:"output"`        // Target table name
-	PrimaryKey  string `yaml:"primary_key"`   // Primary key column
-	OnConflict  string `yaml:"on_conflict"`   // Conflict strategy: overwrite | skip | error (default: skip)
+	Name       string `yaml:"name"`        // Sink name
+	On         string `yaml:"on"`          // Table filter (required for multi-table)
+	If         string `yaml:"if"`          // SQL-style condition expression (govaluate)
+	SQL        string `yaml:"sql"`         // Inline SQL template
+	SQLFile    string `yaml:"sql_file"`    // External SQL file path
+	Output     string `yaml:"output"`      // Target table name
+	PrimaryKey string `yaml:"primary_key"` // Primary key column
+	OnConflict string `yaml:"on_conflict"` // Conflict strategy: overwrite | skip | error (default: skip)
 
 	compiledIf *govaluate.EvaluableExpression `yaml:"-"` // Precompiled expression (internal use)
 }
@@ -294,7 +294,6 @@ func normalizeIfExpression(expr string) string {
 	return result
 }
 
-
 // EvalIf evaluates the 'if' expression for a sink against CDC data.
 // It returns true if:
 //   - The sink has no 'if' expression (always true)
@@ -303,7 +302,9 @@ func normalizeIfExpression(expr string) string {
 // It returns false if the expression evaluates to false or an error occurs.
 //
 // Table and field names in expressions are treated case-insensitively:
-//   "orders.status = 'vip'" and "ORDERS.STATUS = 'vip'" both map to the same fields.
+//
+//	"orders.status = 'vip'" and "ORDERS.STATUS = 'vip'" both map to the same fields.
+//
 // Literal values in expressions remain case-sensitive.
 func (s *SinkConfig) EvalIf(cdcParams CDCParameters) bool {
 	if s.compiledIf == nil {
@@ -379,12 +380,12 @@ func (ds *DataSet) String() string {
 
 // PluginMetadata contains metadata and file tracking information for a SQL plugin
 type PluginMetadata struct {
-	Name        string              `json:"name"`
-	Type        string              `json:"type"`         // "sql"
-	Status      string              `json:"status"`       // loaded | stale | error
-	NeedsReload bool                `json:"needs_reload"`
-	LoadCount   int                 `json:"load_count"`
-	LastError   string              `json:"last_error,omitempty"`
+	Name        string                  `json:"name"`
+	Type        string                  `json:"type"`   // "sql"
+	Status      string                  `json:"status"` // loaded | stale | error
+	NeedsReload bool                    `json:"needs_reload"`
+	LoadCount   int                     `json:"load_count"`
+	LastError   string                  `json:"last_error,omitempty"`
 	Files       map[string]FileMetadata `json:"files"`
 }
 
@@ -392,15 +393,13 @@ type PluginMetadata struct {
 type FileMetadata struct {
 	Path        string    `json:"path"`
 	IsSQL       bool      `json:"is_sql"`
-	CurVersion  string    `json:"cur_version"`        // SHA256 hash of current loaded content
+	CurVersion  string    `json:"cur_version"` // SHA256 hash of current loaded content
 	CurModTime  time.Time `json:"cur_mod_time"`
 	CurSize     int64     `json:"cur_size"`
 	CurLoadedAt time.Time `json:"cur_loaded_at"`
-	NewVersion  string    `json:"new_version"`        // SHA256 hash of new content (if changed)
+	NewVersion  string    `json:"new_version"` // SHA256 hash of new content (if changed)
 	NewModTime  time.Time `json:"new_mod_time"`
 	NewSize     int64     `json:"new_size"`
 	NeedsReload bool      `json:"needs_reload"`
 	IsDeleted   bool      `json:"is_deleted"`
 }
-
-

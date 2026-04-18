@@ -12,7 +12,7 @@ func TestMigration(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "business.db")
 	migrationsDir := filepath.Join(tmpDir, "migrations")
-	
+
 	// 创建 migrations 目录
 	os.MkdirAll(migrationsDir, 0755)
 

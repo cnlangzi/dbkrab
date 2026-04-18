@@ -120,7 +120,7 @@ func TestStore_Write(t *testing.T) {
 		},
 	}
 
-	_, err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	assert.NoError(t, err)
 }
 
@@ -178,7 +178,7 @@ func TestStore_GetChanges(t *testing.T) {
 			},
 		},
 	}
-	_, err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	require.NoError(t, err)
 
 	// Get changes
@@ -212,9 +212,9 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 			{Table: "orders", TransactionID: "tx-002", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
 		},
 	}
-	_, err = store.Write(tx1)
+	_, err = store.Write(tx1.Changes)
 	require.NoError(t, err)
-	_, err = store.Write(tx2)
+	_, err = store.Write(tx2.Changes)
 	require.NoError(t, err)
 
 	// Filter by table name
@@ -418,11 +418,11 @@ func TestStore_Write_DuplicateIgnored(t *testing.T) {
 		},
 	}
 
-	_, err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	require.NoError(t, err)
 
 	// Write the same transaction again - should be ignored (not an error)
-	_, err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	require.NoError(t, err) // INSERT OR IGNORE should prevent duplicate
 
 	// Force commit to make data visible to reader
@@ -474,7 +474,7 @@ func TestStore_Write_SameLSNDifferentContent(t *testing.T) {
 		},
 	}
 
-	_, err = store.Write(tx)
+	_, err = store.Write(tx.Changes)
 	require.NoError(t, err)
 
 	// Force commit
@@ -524,9 +524,9 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 		},
 	}
 
-	_, err = store.Write(tx1)
+	_, err = store.Write(tx1.Changes)
 	require.NoError(t, err)
-	_, err = store.Write(tx2)
+	_, err = store.Write(tx2.Changes)
 	require.NoError(t, err) // different LSN -> different hash, should both be stored
 
 	err = db.Flush()
