@@ -15,7 +15,7 @@ type BatchContext struct {
 	SkillName string
 
 	// BatchID is a unique identifier for each poll cycle (root trace ID)
-	// Format: {uuid-short-8chars}-{timestamp-ms}
+	// Format: {timestamp-ms}-{uuid-short-8chars}
 	BatchID string
 
 	// StartTime is when this poll cycle started
@@ -26,11 +26,11 @@ type BatchContext struct {
 func NewBatchContext() *BatchContext {
 	now := time.Now()
 	u := uuid.New()
-	// Generate batch_id: short-uuid-timestamp (e.g., "a1b2c3d4-1712345678")
-	batchID := fmt.Sprintf("%s-%d", u.String()[:8], now.UnixMilli())
+	// Generate batch_id: timestamp-ms-short-uuid (e.g., "1712345678-a1b2c3d4")
+	batchID := fmt.Sprintf("%d-%s", now.UnixMilli(), u.String()[:8])
 
 	return &BatchContext{
-		BatchID:   batchID,
+		BatchID:    batchID,
 		StartTime: now,
 	}
 }
