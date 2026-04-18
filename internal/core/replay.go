@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
@@ -64,6 +65,14 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	result := &ReplayResult{TotalLSNs: len(lsns)}
 
+	// Create a single BatchContext for the entire replay execution
+	batchCtx := NewBatchContext()
+
+	// Aggregate metrics across all LSNs
+	var totalFetchedRows int
+	var totalTxCount int
+	var totalDLQCount int
+
 	// Process each LSN in order
 	for i, lsn := range lsns {
 		// Honor caller cancellation between LSNs
@@ -74,13 +83,24 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 				"failed", result.FailedLSNs,
 				"total", len(lsns),
 			)
-			return result, ctxErr
+			break
 		}
 
-		if err := r.replayLSN(ctx, lsn, result); err != nil {
+		lsnResult, err := r.replayLSN(ctx, lsn, result, batchCtx)
+		if err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
+			if lsnResult != nil {
+				totalDLQCount += lsnResult.DLQCount
+			}
 			continue
+		}
+
+		// Aggregate metrics from this LSN
+		if lsnResult != nil {
+			totalFetchedRows += lsnResult.FetchedRows
+			totalTxCount += lsnResult.TxCount
+			totalDLQCount += lsnResult.DLQCount
 		}
 
 		result.ProcessedLSNs++
@@ -89,6 +109,27 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 		// Call progress callback if provided
 		if progressCb != nil {
 			progressCb(result.ProcessedLSNs, len(lsns))
+		}
+	}
+
+	// Write single batch_log with aggregated metrics
+	if r.monitorDB != nil && batchCtx.BatchID != "" {
+		status := monitor.PullStatusSuccess
+		if result.FailedLSNs > 0 {
+			status = monitor.PullStatusPartial
+		}
+
+		batchLog := &monitor.BatchLog{
+			BatchID:      batchCtx.BatchID,
+			FetchedRows:  totalFetchedRows,
+			TxCount:      totalTxCount,
+			DLQCount:     totalDLQCount,
+			DurationMs:   time.Since(batchCtx.StartTime).Milliseconds(),
+			Status:       status,
+			CreatedAt:    batchCtx.StartTime,
+		}
+		if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
+			slog.Warn("failed to write batch_log for replay", "batch_id", batchCtx.BatchID, "error", err)
 		}
 	}
 
@@ -101,17 +142,24 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 	return result, nil
 }
 
+// LSNReplayResult contains metrics from processing a single LSN
+type LSNReplayResult struct {
+	FetchedRows int
+	TxCount     int
+	DLQCount    int
+}
+
 // replayLSN replays all changes for a specific LSN
-func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *ReplayResult) error {
+func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *ReplayResult, batchCtx *BatchContext) (*LSNReplayResult, error) {
 	// Get all changes for this LSN
 	changes, err := r.store.GetChangesWithLSN(lsn)
 	if err != nil {
-		return fmt.Errorf("get changes for LSN %s: %w", lsn, err)
+		return nil, fmt.Errorf("get changes for LSN %s: %w", lsn, err)
 	}
 
 	if len(changes) == 0 {
 		slog.Debug("no changes for LSN", "lsn", lsn)
-		return nil
+		return &LSNReplayResult{}, nil
 	}
 
 	// Count total changes
@@ -123,33 +171,25 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	// Skip if transaction has no changes (all were UPDATE_BEFORE)
 	if len(tx.Changes) == 0 {
 		slog.Debug("replayLSN: skip LSN with no valid changes after filtering UPDATE_BEFORE", "lsn", lsn)
-		return nil
+		return &LSNReplayResult{}, nil
 	}
 
-	// Handle the transaction
-	batchCtx := NewBatchContext()
+	// Track DLQ count for this LSN
+	dlqCount := 0
+
+	// Handle the transaction using the shared batchCtx
 	if err := r.handler.Handle(ctx, tx, batchCtx); err != nil {
 		// Write to DLQ on failure (same logic as Poller)
 		r.writeToDLQ(tx, err, lsn, "replay_handler")
-		return fmt.Errorf("handle transaction %s: %w", tx.ID, err)
+		dlqCount++
+		return &LSNReplayResult{FetchedRows: len(changes), TxCount: 1, DLQCount: dlqCount}, fmt.Errorf("handle transaction %s: %w", tx.ID, err)
 	}
 
-	// Write batch_log for observability (like Poller does)
-	if r.monitorDB != nil && batchCtx.BatchID != "" {
-		batchLog := &monitor.BatchLog{
-			BatchID:      batchCtx.BatchID,
-			FetchedRows:  len(changes),
-			TxCount:      1,
-			DLQCount:     0,
-			DurationMs:   0,
-			Status:       monitor.PullStatusSuccess,
-		}
-		if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
-			slog.Warn("failed to write batch_log for replay", "batch_id", batchCtx.BatchID, "error", err)
-		}
-	}
-
-	return nil
+	return &LSNReplayResult{
+		FetchedRows: len(changes),
+		TxCount:     1,
+		DLQCount:    dlqCount,
+	}, nil
 }
 
 // buildTransaction builds a Transaction from Change slice
