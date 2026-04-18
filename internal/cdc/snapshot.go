@@ -67,7 +67,11 @@ func (q *SnapshotQuerier) DiscoverPrimaryKey(ctx context.Context, schema, table 
 	if err != nil {
 		return nil, fmt.Errorf("discover PK: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			slog.Warn("failed to close rows", "error", closeErr)
+		}
+	}()
 
 	for rows.Next() {
 		var colName string
@@ -111,6 +115,38 @@ func (q *SnapshotQuerier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	return lsn, err
 }
 
+// CheckSnapshotIsolation checks if ALLOW_SNAPSHOT_ISOLATION is enabled on the database
+// and attempts to enable it if not. Returns error if not supported.
+func (q *SnapshotQuerier) CheckSnapshotIsolation(ctx context.Context) error {
+	// Check current snapshot isolation state
+	var isAllowed int
+	err := q.db.QueryRowContext(ctx, `
+		SELECT snapshot_isolation_state
+		FROM sys.databases
+		WHERE name = DB_NAME()
+	`).Scan(&isAllowed)
+	if err != nil {
+		return fmt.Errorf("check snapshot isolation: %w", err)
+	}
+
+	if isAllowed == 1 {
+		slog.Debug("snapshot isolation already enabled")
+		return nil
+	}
+
+	// Try to enable snapshot isolation
+	slog.Info("enabling snapshot isolation on database")
+	_, err = q.db.ExecContext(ctx, `
+		ALTER DATABASE SET ALLOW_SNAPSHOT_ISOLATION ON
+	`)
+	if err != nil {
+		return fmt.Errorf("enable snapshot isolation: %w", err)
+	}
+
+	slog.Info("snapshot isolation enabled successfully")
+	return nil
+}
+
 // IncrementLSN returns the next LSN after the given one
 func (q *SnapshotQuerier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
 	var nextLSN []byte
@@ -130,6 +166,11 @@ type SnapshotBatch struct {
 // It reads the table in batches and processes each batch through the handler
 // Returns the startLSN checkpoint that should be stored for subsequent CDC sync
 func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string, handler SnapshotHandler) ([]byte, error) {
+	// Step 0: Check and enable snapshot isolation on the database (must be done before starting transaction)
+	if err := q.CheckSnapshotIsolation(ctx); err != nil {
+		return nil, fmt.Errorf("snapshot isolation check: %w", err)
+	}
+
 	// Step 1: Capture startLSN outside any read transaction (before snapshot reads)
 	startLSN, err := q.GetMaxLSN(ctx)
 	if err != nil {
@@ -147,13 +188,17 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 	// Step 3: Start a read-only transaction with snapshot isolation for consistent reads
 	// This ensures we get a stable view of the table during snapshot
 	tx, err := q.db.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelReadCommitted, // MSSQL snapshot isolation equivalent
+		Isolation: sql.LevelSnapshot, // Use SNAPSHOT isolation for MVCC consistency
 		ReadOnly:  true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("begin snapshot transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if closeErr := tx.Rollback(); closeErr != nil {
+			slog.Warn("failed to rollback transaction", "error", closeErr)
+		}
+	}()
 
 	// Step 4: Read table in batches using OFFSET/FETCH pagination
 	offset := 0
@@ -173,12 +218,16 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 		// Get column information
 		columns, err := rows.Columns()
 		if err != nil {
-			rows.Close()
+			if closeErr := rows.Close(); closeErr != nil {
+				slog.Warn("failed to close rows", "error", closeErr)
+			}
 			return nil, fmt.Errorf("get columns: %w", err)
 		}
 		colTypes, err := rows.ColumnTypes()
 		if err != nil {
-			rows.Close()
+			if closeErr := rows.Close(); closeErr != nil {
+				slog.Warn("failed to close rows", "error", closeErr)
+			}
 			return nil, fmt.Errorf("get column types: %w", err)
 		}
 
@@ -189,7 +238,9 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 		batchRows := make([]map[string]interface{}, 0, batchSize)
 		for rows.Next() {
 			if err := rows.Scan(dest...); err != nil {
-				rows.Close()
+				if closeErr := rows.Close(); closeErr != nil {
+					slog.Warn("failed to close rows", "error", closeErr)
+				}
 				return nil, fmt.Errorf("scan row: %w", err)
 			}
 
@@ -204,7 +255,9 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 			}
 			batchRows = append(batchRows, data)
 		}
-		rows.Close()
+		if closeErr := rows.Close(); closeErr != nil {
+			slog.Warn("failed to close rows", "error", closeErr)
+		}
 
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate rows: %w", err)
