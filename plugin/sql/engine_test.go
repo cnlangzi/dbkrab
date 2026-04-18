@@ -98,10 +98,10 @@ func TestEngine_Handle(t *testing.T) {
 			op   core.Operation
 			want Operation
 		}{
-			{core.OpInsert, Insert},           // 1 → 1
-			{core.OpUpdateAfter, Update},      // 4 → 2 (key fix for sink filtering)
-			{core.OpDelete, Delete},           // 3 → 3
-			{core.OpUpdateBefore, 0},          // Should be skipped
+			{core.OpInsert, Insert},      // 1 → 1
+			{core.OpUpdateAfter, Update}, // 4 → 2 (key fix for sink filtering)
+			{core.OpDelete, Delete},      // 3 → 3
+			{core.OpUpdateBefore, 0},     // Should be skipped
 		}
 
 		for _, tt := range tests {
@@ -136,4 +136,3 @@ func TestEngine_ShortTableName(t *testing.T) {
 		})
 	}
 }
-

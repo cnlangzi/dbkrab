@@ -43,8 +43,8 @@ func TestWriter_InsertStrategy(t *testing.T) {
 			name: "insert skip - record not exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "skip",
+				PrimaryKey: "id",
+				OnConflict: "skip",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -58,8 +58,8 @@ func TestWriter_InsertStrategy(t *testing.T) {
 			name: "insert skip - record exists (should ignore)",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "skip",
+				PrimaryKey: "id",
+				OnConflict: "skip",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -73,8 +73,8 @@ func TestWriter_InsertStrategy(t *testing.T) {
 			name: "insert overwrite - record exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "overwrite",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -155,8 +155,8 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 			name: "update overwrite - record exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "overwrite",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -170,8 +170,8 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 			name: "update skip - record not exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "skip",
+				PrimaryKey: "id",
+				OnConflict: "skip",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -183,8 +183,8 @@ func TestWriter_UpdateStrategy(t *testing.T) {
 			name: "update error - record not exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "error",
+				PrimaryKey: "id",
+				OnConflict: "error",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name", "value"},
@@ -261,8 +261,8 @@ func TestWriter_DeleteStrategy(t *testing.T) {
 			name: "delete overwrite - record exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "overwrite",
+				PrimaryKey: "id",
+				OnConflict: "overwrite",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name"},
@@ -275,8 +275,8 @@ func TestWriter_DeleteStrategy(t *testing.T) {
 			name: "delete skip - record not exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "skip",
+				PrimaryKey: "id",
+				OnConflict: "skip",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name"},
@@ -289,8 +289,8 @@ func TestWriter_DeleteStrategy(t *testing.T) {
 			name: "delete error - record not exists",
 			config: SinkConfig{
 				Output:     "test_table",
-				PrimaryKey:  "id",
-				OnConflict:  "error",
+				PrimaryKey: "id",
+				OnConflict: "error",
 			},
 			ds: &DataSet{
 				Columns: []string{"id", "name"},
@@ -344,7 +344,7 @@ func TestOnConflictStrategy_Parse(t *testing.T) {
 		{"Error", ConflictError},
 		{"ERROR", ConflictError},
 		{"unknown", ConflictSkip}, // Default
-		{"", ConflictSkip},       // Default
+		{"", ConflictSkip},        // Default
 	}
 
 	for _, tt := range tests {

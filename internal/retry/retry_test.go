@@ -197,7 +197,7 @@ func TestDo_ContextCancellation(t *testing.T) {
 	cfg := DefaultRetryConfig()
 	cfg.InitialDelay = 100 * time.Millisecond
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	attempts := 0
@@ -287,7 +287,7 @@ func TestDo_MaxDelayCap(t *testing.T) {
 		MaxRetries:   10,
 		InitialDelay: 10 * time.Millisecond,
 		MaxDelay:     50 * time.Millisecond, // Cap at 50ms
-		Multiplier:   4.0,                    // Would exceed cap quickly
+		Multiplier:   4.0,                   // Would exceed cap quickly
 	}
 
 	attempts := 0
@@ -379,7 +379,7 @@ func TestGetRetryDelay(t *testing.T) {
 		{3, 8 * time.Second},
 		{4, 16 * time.Second},
 		{5, 32 * time.Second},
-		{6, 60 * time.Second}, // Capped
+		{6, 60 * time.Second},  // Capped
 		{10, 60 * time.Second}, // Still capped
 	}
 

@@ -391,7 +391,7 @@ func TestMergeSinks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := mergeSinks(tt.sinks)
-			
+
 			// Compare lengths
 			if len(result) != len(tt.expect) {
 				t.Errorf("mergeSinks() got %d sinks, want %d", len(result), len(tt.expect))
@@ -403,7 +403,7 @@ func TestMergeSinks(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// Compare each sink
 			for i := range result {
 				if result[i].Config.Output != tt.expect[i].Config.Output {
@@ -418,7 +418,7 @@ func TestMergeSinks(t *testing.T) {
 				if result[i].OpType != tt.expect[i].OpType {
 					t.Errorf("sink[%d].OpType = %v, want %v", i, result[i].OpType, tt.expect[i].OpType)
 				}
-				
+
 				// Compare datasets
 				if !reflect.DeepEqual(result[i].DataSet.Columns, tt.expect[i].DataSet.Columns) {
 					t.Errorf("sink[%d].DataSet.Columns = %v, want %v", i, result[i].DataSet.Columns, tt.expect[i].DataSet.Columns)
@@ -432,7 +432,7 @@ func TestMergeSinks(t *testing.T) {
 					}
 				}
 			}
-})
+		})
 	}
 }
 

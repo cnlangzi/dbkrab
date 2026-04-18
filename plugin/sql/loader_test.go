@@ -172,9 +172,9 @@ func TestNormalizeSQLParams(t *testing.T) {
 
 func TestExtractOutputFields(t *testing.T) {
 	tests := []struct {
-		name   string
-		sql    string
-		want   []string
+		name    string
+		sql     string
+		want    []string
 		wantErr bool
 	}{
 		{
@@ -199,7 +199,7 @@ func TestExtractOutputFields(t *testing.T) {
 		},
 		{
 			name: "complex query with joins",
-			sql:  `SELECT 
+			sql: `SELECT 
 				@cdc_lsn as cdc_lsn,
 				@cdc_tx_id as cdc_transaction_id,
 				@orders_customer_id as customer_id,
@@ -240,8 +240,8 @@ func stringSliceEqual(a, b []string) bool {
 
 func TestPopulateSkillOutputs_InlineSQL(t *testing.T) {
 	tests := []struct {
-		name     string
-		skill    *Skill
+		name        string
+		skill       *Skill
 		wantOutputs map[string][]string
 	}{
 		{

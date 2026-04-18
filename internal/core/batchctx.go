@@ -30,7 +30,7 @@ func NewBatchContext() *BatchContext {
 	batchID := fmt.Sprintf("%s-%d", u.String()[:8], now.UnixMilli())
 
 	return &BatchContext{
-		BatchID:    batchID,
+		BatchID:   batchID,
 		StartTime: now,
 	}
 }

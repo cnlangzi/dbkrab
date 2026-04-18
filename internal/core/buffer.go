@@ -10,9 +10,9 @@ import (
 type DeliveryReason string
 
 const (
-	DeliveryReasonCommitTime   DeliveryReason = "commit_time"    // All involved tables indicated transaction complete
-	DeliveryReasonPollInterval DeliveryReason = "poll_interval"  // Poll interval gating safety boundary
-	DeliveryReasonTimeout      DeliveryReason = "timeout"        // maxWaitTime timeout fallback
+	DeliveryReasonCommitTime   DeliveryReason = "commit_time"   // All involved tables indicated transaction complete
+	DeliveryReasonPollInterval DeliveryReason = "poll_interval" // Poll interval gating safety boundary
+	DeliveryReasonTimeout      DeliveryReason = "timeout"       // maxWaitTime timeout fallback
 	DeliveryReasonBatchLimit   DeliveryReason = "batch_limit"   // Batch size limits reached
 
 	// pollIntervalSafetyMultiplier is the multiplier for poll-interval gating
@@ -26,15 +26,15 @@ type TransactionBuffer struct {
 	mu                 sync.RWMutex
 	pending            map[string]*pendingTransaction
 	maxWaitTime        time.Duration
-	pollInterval       time.Duration               // Derived from CDC poll configuration
-	maxTxCount         int                         // maximum transactions per batch
-	maxBatchBytes      int                         // maximum estimated bytes per batch
-	estimatedBytes     int                         // current estimated batch size in bytes
+	pollInterval       time.Duration // Derived from CDC poll configuration
+	maxTxCount         int           // maximum transactions per batch
+	maxBatchBytes      int           // maximum estimated bytes per batch
+	estimatedBytes     int           // current estimated batch size in bytes
 	onComplete         func(*Transaction)
 	onTimeout          func(*Transaction, DeliveryReason)
 	cleanupTicker      *time.Ticker
 	stopCh             chan struct{}
-	tableMaxCommitTime map[string]time.Time         // Per-table max commit time
+	tableMaxCommitTime map[string]time.Time // Per-table max commit time
 }
 
 // pendingTransaction holds changes for an in-flight transaction
@@ -42,10 +42,10 @@ type pendingTransaction struct {
 	transactionID string
 	changes       []Change
 	firstSeen     time.Time
-	commitTime    time.Time              // Transaction commit time (from first change's CommitTime)
-	tables        map[string]bool        // Track which tables have changes for this transaction
+	commitTime    time.Time       // Transaction commit time (from first change's CommitTime)
+	tables        map[string]bool // Track which tables have changes for this transaction
 	complete      bool
-	estimatedSize int                    // Estimated size of this transaction in bytes
+	estimatedSize int // Estimated size of this transaction in bytes
 }
 
 // NewTransactionBuffer creates a new transaction buffer

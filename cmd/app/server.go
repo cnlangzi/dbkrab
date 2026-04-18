@@ -46,35 +46,35 @@ type PollMetricsProvider interface {
 
 // Server provides HTTP API for plugin and DLQ management
 type Server struct {
-	manager        *plugin.Manager
-	dlq            *dlq.DLQ
-	cdcAdmin       *cdcadmin.Admin
-	store          store.Store
-	sinkerManager  *sinker.Manager
-	monitorDB      *monitor.DB
-	port           int
-	app            *xun.App
-	mux            *http.ServeMux
-	configPath     string
-	config         *config.Config
-	configWatcher  *config.Watcher
-	sinksRoot      *os.Root // Secure root for sinks directory access
-	skillsPath     string   // Path to SQL skills directory from config
+	manager         *plugin.Manager
+	dlq             *dlq.DLQ
+	cdcAdmin        *cdcadmin.Admin
+	store           store.Store
+	sinkerManager   *sinker.Manager
+	monitorDB       *monitor.DB
+	port            int
+	app             *xun.App
+	mux             *http.ServeMux
+	configPath      string
+	config          *config.Config
+	configWatcher   *config.Watcher
+	sinksRoot       *os.Root            // Secure root for sinks directory access
+	skillsPath      string              // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
-	replayService *core.ReplayService  // Replay service for CDC changes replay
-	replayStatus  *replayStatus       // Current replay status (protected by mutex)
-	replayCancel  context.CancelFunc   // Cancel function to stop replay
-	poller        *core.Poller        // CDC poller reference for pause/resume during replay
+	replayService   *core.ReplayService // Replay service for CDC changes replay
+	replayStatus    *replayStatus       // Current replay status (protected by mutex)
+	replayCancel    context.CancelFunc  // Cancel function to stop replay
+	poller          *core.Poller        // CDC poller reference for pause/resume during replay
 }
 
 // replayStatus tracks the status of a replay operation
 type replayStatus struct {
-	mutex       sync.Mutex
-	isRunning   bool
-	Total       int
-	Processed   int
-	Failed      int
-	Status      string // "idle", "running", "completed", "failed"
+	mutex     sync.Mutex
+	isRunning bool
+	Total     int
+	Processed int
+	Failed    int
+	Status    string // "idle", "running", "completed", "failed"
 }
 
 // NewServer creates a new API server with all features
@@ -111,8 +111,8 @@ func NewServer(
 		configWatcher:   watcher,
 		skillsPath:      skillsPath,
 		metricsProvider: metricsProvider,
-		replayStatus:   &replayStatus{Status: "idle"},
-		poller:         poller,
+		replayStatus:    &replayStatus{Status: "idle"},
+		poller:          poller,
 	}
 }
 
@@ -393,6 +393,7 @@ func (s *Server) getDLQStats() (map[string]int, error) {
 	}
 	return stats, nil
 }
+
 // handleDLQIgnore handles POST /api/dlq/:id/ignore
 func (s *Server) handleDLQIgnore(c *xun.Context) error {
 	if s.dlq == nil {
@@ -497,10 +498,10 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 	if s.configPath != "" {
 		// Get current config from watcher (most up-to-date)
 		currentCfg := s.configWatcher.Get()
-		
+
 		// Update tables and save to file
 		currentCfg.Tables = req.Tables
-		
+
 		if err := config.Save(s.configPath, currentCfg); err != nil {
 			slog.Error("failed to save config file", "error", err, "path", s.configPath)
 			// Don't fail the request, just log the error
@@ -623,8 +624,8 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 			handler = s.manager
 		} else {
 			// Fallback: log only
-			handler = core.PluginHandler(func(ctx context.Context, tx *core.Transaction, batchCtx *core.BatchContext) error {
-				slog.Debug("replaying transaction", "tx_id", tx.ID, "changes", len(tx.Changes))
+			handler = core.PluginHandler(func(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+				slog.Debug("replaying changes", "batch_id", batchCtx.BatchID, "count", len(changes))
 				return nil
 			})
 		}
@@ -789,10 +790,10 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 	}
 
 	// Get gap detector thresholds from config
-	warnLagBytes := int64(100 * 1024 * 1024)      // Default 100MB
-	warnLagDuration := 1 * time.Hour              // Default 1 hour
-	critLagBytes := int64(1024 * 1024 * 1024)     // Default 1GB
-	critLagDuration := 6 * time.Hour              // Default 6 hours
+	warnLagBytes := int64(100 * 1024 * 1024)  // Default 100MB
+	warnLagDuration := 1 * time.Hour          // Default 1 hour
+	critLagBytes := int64(1024 * 1024 * 1024) // Default 1GB
+	critLagDuration := 6 * time.Hour          // Default 6 hours
 
 	if s.configWatcher != nil {
 		cfg := s.configWatcher.Get()
@@ -841,7 +842,7 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 
 	// Collect gap info for all tracked tables
 	gapInfos := make([]map[string]any, 0, len(trackedTables))
-	
+
 	for _, table := range trackedTables {
 		parts := strings.SplitN(table, ".", 2)
 		if len(parts) != 2 {
@@ -905,10 +906,10 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{
-		"success":     true,
-		"count":       len(gapInfos),
-		"tables":      gapInfos,
-		"max_lsn":     formatLSN(maxLSN),
+		"success": true,
+		"count":   len(gapInfos),
+		"tables":  gapInfos,
+		"max_lsn": formatLSN(maxLSN),
 		"thresholds": map[string]any{
 			"warning_lag_bytes":     warnLagBytes,
 			"warning_lag_duration":  warnLagDuration.String(),
@@ -977,7 +978,7 @@ func formatDuration(dur string) string {
 // renderOverviewHTML renders the overview metrics as HTML
 func renderOverviewHTML(m OverviewMetrics) string {
 	var sb strings.Builder
-	
+
 	// Determine health status classes
 	var healthBgClass, healthTextClass, healthTitle string
 	switch m.HealthStatus {
@@ -994,7 +995,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 		healthTextClass = "text-success"
 		healthTitle = "System Healthy"
 	}
-	
+
 	// Determine CDC status classes
 	var cdcTextClass, cdcStatusText string
 	switch m.CDCStatus {
@@ -1008,9 +1009,9 @@ func renderOverviewHTML(m OverviewMetrics) string {
 		cdcTextClass = "text-success"
 		cdcStatusText = "Active"
 	}
-	
+
 	sb.WriteString(`<div class="space-y-6">`)
-	
+
 	// Health Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<div class="flex items-center gap-4">`)
@@ -1027,7 +1028,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<h3 class="text-xl font-semibold ` + healthTextClass + `">` + healthTitle + `</h3>`)
 	sb.WriteString(`<p class="text-textMuted">` + m.HealthMessage + `</p>`)
 	sb.WriteString(`</div></div></div>`)
-	
+
 	// CDC Sync Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">CDC Sync Status</h3>`)
@@ -1041,7 +1042,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 		sb.WriteString(`<p class="text-xs text-textMuted mt-3">` + m.CDCMessage + `</p>`)
 	}
 	sb.WriteString(`</div>`)
-	
+
 	// GAP Monitoring Summary
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">GAP Monitoring</h3>`)
@@ -1055,7 +1056,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 		sb.WriteString(`<p class="text-xs text-textMuted mt-1">` + formatDuration(m.GAPMaxLagDuration) + `</p>`)
 	}
 	sb.WriteString(`</div></div></div>`)
-	
+
 	// TPS Monitoring Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">TPS Monitoring</h3>`)
@@ -1077,18 +1078,18 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Pending</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-error/20 flex items-center justify-center"><svg class="w-4 h-4 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
 	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-error">%d</p></div>`, m.DLQPending)
-	
+
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-success/20 hover:border-success/40 transition-all">`)
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Resolved</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center"><svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div></div>`)
 	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-success">%d</p></div>`, m.DLQResolved)
-	
+
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border hover:border-border/60 transition-all">`)
 	sb.WriteString(`<div class="flex items-center justify-between mb-2"><p class="text-textMuted text-sm font-medium">DLQ Ignored</p>`)
 	sb.WriteString(`<div class="w-8 h-8 rounded-lg bg-surfaceHover flex items-center justify-center"><svg class="w-4 h-4 text-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg></div></div>`)
 	fmt.Fprintf(&sb, `<p class="text-3xl font-bold text-textMuted">%d</p></div>`, m.DLQIgnored)
 	sb.WriteString(`</div>`)
-	
+
 	// Plugin Status Card
 	sb.WriteString(`<div class="bg-surface rounded-xl shadow-lg p-6 border border-border">`)
 	sb.WriteString(`<h3 class="text-lg font-semibold text-text mb-4">Plugins</h3>`)
@@ -1096,9 +1097,9 @@ func renderOverviewHTML(m OverviewMetrics) string {
 	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">Active</p><p class="text-2xl font-bold text-primary">%d</p></div>`, m.PluginsActive)
 	fmt.Fprintf(&sb, `<div><p class="text-textMuted text-sm">SQL Plugins</p><p class="text-2xl font-bold text-success">%d</p></div>`, m.PluginsSQL)
 	sb.WriteString(`</div></div>`)
-	
+
 	sb.WriteString(`</div>`)
-	
+
 	return sb.String()
 }
 
@@ -1106,7 +1107,7 @@ func renderOverviewHTML(m OverviewMetrics) string {
 func (s *Server) handleOverview(c *xun.Context) error {
 	// Collect all metrics
 	metrics := s.collectOverviewMetrics()
-	
+
 	// Return HTML string directly
 	html := renderOverviewHTML(metrics)
 	c.WriteHeader("Content-Type", "text/html; charset=utf-8")
@@ -1117,50 +1118,50 @@ func (s *Server) handleOverview(c *xun.Context) error {
 // OverviewMetrics contains all dashboard overview metrics
 type OverviewMetrics struct {
 	// Health
-	HealthStatus string
+	HealthStatus  string
 	HealthMessage string
-	
+
 	// CDC Sync Status
-	CDCStatus string // "active", "inactive", "error"
-	CDCMessage string
-	CDCLagBytes int64
+	CDCStatus      string // "active", "inactive", "error"
+	CDCMessage     string
+	CDCLagBytes    int64
 	CDCLagDuration string
-	TablesTracked int
-	
+	TablesTracked  int
+
 	// GAP Monitoring
-	GAPHealthyTables int
-	GAPIssueTables int
-	GAPMaxLagBytes int64
+	GAPHealthyTables  int
+	GAPIssueTables    int
+	GAPMaxLagBytes    int64
 	GAPMaxLagDuration string
-	
+
 	// DLQ Stats
-	DLQPending int
+	DLQPending  int
 	DLQResolved int
-	DLQIgnored int
-	
+	DLQIgnored  int
+
 	// Plugin Status
 	PluginsActive int
-	PluginsSQL int
-	
+	PluginsSQL    int
+
 	// System Info
-	Uptime string
+	Uptime       string
 	LastSyncTime string
 
 	// TPS Monitoring (from Poller.GetMetrics)
-	LastSyncTPS       float64
-	AvgTPS1m          float64
+	LastSyncTPS        float64
+	AvgTPS1m           float64
 	LastSyncDurationMs int64
-	LastDLQCount      int64
-	LastPollTime      string
+	LastDLQCount       int64
+	LastPollTime       string
 }
 
 // collectOverviewMetrics collects all metrics for the dashboard overview
 func (s *Server) collectOverviewMetrics() OverviewMetrics {
 	metrics := OverviewMetrics{
-		HealthStatus: "healthy",
+		HealthStatus:  "healthy",
 		HealthMessage: "All services running",
 	}
-	
+
 	// Collect CDC status
 	if s.store != nil {
 		state, err := s.store.GetPollerState()
@@ -1170,7 +1171,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 		} else {
 			metrics.CDCStatus = "active"
 			metrics.CDCMessage = "CDC polling active"
-			
+
 			// Get last sync time (stored as string in DB)
 			if lastPollStr, ok := state["last_poll_time"].(string); ok && lastPollStr != "" {
 				// Parse the timestamp string and format for display
@@ -1180,7 +1181,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 					metrics.LastSyncTime = lastPollStr
 				}
 			}
-			
+
 			// Count tracked tables
 			if s.configWatcher != nil {
 				cfg := s.configWatcher.Get()
@@ -1191,18 +1192,18 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 		metrics.CDCStatus = "inactive"
 		metrics.CDCMessage = "CDC not initialized"
 	}
-	
+
 	// Collect GAP metrics
 	if s.cdcAdmin != nil && s.store != nil && s.configWatcher != nil {
 		cfg := s.configWatcher.Get()
 		trackedTables := cfg.Tables
-		
+
 		// Get thresholds
 		warnLagBytes := int64(100 * 1024 * 1024)
 		warnLagDuration := 1 * time.Hour
 		critLagBytes := int64(1024 * 1024 * 1024)
 		critLagDuration := 6 * time.Hour
-		
+
 		if cfg.CDC.Gap.Enabled {
 			if cfg.CDC.Gap.WarningLagBytes > 0 {
 				warnLagBytes = cfg.CDC.Gap.WarningLagBytes
@@ -1221,14 +1222,14 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 				}
 			}
 		}
-		
+
 		// Connect to database for gap detection
 		db, err := s.cdcAdmin.Connect()
 		if err == nil {
 			defer db.Close() //nolint:errcheck
 			gapDetector := cdc.NewGapDetector(db)
 			ctx := context.Background()
-			
+
 			maxLSN, err := gapDetector.GetMaxLSN(ctx)
 			if err == nil {
 				state, err := s.store.GetPollerState()
@@ -1237,12 +1238,12 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 					if lsnStr, ok := state["last_lsn"].(string); ok && lsnStr != "" {
 						currentLSN = maxLSN
 					}
-					
+
 					healthyCount := 0
 					issueCount := 0
 					maxLagBytes := int64(0)
 					var maxLagDuration time.Duration
-					
+
 					for _, table := range trackedTables {
 						parts := strings.SplitN(table, ".", 2)
 						if len(parts) != 2 {
@@ -1250,12 +1251,12 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 						}
 						schema, name := parts[0], parts[1]
 						captureInstance := fmt.Sprintf("%s_%s", schema, name)
-						
+
 						gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
 						if err != nil {
 							continue
 						}
-						
+
 						if gapInfo.HasGap || gapInfo.IsGapCritical(critLagBytes, critLagDuration) {
 							issueCount++
 						} else if gapInfo.IsGapWarning(warnLagBytes, warnLagDuration) {
@@ -1263,7 +1264,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 						} else {
 							healthyCount++
 						}
-						
+
 						if gapInfo.LagBytes > maxLagBytes {
 							maxLagBytes = gapInfo.LagBytes
 						}
@@ -1271,7 +1272,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 							maxLagDuration = gapInfo.LagDuration
 						}
 					}
-					
+
 					metrics.GAPHealthyTables = healthyCount
 					metrics.GAPIssueTables = issueCount
 					metrics.GAPMaxLagBytes = maxLagBytes
@@ -1280,7 +1281,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			}
 		}
 	}
-	
+
 	// Collect DLQ stats
 	if s.dlq != nil {
 		rawStats, err := s.dlq.Stats()
@@ -1290,7 +1291,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 			metrics.DLQIgnored = rawStats[dlq.StatusIgnored]
 		}
 	}
-	
+
 	// Collect plugin stats
 	if s.manager != nil {
 		plugins := s.manager.List()
@@ -1377,7 +1378,6 @@ func (s *Server) getSinkById(id string) (*config.SinkConfig, error) {
 	}
 	return nil, fmt.Errorf("sink not found: %s", id)
 }
-
 
 // handleSinkTables handles GET /api/sinks/{id}/tables
 func (s *Server) handleSinkTables(c *xun.Context) error {
@@ -1541,7 +1541,7 @@ func formatFileSize(size int64) string {
 		MB = KB * 1024
 		GB = MB * 1024
 	)
-	
+
 	switch {
 	case size >= GB:
 		return fmt.Sprintf("%.2f GB", float64(size)/float64(GB))

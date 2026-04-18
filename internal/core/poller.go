@@ -16,26 +16,26 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
-	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
+	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
 // PollMetrics holds per-poll performance metrics
 type PollMetrics struct {
-	FetchedChanges    int           // total CDC changes fetched this poll
-	ProcessedTx       int           // number of transactions processed
-	SyncDurationMs    int64         // time spent in sync (handler + store) in milliseconds
-	PullDurationMs    int64         // time spent pulling changes from CDC source (GetChanges loop)
-	StoreDurationMs   int64         // time spent in store write in milliseconds (write_ms)
-	FlushDurationMs   int64         // time spent in store flush in milliseconds
-	DLQCount          int           // number of transactions sent to DLQ
-	LastPollTime      time.Time     // when the poll cycle started (fetch time)
-	LastFetchTime     time.Time     // when changes were fetched (same as LastPollTime)
-	LastSyncTime      time.Time     // when sync completed
-	LastLSN           string        // LSN after this poll
-	SyncTPS           float64       // computed TPS (fetched_changes / sync_duration_seconds)
-	EndToEndLatencyMs int64         // end-to-end latency from fetch to sync complete
+	FetchedChanges    int       // total CDC changes fetched this poll
+	ProcessedTx       int       // number of transactions processed
+	SyncDurationMs    int64     // time spent in sync (handler + store) in milliseconds
+	PullDurationMs    int64     // time spent pulling changes from CDC source (GetChanges loop)
+	StoreDurationMs   int64     // time spent in store write in milliseconds (write_ms)
+	FlushDurationMs   int64     // time spent in store flush in milliseconds
+	DLQCount          int       // number of transactions sent to DLQ
+	LastPollTime      time.Time // when the poll cycle started (fetch time)
+	LastFetchTime     time.Time // when changes were fetched (same as LastPollTime)
+	LastSyncTime      time.Time // when sync completed
+	LastLSN           string    // LSN after this poll
+	SyncTPS           float64   // computed TPS (fetched_changes / sync_duration_seconds)
+	EndToEndLatencyMs int64     // end-to-end latency from fetch to sync complete
 }
 
 // pollMetricsWindow maintains a sliding window of recent poll metrics
@@ -87,48 +87,46 @@ func (w *pollMetricsWindow) avgLatencyMs() int64 {
 	return totalLatency / int64(len(w.samples))
 }
 
-
-
 // Poller polls MSSQL CDC tables for changes
 type Poller struct {
-	cfg           *config.Config
-	db            *sql.DB
-	querier       CDCQuerier
-	cdcAdmin      *cdcadmin.Admin
-	gapDetector   *cdc.GapDetector
-	alertManager  *alert.AlertManager
-	offsets       offset.StoreInterface
+	cfg          *config.Config
+	db           *sql.DB
+	querier      CDCQuerier
+	cdcAdmin     *cdcadmin.Admin
+	gapDetector  *cdc.GapDetector
+	alertManager *alert.AlertManager
+	offsets      offset.StoreInterface
 	store        Store
-	handler       Handler
-	dlq           *dlq.DLQ           // DLQ store
-	monitorDB *monitor.DB     // Observability logs database
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	paused        bool
-	pausedMu      sync.RWMutex
-	polling       bool  // true when poll is running, prevents overlapping polls
-	lastGapCheck  time.Time
-	gapCheckMu    sync.RWMutex
-	txBuffer      *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
-	
+	handler      Handler
+	dlq          *dlq.DLQ    // DLQ store
+	monitorDB    *monitor.DB // Observability logs database
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	paused       bool
+	pausedMu     sync.RWMutex
+	polling      bool // true when poll is running, prevents overlapping polls
+	lastGapCheck time.Time
+	gapCheckMu   sync.RWMutex
+	txBuffer     *TransactionBuffer // DEPRECATED: no longer used, transactions handled via processDirect
+
 	// Graceful degradation fields
 	disconnectStart time.Time
 	disconnectMu    sync.RWMutex
-	
+
 	// Hot reload fields
-	reloadCh      <-chan *config.Config  // Channel for config reload signals
-	pendingCfg    *config.Config         // Pending config to apply
-	
+	reloadCh   <-chan *config.Config // Channel for config reload signals
+	pendingCfg *config.Config        // Pending config to apply
+
 	// Metrics fields
-	metricsMu        sync.RWMutex        // protects metrics
-	metrics          PollMetrics          // last poll metrics
-	metricsWindow    *pollMetricsWindow   // 1-minute sliding window (~60 samples at 1s interval)
+	metricsMu     sync.RWMutex       // protects metrics
+	metrics       PollMetrics        // last poll metrics
+	metricsWindow *pollMetricsWindow // 1-minute sliding window (~60 samples at 1s interval)
 }
 
 // Store interface for storing changes
+// Write writes the full LSN batch of changes and returns the number of rows actually inserted.
 type Store interface {
-	// Write writes a transaction and returns the number of rows actually inserted.
-	Write(tx *Transaction) (int, error)
+	Write(changes []Change) (int, error)
 	// Flush ensures all buffered writes are committed to durable storage.
 	Flush() error
 	Close() error
@@ -136,8 +134,10 @@ type Store interface {
 
 // Handler interface for custom processing.
 // BatchCtx provides observability context (batch_id) for logging correlation.
+// Handler receives the full LSN batch of changes (one LSN = one target-side transaction).
+// Handler may reconstruct transactions internally if needed for business logic.
 type Handler interface {
-	Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
+	Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -149,18 +149,19 @@ type CDCQuerier interface {
 }
 
 // PluginHandler is a function type for plugin-based handling
-type PluginHandler func(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error
+// Handler receives the full LSN batch of changes (not individual transactions).
+type PluginHandler func(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 
 // Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, tx *Transaction, batchCtx *BatchContext) error {
-	return h(ctx, tx, batchCtx)
+func (h PluginHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
+	return h(ctx, changes, batchCtx)
 }
 
 type tablePollResult struct {
-	table       string
-	changes     []Change
-	lastLSN     LSN
-	err         error
+	table   string
+	changes []Change
+	lastLSN LSN
+	err     error
 }
 
 var ErrNoNewData = errors.New("no new data available for table")
@@ -170,9 +171,9 @@ var ErrNoNewData = errors.New("no new data available for table")
 // ensuring all tables see the same boundary for cross-table transaction consistency.
 //
 // Logic:
-//   1. If last_lsn is empty → getMinLSN() as cold start
-//   2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
-//   3. If last_lsn == max_lsn → no new data
+//  1. If last_lsn is empty → getMinLSN() as cold start
+//  2. If last_lsn != max_lsn → new data available, use next_lsn as fromLSN
+//  3. If last_lsn == max_lsn → no new data
 func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Offset, globalMaxLSN LSN) ([]byte, error) {
 	// Case 1: Cold start - no stored last_lsn
 	if stored.LastLSN == "" {
@@ -227,16 +228,16 @@ func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, off
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
-		handler:     handler,
-		cfg:       cfg,
-		db:        db,
-		querier:   cdc.NewQuerier(db, mssqlTimezone),
-		cdcAdmin:  cdcadmin.NewAdmin(&cfg.MSSQL),
-		offsets:   offsetStore,
-		store:     store,
-		dlq:       dlqStore,
-		monitorDB: monitorDB,
-		stopCh:    make(chan struct{}),
+		handler:       handler,
+		cfg:           cfg,
+		db:            db,
+		querier:       cdc.NewQuerier(db, mssqlTimezone),
+		cdcAdmin:      cdcadmin.NewAdmin(&cfg.MSSQL),
+		offsets:       offsetStore,
+		store:         store,
+		dlq:           dlqStore,
+		monitorDB:     monitorDB,
+		stopCh:        make(chan struct{}),
 		metricsWindow: newPollMetricsWindow(60), // ~60 samples for 1-minute window
 	}
 
@@ -284,8 +285,8 @@ func (p *Poller) Start(ctx context.Context) error {
 	for _, status := range statuses {
 		if status.CDCEnabled {
 			if status.EnableError != "" {
-				slog.Warn("CDC enable attempted but failed (requires DBO privileges)", 
-					"table", status.Schema+"."+status.Table, 
+				slog.Warn("CDC enable attempted but failed (requires DBO privileges)",
+					"table", status.Schema+"."+status.Table,
 					"capture_instance", status.CaptureInstance,
 					"error", status.EnableError)
 			} else if status.NeedsEnable {
@@ -395,7 +396,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	// P0-6: Use timeout context for CDC queries to prevent blocking
 	const queryTimeout = 10 * time.Second
 	const changesTimeout = 10 * time.Second // Separate timeout for GetChanges
-	
+
 	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
@@ -516,65 +517,63 @@ func (p *Poller) poll(ctx context.Context) error {
 	return p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, time.Duration(0), time.Duration(0), time.Duration(0), 0, 0, 0)
 }
 
-// processDirect processes changes without transaction buffer (legacy behavior)
+// processDirect processes changes without transaction grouping.
+// One LSN batch => one target-side transaction (per-LSN semantics).
+// Handler and Store receive the full []Change for the batch.
 func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results []tablePollResult, fetchTime time.Time, pullDuration time.Duration) error {
 	// Create BatchContext for this poll cycle
 	batchCtx := NewBatchContext()
-	
-	syncStartTime := time.Now()
 
-	// Group by transaction ID and deliver
-	txs := p.groupByTransaction(allChanges)
+	syncStartTime := time.Now()
 
 	// Track DLQ count, store duration, and actual rows inserted
 	dlqCount := 0
 	actualInserted := 0
 	var totalStoreDuration time.Duration
 	var handlerErrors []error
-
-	// Process all transactions
 	var processErrors []error
-	for _, tx := range txs {
-		// Handler processing with retry (non-blocking: continue even if handler fails)
-		// Plugin writes to its own sink
-		if p.handler != nil {
-			var handlerErr error
-			err := retry.DoWithName(ctx, func() error {
-				handlerErr = p.handler.Handle(ctx, &tx, batchCtx)
-				return handlerErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_tx_%s", tx.ID))
-			if err != nil {
-				slog.Error("handler error",
-					"batch_id", batchCtx.BatchID,
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(&tx, err, "handler")
-				dlqCount++
-				handlerErrors = append(handlerErrors, err)
-			}
-		}
 
-		// Store processing with retry (blocking: must succeed for offset advancement)
-		if p.store != nil {
-			storeStart := time.Now()
-			var inserted int
-			err := retry.DoWithName(ctx, func() error {
-				var writeErr error
-				inserted, writeErr = p.store.Write(&tx)
-				return writeErr
-			}, retry.DefaultRetryConfig(), fmt.Sprintf("store_tx_%s", tx.ID))
-			storeDuration := time.Since(storeStart)
-			totalStoreDuration += storeDuration
-			if err != nil {
-				slog.Error("store error",
-					"tx_id", tx.ID,
-					"error", err)
-				p.writeToDLQ(&tx, err, "store")
-				processErrors = append(processErrors, fmt.Errorf("store tx %s: %w", tx.ID, err))
-				dlqCount++
-			} else {
-				actualInserted += inserted
-			}
+	// Handler processing with retry (non-blocking: continue even if handler fails)
+	// Plugin receives the full LSN batch and may reconstruct transactions internally if needed
+	if p.handler != nil {
+		var handlerErr error
+		err := retry.DoWithName(ctx, func() error {
+			handlerErr = p.handler.Handle(ctx, allChanges, batchCtx)
+			return handlerErr
+		}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_batch_%s", batchCtx.BatchID))
+		if err != nil {
+			slog.Error("handler error",
+				"batch_id", batchCtx.BatchID,
+				"error", err)
+			// Write each failed change to DLQ (change-scoped)
+			p.writeChangesToDLQ(allChanges, err, "handler")
+			dlqCount += len(allChanges)
+			handlerErrors = append(handlerErrors, err)
+		}
+	}
+
+	// Store processing with retry (blocking: must succeed for offset advancement)
+	// Store writes the full LSN batch in one operation
+	if p.store != nil {
+		storeStart := time.Now()
+		var inserted int
+		err := retry.DoWithName(ctx, func() error {
+			var writeErr error
+			inserted, writeErr = p.store.Write(allChanges)
+			return writeErr
+		}, retry.DefaultRetryConfig(), fmt.Sprintf("store_batch_%s", batchCtx.BatchID))
+		storeDuration := time.Since(storeStart)
+		totalStoreDuration += storeDuration
+		if err != nil {
+			slog.Error("store error",
+				"batch_id", batchCtx.BatchID,
+				"error", err)
+			// Write each failed change to DLQ (change-scoped)
+			p.writeChangesToDLQ(allChanges, err, "store")
+			processErrors = append(processErrors, fmt.Errorf("store batch %s: %w", batchCtx.BatchID, err))
+			dlqCount += len(allChanges)
+		} else {
+			actualInserted = inserted
 		}
 	}
 
@@ -599,7 +598,8 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	}
 
 	// Then: update offsets after successful flush
-	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, len(txs), actualInserted); err != nil {
+	// Note: TxCount is 0 since we no longer group by transaction at poller level
+	if err := p.updateOffsets(ctx, results, allChanges, fetchTime, pullDuration, syncDuration, totalStoreDuration, flushDuration, dlqCount, 0, actualInserted); err != nil {
 		return err
 	}
 
@@ -615,9 +615,9 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 
 		totalDuration := time.Since(fetchTime)
 		batchLog := &monitor.BatchLog{
-			BatchID:      batchCtx.BatchID,
+			BatchID:     batchCtx.BatchID,
 			FetchedRows: len(allChanges),
-			TxCount:     len(txs),
+			TxCount:     0, // No transaction grouping at poller level
 			DLQCount:    dlqCount,
 			DurationMs:  totalDuration.Milliseconds(),
 			Status:      pullStatus,
@@ -721,7 +721,7 @@ func (p *Poller) updateOffsets(ctx context.Context, results []tablePollResult, a
 	if len(allChanges) > 0 {
 		syncEndTime := time.Now()
 		endToEndLatency := syncEndTime.Sub(fetchTime)
-		
+
 		// Compute TPS: fetched_changes / sync_duration_seconds
 		var syncTPS float64
 		if syncDuration.Seconds() > 0 {
@@ -805,7 +805,7 @@ func (p *Poller) handleDisconnection(ctx context.Context, err error, reconnectDe
 	p.disconnectMu.Lock()
 	if p.disconnectStart.IsZero() {
 		p.disconnectStart = time.Now()
-		slog.Warn("MSSQL disconnection detected, entering reconnection mode", 
+		slog.Warn("MSSQL disconnection detected, entering reconnection mode",
 			"error", err)
 	}
 	p.disconnectMu.Unlock()
@@ -871,42 +871,6 @@ func min(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
-}
-
-// groupByTransaction groups changes by transaction ID
-// It also defensively filters out OpUpdateBefore changes which should not reach
-// the sink writer or internal store. UPDATE_BEFORE rows are silently dropped
-// to prevent "unknown operation type: UPDATE_BEFORE" errors.
-func (p *Poller) groupByTransaction(changes []Change) []Transaction {
-	txMap := make(map[string]*Transaction)
-
-	for _, c := range changes {
-		// Defensively filter out UPDATE_BEFORE changes - they should not be
-		// captured when using net_changes mode, but we filter as a safeguard
-		// to prevent DLQ errors from reaching the sink writer.
-		if c.Operation == OpUpdateBefore {
-			slog.Debug("groupByTransaction: silently dropping UPDATE_BEFORE change",
-				"table", c.Table,
-				"tx_id", c.TransactionID,
-				"lsn", fmt.Sprintf("%x", c.LSN))
-			continue
-		}
-
-		tx, exists := txMap[c.TransactionID]
-		if !exists {
-			tx = NewTransaction(c.TransactionID)
-			txMap[c.TransactionID] = tx
-		}
-		tx.AddChange(c)
-	}
-
-	// Convert map to slice
-	result := make([]Transaction, 0, len(txMap))
-	for _, tx := range txMap {
-		result = append(result, *tx)
-	}
-
-	return result
 }
 
 // checkGaps checks for CDC gaps across all monitored tables
@@ -1036,12 +1000,13 @@ func (p *Poller) recordGapCheck() {
 	p.gapCheckMu.Unlock()
 }
 
-// writeToDLQ writes a failed transaction to the dead letter queue
-func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
+// writeChangesToDLQ writes failed changes to the dead letter queue (change-scoped).
+// Each change is written as a separate DLQ entry for granular retry.
+func (p *Poller) writeChangesToDLQ(changes []Change, err error, source string) {
 	if p.dlq == nil {
 		slog.Warn("cannot write to DLQ: not initialized",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID)
+			"source", source,
+			"changes", len(changes))
 		return
 	}
 
@@ -1052,73 +1017,39 @@ func (p *Poller) writeToDLQ(tx *Transaction, err error, source string) {
 		retryCount = retryErr.RetryCount
 	}
 
-	// Get the first change to extract table name and operation
-	var tableName, operation string
-	if len(tx.Changes) > 0 {
-		tableName = tx.Changes[0].Table
-		operation = tx.Changes[0].Operation.String()
-	}
-
-	// Encode transaction data as JSON
-	txData := map[string]interface{}{
-		"transaction_id": tx.ID,
-		"changes":        tx.Changes,
-	}
-	changeJSON, encodeErr := json.Marshal(txData)
-	if encodeErr != nil {
-		slog.Error("failed to encode transaction data",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID,
-			"error", encodeErr)
-		changeJSON = []byte("{}")
-	}
-
-	// Get LSN from first change
-	var lsn string
-	if len(tx.Changes) > 0 {
-		lsn = fmt.Sprintf("%v", tx.Changes[0].LSN)
-	}
-
-	entry := &dlq.DLQEntry{
-		TraceID:      tx.TraceID,
-		Source:       source,
-		LSN:          lsn,
-		TableName:    tableName,
-		Operation:    operation,
-		ChangeData:   string(changeJSON),
-		ErrorMessage: fmt.Sprintf("%s error: %v", source, err),
-		RetryCount:   retryCount,
-		Status:       dlq.StatusPending,
-	}
-
-	if writeErr := p.dlq.Write(entry); writeErr != nil {
-		slog.Error("failed to write DLQ entry",
-			"trace_id", tx.TraceID,
-			"tx_id", tx.ID,
-			"error", writeErr)
-		return
-	}
-
-	// Send alert
-	if p.alertManager != nil {
-		gapInfo := cdc.GapInfo{
-			Table:       tableName,
-			LagBytes:    0,
-			LagDuration: 0,
-			CheckedAt:   time.Now(),
+	// Write each change as a separate DLQ entry (change-scoped)
+	for i, c := range changes {
+		// Encode change data as JSON
+		changeJSON, encodeErr := json.Marshal(c)
+		if encodeErr != nil {
+			slog.Error("failed to encode change data",
+				"table", c.Table,
+				"lsn", fmt.Sprintf("%x", c.LSN),
+				"error", encodeErr)
+			changeJSON = []byte("{}")
 		}
-		p.alertManager.SendWarning(
-			fmt.Sprintf("Transaction %s (trace: %s) written to DLQ", tx.ID, tx.TraceID),
-			gapInfo,
-		)
-	}
 
-	slog.Warn("transaction written to DLQ",
-		"trace_id", tx.TraceID,
-		"tx_id", tx.ID,
-		"table", tableName,
-		"operation", operation,
-		"retries", retryCount)
+		// Use Change.ID for trace correlation (content-based, deterministic)
+		// This allows tracing the same change across multiple DLQ entries if retried
+		entry := &dlq.DLQEntry{
+			TraceID:      c.ID,
+			Source:       source,
+			LSN:          fmt.Sprintf("%x", c.LSN),
+			TableName:    c.Table,
+			Operation:    c.Operation.String(),
+			ChangeData:   string(changeJSON),
+			ErrorMessage: fmt.Sprintf("%s error (batch[%d]): %v", source, i, err),
+			RetryCount:   retryCount,
+			Status:       dlq.StatusPending,
+		}
+
+		if writeErr := p.dlq.Write(entry); writeErr != nil {
+			slog.Error("failed to write DLQ entry",
+				"table", c.Table,
+				"lsn", fmt.Sprintf("%x", c.LSN),
+				"error", writeErr)
+		}
+	}
 }
 
 // checkAndApplyConfig checks if config can be applied and applies it at transaction boundary
@@ -1187,23 +1118,22 @@ func tablesEqual(a, b []string) bool {
 	return true
 }
 
-
 // GetMetrics returns the current poll metrics and 1-minute window averages
 func (p *Poller) GetMetrics() map[string]interface{} {
 	p.metricsMu.RLock()
 	m := p.metrics
 	p.metricsMu.RUnlock()
-	
+
 	// Get window averages
 	avgTPS := p.metricsWindow.avgTPS()
 	avgLatency := p.metricsWindow.avgLatencyMs()
-	
+
 	return map[string]interface{}{
 		"last_fetched":          m.FetchedChanges,
 		"last_processed_tx":     m.ProcessedTx,
 		"last_sync_tps":         m.SyncTPS,
 		"last_sync_duration_ms": m.SyncDurationMs,
-		"last_batch_ms":          m.PullDurationMs,
+		"last_batch_ms":         m.PullDurationMs,
 		"last_write_ms":         m.StoreDurationMs,
 		"last_flush_ms":         m.FlushDurationMs,
 		"last_dlq_count":        m.DLQCount,

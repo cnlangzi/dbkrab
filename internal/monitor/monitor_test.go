@@ -39,7 +39,7 @@ func TestDB_WriteBatchLog(t *testing.T) {
 
 	// Test successful pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-001",
+		BatchID:     "test-pull-001",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,
@@ -89,7 +89,7 @@ func TestDB_WriteBatchLog_Partial(t *testing.T) {
 
 	// Test partial pull log (with DLQ entries)
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-002",
+		BatchID:     "test-pull-002",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    2,
@@ -137,7 +137,7 @@ func TestDB_WriteBatchLog_Failed(t *testing.T) {
 
 	// Test failed pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-003",
+		BatchID:     "test-pull-003",
 		FetchedRows: 0,
 		TxCount:     0,
 		DLQCount:    0,
@@ -181,7 +181,7 @@ func TestDB_WriteSkillLog(t *testing.T) {
 
 	// First write a pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-004",
+		BatchID:     "test-pull-004",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,
@@ -195,7 +195,7 @@ func TestDB_WriteSkillLog(t *testing.T) {
 
 	// Test skill log - executed
 	skillLog := &SkillLog{
-		BatchID:        "test-pull-004",
+		BatchID:       "test-pull-004",
 		SkillID:       "skill-001",
 		SkillName:     "test-skill",
 		Operation:     "INSERT",
@@ -244,7 +244,7 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 
 	// Write pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-005",
+		BatchID:     "test-pull-005",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,
@@ -258,7 +258,7 @@ func TestDB_WriteSkillLog_Skip(t *testing.T) {
 
 	// Test skill log - skipped
 	skillLog := &SkillLog{
-		BatchID:        "test-pull-005",
+		BatchID:       "test-pull-005",
 		SkillID:       "skill-002",
 		SkillName:     "test-skip-skill",
 		Operation:     "UPDATE",
@@ -303,7 +303,7 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 
 	// Write pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-006",
+		BatchID:     "test-pull-006",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    1,
@@ -317,7 +317,7 @@ func TestDB_WriteSkillLog_Error(t *testing.T) {
 
 	// Test skill log - error
 	skillLog := &SkillLog{
-		BatchID:        "test-pull-006",
+		BatchID:       "test-pull-006",
 		SkillID:       "skill-003",
 		SkillName:     "test-error-skill",
 		Operation:     "DELETE",
@@ -367,7 +367,7 @@ func TestDB_WriteSinkLog(t *testing.T) {
 
 	// Write pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-007",
+		BatchID:     "test-pull-007",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,
@@ -381,15 +381,15 @@ func TestDB_WriteSinkLog(t *testing.T) {
 
 	// Test sink log - success
 	sinkLog := &SinkLog{
-		BatchID:       "test-pull-007",
-		SkillName:    "test-skill",
-		SinkName:     "business",
-		OutputTable:  "orders",
-		Operation:    "INSERT",
-		RowsWritten:  50,
-		Status:       SinkStatusSuccess,
-		DurationMs:   20,
-		CreatedAt:    time.Now(),
+		BatchID:     "test-pull-007",
+		SkillName:   "test-skill",
+		SinkName:    "business",
+		OutputTable: "orders",
+		Operation:   "INSERT",
+		RowsWritten: 50,
+		Status:      SinkStatusSuccess,
+		DurationMs:  20,
+		CreatedAt:   time.Now(),
 	}
 
 	if err := monitorDB.WriteSinkLog(sinkLog); err != nil {
@@ -431,7 +431,7 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 
 	// Write pull log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-008",
+		BatchID:     "test-pull-008",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    1,
@@ -445,7 +445,7 @@ func TestDB_WriteSinkLog_Error(t *testing.T) {
 
 	// Test sink log - error
 	sinkLog := &SinkLog{
-		BatchID:       "test-pull-008",
+		BatchID:      "test-pull-008",
 		SkillName:    "test-skill",
 		SinkName:     "analytics",
 		OutputTable:  "events",
@@ -506,7 +506,7 @@ func TestDB_GetBatchLogStats(t *testing.T) {
 		}
 
 		pullLog := &BatchLog{
-			BatchID:      string(rune('a' + i)),
+			BatchID:     string(rune('a' + i)),
 			FetchedRows: 100,
 			TxCount:     5,
 			DLQCount:    0,
@@ -561,7 +561,7 @@ func TestDB_Closed(t *testing.T) {
 
 	// Try to write after close - should fail
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-closed",
+		BatchID:     "test-pull-closed",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,
@@ -588,7 +588,7 @@ func TestDB_Flush(t *testing.T) {
 
 	// Write a log
 	pullLog := &BatchLog{
-		BatchID:      "test-pull-flush",
+		BatchID:     "test-pull-flush",
 		FetchedRows: 100,
 		TxCount:     5,
 		DLQCount:    0,

@@ -14,6 +14,7 @@ type TxExec interface {
 	Commit() error
 	Rollback() error
 }
+
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
 // Tables must be created via migrations before calling this function.
 // This function will NOT create tables - it assumes the table already exists.
@@ -219,9 +220,9 @@ func DeleteInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 
 // TableConfig holds configuration for table operations.
 type TableConfig struct {
-	Output      string
-	PrimaryKey  string
-	OnConflict  string // "overwrite", "skip", or ""
+	Output     string
+	PrimaryKey string
+	OnConflict string // "overwrite", "skip", or ""
 }
 
 // BuildInsertSQL builds INSERT SQL with optional OR REPLACE/OR IGNORE.

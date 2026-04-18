@@ -41,11 +41,11 @@ type SkillListResponse struct {
 // SkillInfo contains skill metadata
 type SkillInfo struct {
 	Name        string   `json:"name"`
-	Id          string   `json:"id"`            // SHA256(file)[:12]
-	File        string   `json:"file"`          // Relative path from config.plugins.sql.path
+	Id          string   `json:"id"`   // SHA256(file)[:12]
+	File        string   `json:"file"` // Relative path from config.plugins.sql.path
 	Description string   `json:"description"`
 	Tables      []string `json:"tables"`
-	Status      string   `json:"status"`        // loaded, error, not_loaded
+	Status      string   `json:"status"` // loaded, error, not_loaded
 	Version     string   `json:"version"`
 	LoadTime    string   `json:"load_time,omitempty"`
 	Error       string   `json:"error,omitempty"`
@@ -257,6 +257,7 @@ func renderSkillsFilesHTML(files []SkillFileInfo) string {
 
 	return html.String()
 }
+
 // Returns JSON for API clients
 func (s *Server) handleSkillsFiles(c *xun.Context) error {
 	skillsDir := "skills"
