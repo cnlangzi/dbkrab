@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // TxExec is the interface for executing statements within a transaction.
@@ -13,6 +14,21 @@ type TxExec interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Commit() error
 	Rollback() error
+}
+
+// normalizeRowValues converts time.Time values to SQLite-compatible datetime strings.
+// Uses SQLite's native format (YYYY-MM-DD HH:MM:SS) for maximum compatibility.
+func normalizeRowValues(columns []string, row []interface{}) []interface{} {
+	normalized := make([]interface{}, len(row))
+	for i, v := range row {
+		if t, ok := v.(time.Time); ok {
+			// Use SQLite's native datetime format
+			normalized[i] = t.Format("2006-01-02 15:04:05")
+		} else {
+			normalized[i] = v
+		}
+	}
+	return normalized
 }
 
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
@@ -36,7 +52,9 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"sql", sqlStr,
 			"rowLen", len(row))
 
-		result, err := tx.Exec(sqlStr, row...)
+		// Normalize time.Time values to RFC3339 format
+		normalizedRow := normalizeRowValues(columns, row)
+		result, err := tx.Exec(sqlStr, normalizedRow...)
 		if err != nil {
 			slog.Error("sqliteutil.InsertInTx: exec failed",
 				"table", config.Output,
@@ -141,7 +159,9 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"pkValue", pkValue,
 			"valuesCount", len(values))
 
-		result, err := tx.Exec(sqlStr, values...)
+		// Normalize time.Time values to RFC3339 format
+		normalizedValues := normalizeRowValues(columns, values)
+		result, err := tx.Exec(sqlStr, normalizedValues...)
 		if err != nil {
 			slog.Error("sqliteutil.UpdateInTx: exec failed",
 				"table", config.Output,

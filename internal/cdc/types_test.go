@@ -376,8 +376,8 @@ func TestDateTimeScanValue(t *testing.T) {
 		{
 			name:    "nil",
 			src:     nil,
-			wantVal: nil,
-			wantNil: true,
+			wantVal: time.Time{}, // Zero time instead of nil to preserve date distinction
+			wantNil: false,
 		},
 		{
 			name:    "RFC3339Nano string",
@@ -408,15 +408,16 @@ func TestDateTimeScanValue(t *testing.T) {
 }
 
 func TestDateTimeZeroValue(t *testing.T) {
-	// Zero time should return nil
+	// Zero time should return zero time.Time{} (not nil) to preserve date distinction
 	dt := NewDateTime(time.UTC)
 	dt.Scan(time.Time{})
 	got, err := dt.Value()
 	if err != nil {
 		t.Fatalf("Value() error = %v", err)
 	}
-	if got != nil {
-		t.Errorf("Value() for zero time = %v, want nil", got)
+	// Expect zero time instead of nil
+	if gotTime, ok := got.(time.Time); !ok || !gotTime.IsZero() {
+		t.Errorf("Value() for zero time = %v, want zero time.Time{}", got)
 	}
 }
 

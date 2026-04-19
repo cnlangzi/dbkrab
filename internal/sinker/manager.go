@@ -16,6 +16,45 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// datetimeFormats contains supported datetime formats for parsing SQLite datetime columns.
+var datetimeFormats = []string{
+	"2006-01-02 15:04:05",      // SQLite native format
+	"2006-01-02T15:04:05Z07:00", // RFC3339 with timezone
+	time.RFC3339,                // RFC3339 standard
+	"2006-01-02T15:04:05",      // ISO8601 without timezone
+	"2006-01-02",               // date only
+	"2006-01-02 15:04:05 -0700 MST", // Go's time.String() format (legacy)
+}
+
+// parseDatetime attempts to parse a datetime string using multiple formats.
+// Returns the parsed time if successful, or the original value if parsing fails.
+func parseDatetime(val any) any {
+	if val == nil {
+		return nil
+	}
+
+	// Handle time.Time directly from SQLite driver
+	if t, ok := val.(time.Time); ok {
+		return t.Format(time.RFC3339)
+	}
+
+	// Handle string values
+	str, ok := val.(string)
+	if !ok {
+		return val
+	}
+
+	// Try parsing with each format
+	for _, format := range datetimeFormats {
+		if t, err := time.Parse(format, str); err == nil {
+			return t.Format(time.RFC3339)
+		}
+	}
+
+	// Return original string if no format matched
+	return str
+}
+
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
 type Manager struct {
 	sinkers   map[string]Sinker // keyed by database name
@@ -322,6 +361,21 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		return nil, nil, fmt.Errorf("get columns: %w", err)
 	}
 
+	// Get column types to identify datetime columns
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get column types: %w", err)
+	}
+
+	// Identify datetime columns
+	datetimeCols := make(map[int]bool)
+	for i, ct := range colTypes {
+		// SQLite datetime type is stored as "datetime" in schema
+		if strings.EqualFold(ct.DatabaseTypeName(), "datetime") {
+			datetimeCols[i] = true
+		}
+	}
+
 	// Fetch results
 	results := []map[string]any{}
 	for rows.Next() {
@@ -337,7 +391,12 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 
 		rowMap := make(map[string]any)
 		for i, col := range columns {
-			rowMap[col] = values[i]
+			val := values[i]
+			// Parse datetime columns
+			if datetimeCols[i] {
+				val = parseDatetime(val)
+			}
+			rowMap[col] = val
 		}
 		results = append(results, rowMap)
 	}
