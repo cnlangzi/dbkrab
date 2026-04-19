@@ -16,57 +16,56 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// datetimeFormats contains supported datetime formats for parsing SQLite datetime columns.
-var datetimeFormats = []string{
-	"2006-01-02 15:04:05",      // SQLite native format
-	"2006-01-02T15:04:05Z07:00", // RFC3339 with timezone
-	time.RFC3339,                // RFC3339 standard
-	"2006-01-02T15:04:05",      // ISO8601 without timezone
-	"2006-01-02",               // date only
-	"2006-01-02 15:04:05 -0700 MST", // Go's time.String() format (legacy)
-}
-
-// parseDatetime attempts to parse a datetime string using multiple formats.
-// Returns the parsed time if successful, or the original value if parsing fails.
+// parseDatetime normalizes datetime values from SQLite.
+// With the SQLite driver handling serialization, we expect time.Time values.
+// This function handles edge cases where strings might be returned.
 func parseDatetime(val any) any {
 	if val == nil {
 		return nil
 	}
 
-	// Handle time.Time directly from SQLite driver
+	// SQLite driver should return time.Time for TIMESTAMP/DATETIME columns
 	if t, ok := val.(time.Time); ok {
-		return t.Format(time.RFC3339)
+		return t.UTC() // Normalize to UTC
 	}
 
-	// Handle string values
+	// Fallback: handle string values (legacy or edge cases)
 	str, ok := val.(string)
 	if !ok {
 		return val
 	}
 
-	// Try parsing with each format
-	for _, format := range datetimeFormats {
-		if t, err := time.Parse(format, str); err == nil {
-			return t.Format(time.RFC3339)
-		}
+	// Try parsing as RFC3339Nano first (our standard format)
+	if t, err := time.Parse(time.RFC3339Nano, str); err == nil {
+		return t.UTC()
 	}
 
-	// Return original string if no format matched
+	// Try SQLite native format
+	if t, err := time.Parse("2006-01-02 15:04:05", str); err == nil {
+		return t.UTC()
+	}
+
+	// Return original string if parsing fails
 	return str
 }
 
-// tryParseDatetimeString attempts to parse a string as datetime and returns RFC3339 format.
+// tryParseDatetimeString attempts to parse a string as datetime and returns UTC time.
 // Returns the original string if parsing fails.
 func tryParseDatetimeString(s string) string {
 	if s == "" {
 		return s
 	}
-	// Try common datetime formats
-	for _, format := range datetimeFormats {
-		if t, err := time.Parse(format, s); err == nil {
-			return t.Format(time.RFC3339)
-		}
+
+	// Try RFC3339Nano first (standard format)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t.UTC().Format(time.RFC3339Nano)
 	}
+
+	// Try SQLite native format
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t.UTC().Format(time.RFC3339Nano)
+	}
+
 	return s
 }
 

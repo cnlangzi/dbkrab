@@ -98,14 +98,15 @@ func (d *DateTime) convertTime(driverTime time.Time) time.Time {
 }
 
 // Value implements driver.Valuer for DateTime.
-// Returns RFC3339Nano UTC string for valid times, zero time for zero/invalid times.
+// Returns time.Time for valid times (driver will serialize to SQLite format),
+// nil for invalid/zero times (stored as NULL in SQLite).
 func (d DateTime) Value() (driver.Value, error) {
-	// Return zero time instead of nil to preserve the actual date
-	// This prevents NULL values in SQLite and distinguishes invalid from NULL
 	if !d.valid || d.val.IsZero() {
-		return time.Time{}, nil
+		return nil, nil // Invalid/zero time stored as NULL
 	}
-	return d.val.Format(time.RFC3339Nano), nil
+	// Return time.Time directly - let SQLite driver handle serialization
+	// Driver will use RFC3339Nano format with timezone: "2006-01-02 15:04:05.999999999-07:00"
+	return d.val, nil
 }
 
 // Deprecated: convertCommitTime is kept for test compatibility.

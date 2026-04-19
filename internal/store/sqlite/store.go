@@ -31,16 +31,20 @@ func New(db *store.DB) (*Store, error) {
 // UpdatePollerState updates the poller state after successful poll.
 // fetchedCount is total CDC rows fetched; insertedCount is rows actually written (after dedup).
 func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {
+	// Use Go time.Now().UTC() for consistency with rest of the codebase
+	// This ensures all timestamps are in UTC with nanosecond precision
+	now := time.Now().UTC()
+	
 	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
 		UPDATE poller_state
-		SET last_poll_time = CURRENT_TIMESTAMP,
+		SET last_poll_time = ?,
 			last_lsn = COALESCE(NULLIF(?, ''), last_lsn),
 			total_changes = total_changes + ?,
 			total_inserted = total_inserted + ?,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = ?
 		WHERE id = 1
-	`, lastLSN, fetchedCount, insertedCount)
+	`, now, lastLSN, fetchedCount, insertedCount, now)
 	return err
 }
 

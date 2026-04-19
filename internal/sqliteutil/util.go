@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 )
 
 // TxExec is the interface for executing statements within a transaction.
@@ -16,19 +15,16 @@ type TxExec interface {
 	Rollback() error
 }
 
-// normalizeRowValues converts time.Time values to SQLite-compatible datetime strings.
-// Uses SQLite's native format (YYYY-MM-DD HH:MM:SS) for maximum compatibility.
+// normalizeRowValues passes values through unchanged.
+// time.Time values are passed directly to the SQLite driver,
+// which handles serialization to RFC3339Nano format automatically.
 func normalizeRowValues(columns []string, row []interface{}) []interface{} {
-	normalized := make([]interface{}, len(row))
-	for i, v := range row {
-		if t, ok := v.(time.Time); ok {
-			// Use SQLite's native datetime format
-			normalized[i] = t.Format("2006-01-02 15:04:05")
-		} else {
-			normalized[i] = v
-		}
-	}
-	return normalized
+	// No transformation needed - pass values directly to driver
+	// The SQLite driver (mattn/go-sqlite3) will:
+	// - Serialize time.Time to "2006-01-02 15:04:05.999999999-07:00" format
+	// - Preserve timezone information (UTC in our case)
+	// - Handle NULL for zero/nil times
+	return row
 }
 
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
@@ -52,7 +48,7 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"sql", sqlStr,
 			"rowLen", len(row))
 
-		// Normalize time.Time values to RFC3339 format
+		// Pass row directly - driver handles time.Time serialization
 		normalizedRow := normalizeRowValues(columns, row)
 		result, err := tx.Exec(sqlStr, normalizedRow...)
 		if err != nil {
@@ -159,7 +155,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"pkValue", pkValue,
 			"valuesCount", len(values))
 
-		// Normalize time.Time values to RFC3339 format
+		// Pass values directly - driver handles time.Time serialization
 		normalizedValues := normalizeRowValues(columns, values)
 		result, err := tx.Exec(sqlStr, normalizedValues...)
 		if err != nil {
