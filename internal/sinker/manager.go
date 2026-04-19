@@ -55,6 +55,21 @@ func parseDatetime(val any) any {
 	return str
 }
 
+// tryParseDatetimeString attempts to parse a string as datetime and returns RFC3339 format.
+// Returns the original string if parsing fails.
+func tryParseDatetimeString(s string) string {
+	if s == "" {
+		return s
+	}
+	// Try common datetime formats
+	for _, format := range datetimeFormats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t.Format(time.RFC3339)
+		}
+	}
+	return s
+}
+
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
 type Manager struct {
 	sinkers   map[string]Sinker // keyed by database name
@@ -367,7 +382,7 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		return nil, nil, fmt.Errorf("get column types: %w", err)
 	}
 
-	// Identify datetime columns
+	// Identify datetime columns and attempt to parse time values
 	datetimeCols := make(map[int]bool)
 	for i, ct := range colTypes {
 		// SQLite datetime type is stored as "datetime" in schema
@@ -395,6 +410,12 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 			// Parse datetime columns
 			if datetimeCols[i] {
 				val = parseDatetime(val)
+			}
+			// Also attempt to parse string values that look like datetime
+			if s, ok := val.(string); ok && !datetimeCols[i] {
+				if parsed := tryParseDatetimeString(s); parsed != s {
+					val = parsed
+				}
 			}
 			rowMap[col] = val
 		}
