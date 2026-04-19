@@ -17,32 +17,71 @@ import (
 )
 
 // parseDatetime normalizes datetime values from SQLite.
-// With the SQLite driver handling serialization, we expect time.Time values.
-// This function handles edge cases where strings might be returned.
-func parseDatetime(val any) any {
+// This function handles the case where SQLite driver incorrectly returns zero time
+// for datetime columns that contain valid string values.
+func (m *Manager) parseDatetime(val any, rawString string) any {
 	if val == nil {
 		return nil
 	}
 
-	// SQLite driver should return time.Time for TIMESTAMP/DATETIME columns
+	// Get MSSQL timezone - use UTC
+	tz := time.UTC
+
+	// Handle time.Time - check for zero time (the bug)
 	if t, ok := val.(time.Time); ok {
-		return t.UTC() // Normalize to UTC
+		// Check if it's zero time - this happens when driver fails to parse the string
+		if t.IsZero() {
+			// Driver failed to parse - try to use raw string if provided
+			if rawString != "" && !strings.Contains(rawString, "0001-01-01") {
+				// Try parsing the raw string
+				if parsed := parseDateTimeString(rawString, tz); parsed != "" {
+					return parsed
+				}
+			}
+			// Return nil for zero time to avoid showing 0001-01-01
+			return nil
+		}
+		// Convert to specified timezone and return as string
+		return t.In(tz).Format("2006-01-02 15:04:05")
 	}
 
-	// Fallback: handle string values (legacy or edge cases)
-	str, ok := val.(string)
-	if !ok {
-		return val
+	// Handle string values directly
+	if str, ok := val.(string); ok {
+		return parseDateTimeString(str, tz)
 	}
 
-	// Try parsing as RFC3339Nano first (our standard format)
+	// Return other types as-is
+	return val
+}
+
+// parseDateTimeString tries to parse a datetime string and return formatted result
+func parseDateTimeString(str string, tz *time.Location) string {
+	if str == "" {
+		return ""
+	}
+	if strings.Contains(str, "0001-01-01") {
+		return ""
+	}
+
+	// Try parsing various datetime formats
+	// Try Go's driver format first (matches stored format)
+	if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", str); err == nil {
+		return t.In(tz).Format("2006-01-02 15:04:05")
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05.999 -0700 MST", str); err == nil {
+		return t.In(tz).Format("2006-01-02 15:04:05")
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05 -0700 MST", str); err == nil {
+		return t.In(tz).Format("2006-01-02 15:04:05")
+	}
+
+	// Try RFC3339Nano format
 	if t, err := time.Parse(time.RFC3339Nano, str); err == nil {
-		return t.UTC()
+		return t.In(tz).Format("2006-01-02 15:04:05")
 	}
-
-	// Try SQLite native format
-	if t, err := time.Parse("2006-01-02 15:04:05", str); err == nil {
-		return t.UTC()
+	// Try RFC3339
+	if t, err := time.Parse(time.RFC3339, str); err == nil {
+		return t.In(tz).Format("2006-01-02 15:04:05")
 	}
 
 	// Return original string if parsing fails
@@ -74,6 +113,7 @@ type Manager struct {
 	sinkers   map[string]Sinker // keyed by database name
 	dbConfigs map[string]config.SinkConfig
 	mu        sync.RWMutex
+	timezone  *time.Location // MSSQL timezone for datetime conversion
 }
 
 // NewManager creates a new Sinker manager
@@ -81,6 +121,7 @@ func NewManager() *Manager {
 	return &Manager{
 		sinkers:   make(map[string]Sinker),
 		dbConfigs: make(map[string]config.SinkConfig),
+		timezone:  time.Local, // Default to local timezone
 	}
 }
 
@@ -382,15 +423,26 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 	}
 
 	// Identify datetime columns and attempt to parse time values
+	// Note: SQLite's ColumnTypes() may not return "datetime" for datetime columns
+	// because SQLite uses dynamic typing. We also check for time-like string values.
 	datetimeCols := make(map[int]bool)
 	for i, ct := range colTypes {
 		// SQLite datetime type is stored as "datetime" in schema
-		if strings.EqualFold(ct.DatabaseTypeName(), "datetime") {
+		dbTypeName := ct.DatabaseTypeName()
+		slog.Debug("Query column type", "i", i, "col", columns[i], "dbType", dbTypeName)
+
+		if strings.EqualFold(dbTypeName, "datetime") {
 			datetimeCols[i] = true
+		}
+		// Also mark columns whose names suggest they are datetime
+		colNameLower := strings.ToLower(columns[i])
+		if strings.Contains(colNameLower, "date") || strings.Contains(colNameLower, "time") || strings.Contains(colNameLower, "dt") || strings.Contains(colNameLower, "ts") {
+			datetimeCols[i] = true
+			slog.Debug("Query marked datetime col by name", "col", columns[i])
 		}
 	}
 
-	// Fetch results
+	slog.Info("Query datetimeCols", "datetimeCols", datetimeCols)
 	results := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -406,14 +458,15 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		rowMap := make(map[string]any)
 		for i, col := range columns {
 			val := values[i]
-			// Parse datetime columns
-			if datetimeCols[i] {
-				val = parseDatetime(val)
-			}
-			// Also attempt to parse string values that look like datetime
-			if s, ok := val.(string); ok && !datetimeCols[i] {
-				if parsed := tryParseDatetimeString(s); parsed != s {
-					val = parsed
+			// For datetime columns, convert time.Time back to string if it's valid
+			// The SQLite driver sometimes incorrectly converts TEXT datetime columns
+			if t, ok := val.(time.Time); ok {
+				if !t.IsZero() {
+					// Valid time, convert to string
+					val = t.UTC().Format("2006-01-02 15:04:05")
+				} else {
+					// Zero time - keep as null in output
+					val = nil
 				}
 			}
 			rowMap[col] = val
@@ -422,4 +475,21 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 	}
 
 	return columns, results, rows.Err()
+}
+
+// GetTimezone returns the configured MSSQL timezone
+func (m *Manager) GetTimezone() *time.Location {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.timezone == nil {
+		return time.Local
+	}
+	return m.timezone
+}
+
+// SetTimezone sets the MSSQL timezone for datetime conversion in API responses
+func (m *Manager) SetTimezone(tz *time.Location) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.timezone = tz
 }

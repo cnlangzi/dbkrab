@@ -6,10 +6,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"time"
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
@@ -114,6 +114,9 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 
 	rowsInserted := 0
 	for _, change := range changes {
+		// 直接序列化 time.Time，JSON 会将其转为 RFC3339Nano 格式
+		// 注意：JSON 序列化时，time.Time 会被转为 RFC3339Nano 格式的字符串
+		// 读取时需要正确解析这个格式
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
 			dataJSON = []byte("{}")
