@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // TxExec is the interface for executing statements within a transaction.
@@ -13,6 +14,61 @@ type TxExec interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Commit() error
 	Rollback() error
+}
+
+// normalizeRowValues converts datetime string values back to time.Time for proper SQLite serialization.
+// When datetime columns are stored as JSON strings, they need to be converted back to time.Time
+// so the SQLite driver can serialize them correctly as DATETIME.
+func normalizeRowValues(columns []string, row []interface{}) []interface{} {
+	// Detect datetime columns by name pattern
+	datetimeCols := make(map[int]bool)
+	for i, col := range columns {
+		colLower := strings.ToLower(col)
+		if strings.Contains(colLower, "date") || strings.Contains(colLower, "time") || strings.Contains(colLower, "dt") || strings.Contains(colLower, "ts") {
+			datetimeCols[i] = true
+		}
+	}
+
+	// Process each value
+	result := make([]interface{}, len(row))
+	for i, val := range row {
+		if datetimeCols[i] {
+			// Try to parse datetime string back to time.Time
+			if str, ok := val.(string); ok && str != "" {
+				// Try various formats
+				var t time.Time
+				var err error
+
+				// Try RFC3339Nano format first (from JSON serialization)
+				if t, err = time.Parse(time.RFC3339Nano, str); err == nil {
+					result[i] = t
+					continue
+				}
+				// Try RFC3339
+				if t, err = time.Parse(time.RFC3339, str); err == nil {
+					result[i] = t
+					continue
+				}
+				// Try Go's driver format "2006-01-02 15:04:05.999999999 -0700 MST"
+				if t, err = time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", str); err == nil {
+					result[i] = t
+					continue
+				}
+				if t, err = time.Parse("2006-01-02 15:04:05.999 -0700 MST", str); err == nil {
+					result[i] = t
+					continue
+				}
+				if t, err = time.Parse("2006-01-02 15:04:05 -0700 MST", str); err == nil {
+					result[i] = t
+					continue
+				}
+				// If parsing fails, keep original string
+				slog.Debug("normalizeRowValues: failed to parse datetime", "col", columns[i], "val", str)
+			}
+		}
+		result[i] = val
+	}
+	return result
 }
 
 // InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
@@ -36,7 +92,10 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"sql", sqlStr,
 			"rowLen", len(row))
 
-		result, err := tx.Exec(sqlStr, row...)
+		// Pass row directly - driver handles time.Time serialization
+		normalizedRow := normalizeRowValues(columns, row)
+		fmt.Printf("DEBUG Exec: table=%s, sql=%s, normalizedRow len=%d\n", config.Output, sqlStr, len(normalizedRow))
+		result, err := tx.Exec(sqlStr, normalizedRow...)
 		if err != nil {
 			slog.Error("sqliteutil.InsertInTx: exec failed",
 				"table", config.Output,
@@ -141,7 +200,9 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 			"pkValue", pkValue,
 			"valuesCount", len(values))
 
-		result, err := tx.Exec(sqlStr, values...)
+		// Pass values directly - driver handles time.Time serialization
+		normalizedValues := normalizeRowValues(columns, values)
+		result, err := tx.Exec(sqlStr, normalizedValues...)
 		if err != nil {
 			slog.Error("sqliteutil.UpdateInTx: exec failed",
 				"table", config.Output,

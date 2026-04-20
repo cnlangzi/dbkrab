@@ -370,19 +370,19 @@ func TestDateTimeScanValue(t *testing.T) {
 		{
 			name:    "valid time.Time",
 			src:     time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			wantVal: "2026-04-09T04:26:00Z", // Converted from UTC to Shanghai then back to UTC
+			wantVal: time.Date(2026, 4, 9, 4, 26, 0, 0, time.UTC), // Driver UTC 12:26 reinterpreted as Shanghai 12:26 → UTC 04:26
 			wantNil: false,
 		},
 		{
 			name:    "nil",
 			src:     nil,
-			wantVal: nil,
+			wantVal: nil, // Invalid time stored as NULL
 			wantNil: true,
 		},
 		{
 			name:    "RFC3339Nano string",
 			src:     "2026-04-09T12:26:00Z",
-			wantVal: "2026-04-09T04:26:00Z", // With Shanghai timezone
+			wantVal: time.Date(2026, 4, 9, 4, 26, 0, 0, time.UTC), // String 12:26 UTC reinterpreted as Shanghai → UTC 04:26
 			wantNil: false,
 		},
 	}
@@ -397,24 +397,33 @@ func TestDateTimeScanValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Value() error = %v", err)
 			}
-			if tt.wantNil && got != nil {
-				t.Errorf("Value() = %v, want nil", got)
-			}
-			if !tt.wantNil && got != tt.wantVal {
-				t.Errorf("Value() = %v, want %v", got, tt.wantVal)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("Value() = %v, want nil", got)
+				}
+			} else {
+				gotTime, ok := got.(time.Time)
+				if !ok {
+					t.Fatalf("Value() returned %T, want time.Time", got)
+				}
+				wantTime := tt.wantVal.(time.Time)
+				if !gotTime.Equal(wantTime) {
+					t.Errorf("Value() = %v, want %v", gotTime, wantTime)
+				}
 			}
 		})
 	}
 }
 
 func TestDateTimeZeroValue(t *testing.T) {
-	// Zero time should return nil
+	// Zero/invalid time should return nil (stored as NULL in SQLite)
 	dt := NewDateTime(time.UTC)
 	dt.Scan(time.Time{})
 	got, err := dt.Value()
 	if err != nil {
 		t.Fatalf("Value() error = %v", err)
 	}
+	// Expect nil for invalid/zero time
 	if got != nil {
 		t.Errorf("Value() for zero time = %v, want nil", got)
 	}

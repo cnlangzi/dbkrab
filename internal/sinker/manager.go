@@ -21,6 +21,7 @@ type Manager struct {
 	sinkers   map[string]Sinker // keyed by database name
 	dbConfigs map[string]config.SinkConfig
 	mu        sync.RWMutex
+	timezone  *time.Location // MSSQL timezone for datetime conversion
 }
 
 // NewManager creates a new Sinker manager
@@ -28,6 +29,7 @@ func NewManager() *Manager {
 	return &Manager{
 		sinkers:   make(map[string]Sinker),
 		dbConfigs: make(map[string]config.SinkConfig),
+		timezone:  time.Local, // Default to local timezone
 	}
 }
 
@@ -322,7 +324,33 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		return nil, nil, fmt.Errorf("get columns: %w", err)
 	}
 
-	// Fetch results
+	// Get column types to identify datetime columns
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get column types: %w", err)
+	}
+
+	// Identify datetime columns and attempt to parse time values
+	// Note: SQLite's ColumnTypes() may not return "datetime" for datetime columns
+	// because SQLite uses dynamic typing. We also check for time-like string values.
+	datetimeCols := make(map[int]bool)
+	for i, ct := range colTypes {
+		// SQLite datetime type is stored as "datetime" in schema
+		dbTypeName := ct.DatabaseTypeName()
+		slog.Debug("Query column type", "i", i, "col", columns[i], "dbType", dbTypeName)
+
+		if strings.EqualFold(dbTypeName, "datetime") {
+			datetimeCols[i] = true
+		}
+		// Also mark columns whose names suggest they are datetime
+		colNameLower := strings.ToLower(columns[i])
+		if strings.Contains(colNameLower, "date") || strings.Contains(colNameLower, "time") || strings.Contains(colNameLower, "dt") || strings.Contains(colNameLower, "ts") {
+			datetimeCols[i] = true
+			slog.Debug("Query marked datetime col by name", "col", columns[i])
+		}
+	}
+
+	slog.Info("Query datetimeCols", "datetimeCols", datetimeCols)
 	results := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -337,10 +365,39 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 
 		rowMap := make(map[string]any)
 		for i, col := range columns {
-			rowMap[col] = values[i]
+			val := values[i]
+			// For datetime columns, convert time.Time back to string if it's valid
+			// The SQLite driver sometimes incorrectly converts TEXT datetime columns
+			if t, ok := val.(time.Time); ok {
+				if !t.IsZero() {
+					// Valid time, convert to string
+					val = t.UTC().Format("2006-01-02 15:04:05")
+				} else {
+					// Zero time - keep as null in output
+					val = nil
+				}
+			}
+			rowMap[col] = val
 		}
 		results = append(results, rowMap)
 	}
 
 	return columns, results, rows.Err()
+}
+
+// GetTimezone returns the configured MSSQL timezone
+func (m *Manager) GetTimezone() *time.Location {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.timezone == nil {
+		return time.Local
+	}
+	return m.timezone
+}
+
+// SetTimezone sets the MSSQL timezone for datetime conversion in API responses
+func (m *Manager) SetTimezone(tz *time.Location) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.timezone = tz
 }

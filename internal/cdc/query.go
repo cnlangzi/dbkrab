@@ -215,14 +215,9 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		if idx, ok := colIndex["__$commit_time"]; ok {
 			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
 				if val, err := s.Value(); err == nil && val != nil {
-					// DateTime.Value returns RFC3339Nano string, handle both string and time.Time
-					switch v := val.(type) {
-					case time.Time:
-						commitTime = v
-					case string:
-						if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
-							commitTime = parsed
-						}
+					// DateTime.Value now returns time.Time directly
+					if t, ok := val.(time.Time); ok {
+						commitTime = t
 					}
 				}
 			}
