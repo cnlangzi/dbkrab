@@ -104,14 +104,14 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	// Handle CDC system queries
 	query = normalizeQuery(query)
 
-	switch {
-	case query == "SELECT sys.fn_cdc_get_max_lsn()":
+	switch query {
+	case "SELECT sys.fn_cdc_get_max_lsn()":
 		return &mockResult{rowsAffected: 1}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestProducts')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestProducts')":
 		return &mockResult{rowsAffected: 1}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrders')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrders')":
 		return &mockResult{rowsAffected: 1}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrderItems')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrderItems')":
 		return &mockResult{rowsAffected: 1}, nil
 	default:
 		return &mockResult{rowsAffected: 0}, nil
@@ -123,28 +123,28 @@ func (c *conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 	query = normalizeQuery(query)
 
 	// Handle CDC function queries
-	switch {
-	case query == "SELECT sys.fn_cdc_get_max_lsn()":
+	switch query {
+	case "SELECT sys.fn_cdc_get_max_lsn()":
 		return &rows{
 			columns: []string{"computed"},
 			values:  [][]interface{}{{c.handler.MaxLSN}},
 		}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestProducts')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestProducts')":
 		return &rows{
 			columns: []string{"computed"},
 			values:  [][]interface{}{{[]byte{0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}},
 		}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrders')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrders')":
 		return &rows{
 			columns: []string{"computed"},
 			values:  [][]interface{}{{[]byte{0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}},
 		}, nil
-	case query == "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrderItems')":
+	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrderItems')":
 		return &rows{
 			columns: []string{"computed"},
 			values:  [][]interface{}{{[]byte{0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}},
 		}, nil
-	case query == "SELECT snapshot_isolation_state FROM sys.databases WHERE name = DB_NAME()":
+	case "SELECT snapshot_isolation_state FROM sys.databases WHERE name = DB_NAME()":
 		return &rows{
 			columns: []string{"snapshot_isolation_state"},
 			values:  [][]interface{}{{1}},
