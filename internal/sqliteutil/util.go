@@ -71,9 +71,12 @@ func normalizeRowValues(columns []string, row []interface{}) []interface{} {
 	return result
 }
 
-// InsertInTx inserts DataSet into table using INSERT OR REPLACE strategy.
-// Tables must be created via migrations before calling this function.
-// This function will NOT create tables - it assumes the table already exists.
+// InsertInTx inserts DataSet into table.
+// For "overwrite" strategy:
+//   - If record exists: UPDATE only columns provided (preserve other columns)
+//   - If record doesn't exist: INSERT new record
+// For "skip"/"": INSERT OR IGNORE (do nothing if exists)
+// For other cases: standard INSERT
 func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
@@ -82,33 +85,139 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 	slog.Debug("sqliteutil.InsertInTx: starting insert",
 		"table", config.Output,
 		"primaryKey", config.PrimaryKey,
+		"onConflict", config.OnConflict,
 		"columns", columns,
 		"rows", len(rows))
 
-	for _, row := range rows {
-		sqlStr := BuildInsertSQL(config.Output, columns, true)
-		slog.Debug("sqliteutil.InsertInTx: executing",
-			"table", config.Output,
-			"sql", sqlStr,
-			"rowLen", len(row))
+	pkColumn := config.PrimaryKey
 
-		// Pass row directly - driver handles time.Time serialization
-		normalizedRow := normalizeRowValues(columns, row)
-		fmt.Printf("DEBUG Exec: table=%s, sql=%s, normalizedRow len=%d\n", config.Output, sqlStr, len(normalizedRow))
-		result, err := tx.Exec(sqlStr, normalizedRow...)
-		if err != nil {
-			slog.Error("sqliteutil.InsertInTx: exec failed",
+	// Find PK index
+	pkIndex := -1
+	for i, col := range columns {
+		if col == pkColumn {
+			pkIndex = i
+			break
+		}
+	}
+
+	// Normalize onConflict first, then validate based on normalized value
+	normalizedOnConflict := config.OnConflict
+	if normalizedOnConflict != "overwrite" && normalizedOnConflict != "skip" {
+		normalizedOnConflict = "overwrite"
+	}
+
+	// For overwrite strategy, PK must exist in columns
+	if pkIndex == -1 && normalizedOnConflict == "overwrite" {
+		return fmt.Errorf("primary key %s not found in columns", pkColumn)
+	}
+
+	for _, row := range rows {
+		onConflict := normalizedOnConflict
+
+		switch onConflict {
+		case "overwrite":
+			// "overwrite" strategy: partial update
+			// - If record exists: UPDATE only provided columns (preserve other columns)
+			// - If record doesn't exist: INSERT new record
+			pkValue := row[pkIndex]
+
+			// Build SET clause (exclude PK column from update)
+			var setClauses []string
+			var updateValues []any
+			for colIdx, col := range columns {
+				if col == pkColumn {
+					continue // Skip PK in SET clause
+				}
+				setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
+				updateValues = append(updateValues, row[colIdx])
+			}
+
+			// check if we can perform UPDATE (need non-PK columns)
+			canUpdate := len(setClauses) > 0
+
+			if canUpdate {
+				updateValues = append(updateValues, pkValue)
+
+				updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
+					config.Output,
+					strings.Join(setClauses, ", "),
+					pkColumn)
+
+				slog.Debug("sqliteutil.InsertInTx: executing update",
+					"table", config.Output,
+					"sql", updateSQL,
+					"pkValue", pkValue)
+				// Normalize values for UPDATE
+				normalizedUpdateValues := normalizeRowValues(columns, updateValues)
+				result, err := tx.Exec(updateSQL, normalizedUpdateValues...)
+				if err != nil {
+					slog.Error("sqliteutil.InsertInTx: update failed",
+						"table", config.Output,
+						"sql", updateSQL,
+						"err", err)
+					return fmt.Errorf("update: %w", err)
+				}
+
+				rowsAffected, _ := result.RowsAffected()
+				if rowsAffected > 0 {
+					// Successfully updated existing row
+					slog.Debug("sqliteutil.InsertInTx: updated existing row",
+						"table", config.Output,
+						"pkValue", pkValue)
+					continue
+				}
+			}
+
+			// No row exists (or can't update), INSERT new record
+			var placeholders []string
+			for range columns {
+				placeholders = append(placeholders, "?")
+			}
+			insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+				config.Output,
+				strings.Join(escapedColumns(columns), ", "),
+				strings.Join(placeholders, ", "))
+
+			slog.Debug("sqliteutil.InsertInTx: executing insert",
+				"table", config.Output,
+				"sql", insertSQL,
+				"pkValue", pkValue)
+			// Normalize values for INSERT
+			normalizedRow := normalizeRowValues(columns, row)
+			_, err := tx.Exec(insertSQL, normalizedRow...)
+			if err != nil {
+				slog.Error("sqliteutil.InsertInTx: insert failed",
+					"table", config.Output,
+					"sql", insertSQL,
+					"err", err)
+				return fmt.Errorf("insert: %w", err)
+			}
+		default:
+			// Default strategy: INSERT OR REPLACE
+			sqlStr := BuildInsertSQL(config.Output, columns, true)
+			slog.Debug("sqliteutil.InsertInTx: executing",
 				"table", config.Output,
 				"sql", sqlStr,
-				"err", err)
-			return fmt.Errorf("execute: %w", err)
-		}
+				"rowLen", len(row))
 
-		if result != nil {
-			rowsAffected, _ := result.RowsAffected()
-			slog.Debug("sqliteutil.InsertInTx: rows affected",
-				"table", config.Output,
-				"rowsAffected", rowsAffected)
+			// Pass row directly - driver handles time.Time serialization
+			normalizedRow := normalizeRowValues(columns, row)
+			fmt.Printf("DEBUG Exec: table=%s, sql=%s, normalizedRow len=%d\n", config.Output, sqlStr, len(normalizedRow))
+			result, err := tx.Exec(sqlStr, normalizedRow...)
+			if err != nil {
+				slog.Error("sqliteutil.InsertInTx: exec failed",
+					"table", config.Output,
+					"sql", sqlStr,
+					"err", err)
+				return fmt.Errorf("execute: %w", err)
+			}
+
+			if result != nil {
+				rowsAffected, _ := result.RowsAffected()
+				slog.Debug("sqliteutil.InsertInTx: rows affected",
+					"table", config.Output,
+					"rowsAffected", rowsAffected)
+			}
 		}
 
 		slog.Debug("sqliteutil.InsertInTx: statement buffered",
@@ -119,100 +228,188 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 }
 
 // UpdateInTx updates records in table.
+// For "overwrite" strategy:
+//   - If record exists: UPDATE only columns in this sink (preserve other columns)
+//   - If record doesn't exist: INSERT the record
+// This achieves partial update without overwriting the entire row.
 func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
 	}
 
+	pkColumn := config.PrimaryKey
+
 	// Find PK index
 	pkIndex := -1
 	for i, col := range columns {
-		if col == config.PrimaryKey {
+		if col == pkColumn {
 			pkIndex = i
 			break
 		}
 	}
 
 	if pkIndex == -1 {
-		return fmt.Errorf("primary key %s not found", config.PrimaryKey)
+		return fmt.Errorf("primary key %s not found", pkColumn)
+	}
+
+	// Normalize onConflict before use
+	normalizedOnConflict := config.OnConflict
+	if normalizedOnConflict != "overwrite" && normalizedOnConflict != "skip" {
+		normalizedOnConflict = "overwrite"
 	}
 
 	slog.Debug("sqliteutil.UpdateInTx: starting update",
 		"table", config.Output,
-		"primaryKey", config.PrimaryKey,
+		"primaryKey", pkColumn,
 		"pkIndex", pkIndex,
+		"onConflict", normalizedOnConflict,
 		"columns", columns,
 		"rows", len(rows))
 
 	for _, row := range rows {
 		pkValue := row[pkIndex]
 
-		var sqlStr string
-		var values []any
+		onConflict := normalizedOnConflict
 
-		// For UPDATE operations:
-		// - "overwrite" (INSERT OR REPLACE): update if exists, insert if not
-		// - "skip" or "" (INSERT OR IGNORE): do nothing if exists, insert if not
-		// - otherwise: plain UPDATE (does nothing if row doesn't exist)
-		switch config.OnConflict {
+		switch onConflict {
 		case "overwrite":
-			// Use INSERT OR REPLACE: inserts if not exists, replaces if exists
-			var placeholders []string
-			for i := range columns {
-				placeholders = append(placeholders, "?")
-				values = append(values, row[i])
+			// "overwrite" strategy:
+			// - If record exists: UPDATE only columns in this sink (preserve other columns)
+			// - If record doesn't exist: INSERT the record
+			// This achieves partial update without overwriting entire row
+
+			// Build SET clause (exclude PK column from update)
+			var setClauses []string
+			var updateValues []any
+			for colIdx, col := range columns {
+				if col == pkColumn {
+					continue // Skip PK in SET clause
+				}
+				setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
+				updateValues = append(updateValues, row[colIdx])
 			}
-			sqlStr = fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+
+			// Check if we can perform UPDATE (need non-PK columns)
+			canUpdate := len(setClauses) > 0
+
+			if canUpdate {
+				updateValues = append(updateValues, pkValue)
+
+				updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
+					config.Output,
+					strings.Join(setClauses, ", "),
+					pkColumn)
+
+				slog.Debug("sqliteutil.UpdateInTx: executing update",
+					"table", config.Output,
+					"sql", updateSQL,
+					"pkValue", pkValue)
+				// Normalize values for UPDATE
+				normalizedUpdateValues := normalizeRowValues(columns, updateValues)
+				result, err := tx.Exec(updateSQL, normalizedUpdateValues...)
+				if err != nil {
+					slog.Error("sqliteutil.UpdateInTx: update failed",
+						"table", config.Output,
+						"sql", updateSQL,
+						"err", err)
+					return fmt.Errorf("update: %w", err)
+				}
+
+				rowsAffected, _ := result.RowsAffected()
+				if rowsAffected > 0 {
+					// Successfully updated existing row
+					slog.Debug("sqliteutil.UpdateInTx: updated existing row",
+						"table", config.Output,
+						"pkValue", pkValue)
+					continue
+				}
+			}
+
+			// No row exists (or can't update), INSERT new record
+			var placeholders []string
+			for range columns {
+				placeholders = append(placeholders, "?")
+			}
+			insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 				config.Output,
 				strings.Join(escapedColumns(columns), ", "),
 				strings.Join(placeholders, ", "))
+
+			slog.Debug("sqliteutil.UpdateInTx: executing insert",
+				"table", config.Output,
+				"sql", insertSQL,
+				"pkValue", pkValue)
+			// Normalize values for INSERT
+			normalizedRow := normalizeRowValues(columns, row)
+			_, err := tx.Exec(insertSQL, normalizedRow...)
+			if err != nil {
+				slog.Error("sqliteutil.UpdateInTx: insert failed",
+					"table", config.Output,
+					"sql", insertSQL,
+					"err", err)
+				return fmt.Errorf("insert: %w", err)
+			}
 		case "skip", "":
 			// Use INSERT OR IGNORE: does nothing if row with PK already exists
 			var placeholders []string
+			var values []any
 			for i := range columns {
 				placeholders = append(placeholders, "?")
 				values = append(values, row[i])
 			}
-			sqlStr = fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
+			sqlStr := fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
 				config.Output,
 				strings.Join(escapedColumns(columns), ", "),
 				strings.Join(placeholders, ", "))
+
+			slog.Debug("sqliteutil.UpdateInTx: executing insert or ignore",
+				"table", config.Output,
+				"sql", sqlStr,
+				"pkValue", pkValue)
+			normalizedValues := normalizeRowValues(columns, values)
+			_, err := tx.Exec(sqlStr, normalizedValues...)
+			if err != nil {
+				slog.Error("sqliteutil.UpdateInTx: exec failed",
+					"table", config.Output,
+					"sql", sqlStr,
+					"pkValue", pkValue,
+					"err", err)
+				return fmt.Errorf("execute: %w", err)
+			}
 		default:
 			// Plain UPDATE: only updates if row exists
 			var setClauses []string
+			var values []any
 			for i, col := range columns {
-				if col == config.PrimaryKey {
+				if col == pkColumn {
 					continue
 				}
 				setClauses = append(setClauses, fmt.Sprintf("[%s] = ?", col))
 				values = append(values, row[i])
 			}
-			sqlStr = fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
+			sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE [%s] = ?",
 				config.Output,
 				strings.Join(setClauses, ", "),
-				config.PrimaryKey)
+				pkColumn)
 			values = append(values, pkValue)
-		}
 
-		slog.Debug("sqliteutil.UpdateInTx: executing",
-			"table", config.Output,
-			"sql", sqlStr,
-			"pkValue", pkValue,
-			"valuesCount", len(values))
-
-		// Pass values directly - driver handles time.Time serialization
-		normalizedValues := normalizeRowValues(columns, values)
-		result, err := tx.Exec(sqlStr, normalizedValues...)
-		if err != nil {
-			slog.Error("sqliteutil.UpdateInTx: exec failed",
+			slog.Debug("sqliteutil.UpdateInTx: executing plain update",
 				"table", config.Output,
 				"sql", sqlStr,
 				"pkValue", pkValue,
-				"err", err)
-			return fmt.Errorf("execute: %w", err)
-		}
+				"valuesCount", len(values))
 
-		if result != nil {
+			normalizedValues := normalizeRowValues(columns, values)
+			result, err := tx.Exec(sqlStr, normalizedValues...)
+			if err != nil {
+				slog.Error("sqliteutil.UpdateInTx: exec failed",
+					"table", config.Output,
+					"sql", sqlStr,
+					"pkValue", pkValue,
+					"err", err)
+				return fmt.Errorf("execute: %w", err)
+			}
+
 			rowsAffected, _ := result.RowsAffected()
 			slog.Debug("sqliteutil.UpdateInTx: rows affected",
 				"table", config.Output,
@@ -281,8 +478,8 @@ func DeleteInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 
 // TableConfig holds configuration for table operations.
 type TableConfig struct {
-	Output     string
-	PrimaryKey string
+	Output      string
+	PrimaryKey  string
 	OnConflict string // "overwrite", "skip", or ""
 }
 
