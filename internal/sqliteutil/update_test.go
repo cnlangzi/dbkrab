@@ -266,6 +266,61 @@ func TestUpdateInTx_PlainUpdate_NoInsert(t *testing.T) {
 	t.Logf("Plain update with no existing record: inserted %d rows", count)
 }
 
+// TestInsertInTx_Overwrite_PartialUpdate verifies that InsertInTx with overwrite
+// strategy also does partial update when called (not just UpdateInTx).
+func TestInsertInTx_Overwrite_PartialUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := sqlite.Open(ctx, ":memory:")
+	require.NoError(t, err)
+	defer func() { _ = db.Writer.Close() }()
+
+	// Create table
+	_, err = db.Writer.Exec(`CREATE TABLE test_items (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		amount REAL,
+		extra_field TEXT
+	)`)
+	require.NoError(t, err)
+
+	// Insert initial record
+	_, err = db.Writer.Exec(`INSERT INTO test_items (id, name, amount, extra_field) VALUES (?, ?, ?, ?)`,
+		1, "initial", 100.0, "preserve_me")
+	require.NoError(t, err)
+
+	// Use InsertInTx with overwrite - only updating name
+	config := sqliteutil.TableConfig{
+		Output:      "test_items",
+		PrimaryKey:  "id",
+		OnConflict: "overwrite",
+	}
+	columns := []string{"id", "name"}
+	rows := [][]interface{}{
+		{1, "updated_via_insert"},
+	}
+
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	require.NoError(t, err)
+
+	err = sqliteutil.InsertInTx(tx, config, columns, rows)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Verify: name updated, amount and extra_field preserved
+	var name string
+	var amount float64
+	var extraField string
+	err = db.Writer.QueryRow(`SELECT name, amount, extra_field FROM test_items WHERE id = 1`).
+		Scan(&name, &amount, &extraField)
+	require.NoError(t, err)
+
+	assert.Equal(t, "updated_via_insert", name)
+	assert.Equal(t, 100.0, amount, "amount should be preserved")
+	assert.Equal(t, "preserve_me", extraField, "extra_field should be preserved")
+}
+
 // mockTx implements sqliteutil.TxExec for testing
 type mockTx struct {
 	*sql.Tx
