@@ -100,16 +100,19 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 		}
 	}
 
-	if pkIndex == -1 && config.OnConflict == "overwrite" {
+	// Normalize onConflict first, then validate based on normalized value
+	normalizedOnConflict := config.OnConflict
+	if normalizedOnConflict != "overwrite" && normalizedOnConflict != "skip" {
+		normalizedOnConflict = "overwrite"
+	}
+
+	// For overwrite strategy, PK must exist in columns
+	if pkIndex == -1 && normalizedOnConflict == "overwrite" {
 		return fmt.Errorf("primary key %s not found in columns", pkColumn)
 	}
 
 	for _, row := range rows {
-		// Default to overwrite if not specified or invalid
-		onConflict := config.OnConflict
-		if onConflict != "overwrite" && onConflict != "skip" {
-			onConflict = "overwrite"
-		}
+		onConflict := normalizedOnConflict
 
 		switch onConflict {
 		case "overwrite":
@@ -249,22 +252,24 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 		return fmt.Errorf("primary key %s not found", pkColumn)
 	}
 
+	// Normalize onConflict before use
+	normalizedOnConflict := config.OnConflict
+	if normalizedOnConflict != "overwrite" && normalizedOnConflict != "skip" {
+		normalizedOnConflict = "overwrite"
+	}
+
 	slog.Debug("sqliteutil.UpdateInTx: starting update",
 		"table", config.Output,
 		"primaryKey", pkColumn,
 		"pkIndex", pkIndex,
-		"onConflict", config.OnConflict,
+		"onConflict", normalizedOnConflict,
 		"columns", columns,
 		"rows", len(rows))
 
 	for _, row := range rows {
 		pkValue := row[pkIndex]
 
-		// Default to overwrite if not specified or invalid
-		onConflict := config.OnConflict
-		if onConflict != "overwrite" && onConflict != "skip" {
-			onConflict = "overwrite"
-		}
+		onConflict := normalizedOnConflict
 
 		switch onConflict {
 		case "overwrite":
