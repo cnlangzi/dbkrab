@@ -105,7 +105,13 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 	}
 
 	for _, row := range rows {
-		switch config.OnConflict {
+		// Default to overwrite if not specified or invalid
+		onConflict := config.OnConflict
+		if onConflict != "overwrite" && onConflict != "skip" {
+			onConflict = "overwrite"
+		}
+
+		switch onConflict {
 		case "overwrite":
 			// "overwrite" strategy: partial update
 			// - If record exists: UPDATE only provided columns (preserve other columns)
@@ -239,7 +245,13 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 	for _, row := range rows {
 		pkValue := row[pkIndex]
 
-		switch config.OnConflict {
+		// Default to overwrite if not specified or invalid
+		onConflict := config.OnConflict
+		if onConflict != "overwrite" && onConflict != "skip" {
+			onConflict = "overwrite"
+		}
+
+		switch onConflict {
 		case "overwrite":
 			// "overwrite" strategy:
 			// - If record exists: UPDATE only columns in this sink (preserve other columns)
