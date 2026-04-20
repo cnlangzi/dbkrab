@@ -4,22 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
-	"sync"
+	"io"
 )
-
-// ErrDone is returned when there are no more rows
-var ErrDone = errors.New("no more rows")
 
 // Driver implements database/sql/driver.Driver
 type Driver struct {
-	mu       sync.Mutex
 	handlers map[string]*MockHandler
 }
 
 // MockHandler holds mock data and state
 type MockHandler struct {
-	mu           sync.Mutex
 	Tables       map[string]*TableData
 	MaxLSN       []byte
 	CurrentLSN   []byte
@@ -80,9 +74,6 @@ func (d *Driver) registerDefaultHandler() {
 
 // Open returns a new connection to the mock database
 func (d *Driver) Open(name string) (driver.Conn, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	h, ok := d.handlers[name]
 	if !ok {
 		h = d.handlers["default"]
@@ -94,8 +85,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 // conn implements driver.Conn
 type conn struct {
 	handler *MockHandler
-	mu      sync.Mutex
-	tx      *sql.Tx
 }
 
 func (c *conn) Prepare(query string) (driver.Stmt, error) {
@@ -107,16 +96,11 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) Begin() (driver.Tx, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	return &tx{conn: c}, nil
 }
 
 // Exec implements context.Context executor
 func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Handle CDC system queries
 	query = normalizeQuery(query)
 
@@ -135,8 +119,6 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	query = normalizeQuery(query)
 
@@ -240,7 +222,7 @@ func (r *rows) Close() error {
 
 func (r *rows) Next(dest []driver.Value) error {
 	if r.pos >= len(r.values) {
-		return ErrDone
+		return io.EOF
 	}
 
 	row := r.values[r.pos]

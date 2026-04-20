@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/cdc"
@@ -54,13 +55,8 @@ func (q *CDCQuerier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, erro
 // GetChanges queries CDC changes for a table
 func (q *CDCQuerier) GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]cdc.Change, error) {
 	// Parse table name from capture instance (format: schema_table)
-	actualTableName := tableName
-	if idx := len(captureInstance) - len("_") - len(tableName); idx > 0 {
-		// captureInstance format: dbo_TestProducts
-		if len(captureInstance) > 4 && captureInstance[:4] == "dbo_" {
-			actualTableName = captureInstance[4:]
-		}
-	}
+	// Handle "dbo_" prefix for capture instance names
+	actualTableName := strings.TrimPrefix(captureInstance, "dbo_")
 
 	// Return mock CDC changes based on table
 	return q.getMockChanges(actualTableName, fromLSN, toLSN)
