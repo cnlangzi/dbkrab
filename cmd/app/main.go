@@ -193,6 +193,8 @@ func main() {
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
 	sinkerMgr.Configure(cfg.Sinks.ToMap())
+	// Set MSSQL timezone for datetime conversion
+	sinkerMgr.SetTimezone(config.ParseTimezone(cfg.MSSQL.Timezone))
 	defer func() {
 		if err := sinkerMgr.Close(); err != nil {
 			slog.Warn("sinkerMgr.Close error", "error", err)

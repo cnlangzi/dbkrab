@@ -6,10 +6,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"time"
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
@@ -31,16 +31,20 @@ func New(db *store.DB) (*Store, error) {
 // UpdatePollerState updates the poller state after successful poll.
 // fetchedCount is total CDC rows fetched; insertedCount is rows actually written (after dedup).
 func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {
+	// Use Go time.Now().UTC() for consistency with rest of the codebase
+	// This ensures all timestamps are in UTC with nanosecond precision
+	now := time.Now().UTC()
+	
 	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
 		UPDATE poller_state
-		SET last_poll_time = CURRENT_TIMESTAMP,
+		SET last_poll_time = ?,
 			last_lsn = COALESCE(NULLIF(?, ''), last_lsn),
 			total_changes = total_changes + ?,
 			total_inserted = total_inserted + ?,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = ?
 		WHERE id = 1
-	`, lastLSN, fetchedCount, insertedCount)
+	`, now, lastLSN, fetchedCount, insertedCount, now)
 	return err
 }
 
@@ -110,6 +114,9 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 
 	rowsInserted := 0
 	for _, change := range changes {
+		// 直接序列化 time.Time，JSON 会将其转为 RFC3339Nano 格式
+		// 注意：JSON 序列化时，time.Time 会被转为 RFC3339Nano 格式的字符串
+		// 读取时需要正确解析这个格式
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
 			dataJSON = []byte("{}")
