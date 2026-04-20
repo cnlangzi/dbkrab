@@ -78,7 +78,7 @@ func TestUpdateInTx_Overwrite_InsertIfNotExists(t *testing.T) {
 	// Create in-memory database
 	db, err := sqlite.Open(ctx, ":memory:")
 	require.NoError(t, err)
-	defer func() { _ = db.Writer.Close() }()
+	defer func() { _ = db.Close() }()
 
 	// Create table
 	createSQL := `CREATE TABLE test_items (
@@ -128,7 +128,7 @@ func TestUpdateInTx_Overwrite_MultipleColumns(t *testing.T) {
 	// Create in-memory database
 	db, err := sqlite.Open(ctx, ":memory:")
 	require.NoError(t, err)
-	defer func() { _ = db.Writer.Close() }()
+	defer func() { _ = db.Close() }()
 
 	// Create table
 	createSQL := `CREATE TABLE test_items (
@@ -184,7 +184,7 @@ func TestUpdateInTx_Skip_ExistingRecord(t *testing.T) {
 
 	db, err := sqlite.Open(ctx, ":memory:")
 	require.NoError(t, err)
-	defer func() { _ = db.Writer.Close() }()
+	defer func() { _ = db.Close() }()
 
 	// Create table
 	_, err = db.Writer.Exec(`CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT)`)
@@ -221,26 +221,24 @@ func TestUpdateInTx_Skip_ExistingRecord(t *testing.T) {
 	assert.Equal(t, "existing", name, "skip should preserve existing record")
 }
 
-// TestUpdateInTx_PlainUpdate_NoInsert verifies that plain UPDATE (empty OnConflict)
-// only updates if record exists, doesn't insert if not.
-// Note: This is the existing behavior - plain UPDATE returns success but 0 rows affected when no record exists.
-func TestUpdateInTx_PlainUpdate_NoInsert(t *testing.T) {
+// TestUpdateInTx_EmptyOnConflict_DefaultsToOverwrite verifies that empty OnConflict
+// defaults to overwrite strategy (which inserts if not exists).
+func TestUpdateInTx_EmptyOnConflict_DefaultsToOverwrite(t *testing.T) {
 	ctx := context.Background()
 
 	db, err := sqlite.Open(ctx, ":memory:")
 	require.NoError(t, err)
-	defer func() { _ = db.Writer.Close() }()
+	defer func() { _ = db.Close() }()
 
 	// Create table
 	_, err = db.Writer.Exec(`CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT)`)
 	require.NoError(t, err)
 
-	// Use plain update (OnConflict = "") - record doesn't exist
-	// This will execute UPDATE but affect 0 rows (no error)
+	// Use empty OnConflict - should default to overwrite (insert if not exists)
 	config := sqliteutil.TableConfig{
 		Output:      "test_items",
 		PrimaryKey:  "id",
-		OnConflict: "", // plain update
+		OnConflict: "", // empty defaults to overwrite
 	}
 	columns := []string{"id", "name"}
 	rows := [][]interface{}{
@@ -251,19 +249,17 @@ func TestUpdateInTx_PlainUpdate_NoInsert(t *testing.T) {
 	require.NoError(t, err)
 
 	err = sqliteutil.UpdateInTx(tx, config, columns, rows)
-	// Should succeed (UPDATE executes without error even if 0 rows affected)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	// Verify: record might be inserted (driver dependent) but test documents behavior
-	// This test verifies no panic/crash - behavior is driver dependent
+	// Verify: empty OnConflict defaults to overwrite, so record should be inserted
 	var count int
 	err = db.Writer.QueryRow(`SELECT COUNT(*) FROM test_items`).Scan(&count)
 	require.NoError(t, err)
 
-	// Document the actual behavior (some drivers insert 0, some don't)
-	t.Logf("Plain update with no existing record: inserted %d rows", count)
+	// Empty OnConflict defaults to overwrite, which inserts if not exists
+	assert.Equal(t, 1, count, "empty OnConflict should default to overwrite and insert record")
 }
 
 // TestInsertInTx_Overwrite_PartialUpdate verifies that InsertInTx with overwrite
@@ -273,7 +269,7 @@ func TestInsertInTx_Overwrite_PartialUpdate(t *testing.T) {
 
 	db, err := sqlite.Open(ctx, ":memory:")
 	require.NoError(t, err)
-	defer func() { _ = db.Writer.Close() }()
+	defer func() { _ = db.Close() }()
 
 	// Create table
 	_, err = db.Writer.Exec(`CREATE TABLE test_items (
