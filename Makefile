@@ -32,10 +32,10 @@ build:
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## test: Run all tests (excluding integration tests)
+## test: Run all tests
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race -v $(TEST_PARALLEL) -skip "Integration" ./...
+	$(GO) test -v -race $(TEST_PARALLEL) ./...
 
 ## test-short: Run short tests
 test-short:
