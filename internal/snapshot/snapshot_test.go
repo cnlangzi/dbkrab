@@ -1,10 +1,13 @@
-package cdc
+package snapshot
 
 import (
 	"context"
 	"encoding/hex"
 	"testing"
 	"time"
+
+	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrimaryKeyInfo_BuildOrderBy(t *testing.T) {
@@ -90,21 +93,21 @@ func TestPrimaryKeyInfo_BuildPagedQuery(t *testing.T) {
 	}
 }
 
-func TestSnapshotConfig_Defaults(t *testing.T) {
-	cfg := DefaultSnapshotConfig()
+func TestConfig_Defaults(t *testing.T) {
+	cfg := DefaultConfig()
 	if cfg.BatchSize != 10000 {
-		t.Errorf("DefaultSnapshotConfig().BatchSize = %d, want 10000", cfg.BatchSize)
+		t.Errorf("DefaultConfig().BatchSize = %d, want 10000", cfg.BatchSize)
 	}
 }
 
-func TestSnapshotConfig_CustomBatchSize(t *testing.T) {
-	cfg := &SnapshotConfig{BatchSize: 5000}
+func TestConfig_CustomBatchSize(t *testing.T) {
+	cfg := &Config{BatchSize: 5000}
 	if cfg.BatchSize != 5000 {
-		t.Errorf("SnapshotConfig.BatchSize = %d, want 5000", cfg.BatchSize)
+		t.Errorf("Config.BatchSize = %d, want 5000", cfg.BatchSize)
 	}
 }
 
-func TestSnapshotQuerier_LSNCapture(t *testing.T) {
+func TestQuerier_LSNCapture(t *testing.T) {
 	startLSN := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
 
 	// Test hex encoding - should be 20 hex chars for 10 bytes
@@ -115,7 +118,7 @@ func TestSnapshotQuerier_LSNCapture(t *testing.T) {
 	}
 }
 
-func TestSnapshotQuerier_IncrementLSN(t *testing.T) {
+func TestQuerier_IncrementLSN(t *testing.T) {
 	startLSN := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
 
 	if len(startLSN) != 10 {
@@ -131,13 +134,13 @@ func TestSnapshotQuerier_IncrementLSN(t *testing.T) {
 	}
 }
 
-// testSnapshotHandler collects changes for testing
-type testSnapshotHandler struct {
-	changes [][]Change
+// testHandler collects changes for testing
+type testHandler struct {
+	changes [][]core.Change
 	err     error
 }
 
-func (h *testSnapshotHandler) HandleSnapshotBatch(ctx context.Context, changes []Change) error {
+func (h *testHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
 	if h.err != nil {
 		return h.err
 	}
@@ -174,41 +177,42 @@ func (s *testOffsetStore) Get(table string) (string, string, bool) {
 	return "", "", false
 }
 
-func TestNewSnapshotQuerier_WithDefaults(t *testing.T) {
-	config := DefaultSnapshotConfig()
+func TestNewQuerier_WithDefaults(t *testing.T) {
+	config := DefaultConfig()
 
 	if config.BatchSize != 10000 {
 		t.Errorf("Default BatchSize = %d, want 10000", config.BatchSize)
 	}
 }
 
-func TestNewSnapshotQuerier_Timezone(t *testing.T) {
-	loc, _ := time.LoadLocation("Asia/Shanghai")
-	q := NewSnapshotQuerier(nil, loc, nil)
+func TestNewQuerier_Timezone(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err, "Failed to load timezone")
+	q := NewQuerier(nil, loc, nil)
 
 	if q.timezone != loc {
 		t.Errorf("timezone = %v, want %v", q.timezone, loc)
 	}
 }
 
-func TestSnapshotHandlerFunc(t *testing.T) {
+func TestHandlerFunc(t *testing.T) {
 	var called bool
-	var captured []Change
+	var captured []core.Change
 
-	handler := SnapshotHandlerFunc(func(ctx context.Context, changes []Change) error {
+	handler := HandlerFunc(func(ctx context.Context, changes []core.Change) error {
 		called = true
 		captured = changes
 		return nil
 	})
 
 	ctx := context.Background()
-	testChanges := []Change{
-		{Table: "test", Operation: 2, Data: map[string]interface{}{"id": 1}},
+	testChanges := []core.Change{
+		{Table: "test", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
 	}
 
-	err := handler.HandleSnapshotBatch(ctx, testChanges)
+	err := handler.HandleBatch(ctx, testChanges)
 	if err != nil {
-		t.Errorf("HandleSnapshotBatch error = %v", err)
+		t.Errorf("HandleBatch error = %v", err)
 	}
 	if !called {
 		t.Error("handler was not called")
@@ -218,7 +222,7 @@ func TestSnapshotHandlerFunc(t *testing.T) {
 	}
 }
 
-func TestSnapshotRunner_OffsetUpdate(t *testing.T) {
+func TestRunner_OffsetUpdate(t *testing.T) {
 	store := newTestOffsetStore()
 
 	err := store.Set("dbo.test_table", "000000000000000001", "000000000000000002")
@@ -246,7 +250,7 @@ func TestSnapshotRunner_OffsetUpdate(t *testing.T) {
 	}
 }
 
-func TestSnapshotRunner_GetNonExistentOffset(t *testing.T) {
+func TestRunner_GetNonExistentOffset(t *testing.T) {
 	store := newTestOffsetStore()
 
 	_, _, ok := store.Get("dbo.non_existent")

@@ -166,7 +166,7 @@ func TestIntegrationWithSQLite(t *testing.T) {
 	mockDB := setupMockDB(t)
 	defer func() { _ = mockDB.Close() }()
 
-	// Setup real SQLite store
+	// Setup real SQLite store (migrations are run automatically by store.New)
 	sqliteDB, cleanupSQLite := setupSQLiteTestDB(t)
 	defer cleanupSQLite()
 
@@ -212,12 +212,9 @@ func TestIntegrationWithSQLite(t *testing.T) {
 			}
 		}
 
-		// Try to write to SQLite store (this may fail due to schema, but that's expected)
+		// Write to SQLite store (schema should exist after Migrate)
 		_, err = storeWrapper.Write(coreChanges)
-		if err != nil {
-			// Schema might not exist - this is OK for integration test
-			t.Logf("Expected schema error: %v", err)
-		}
+		require.NoError(t, err, "Failed to write changes to SQLite store")
 
 		// Test offset store
 		err = offsetStore.Set("dbo.TestProducts", "000000000100000001", "000000000100000002")
@@ -243,17 +240,18 @@ func TestMockMSQLWithRealPoller(t *testing.T) {
 	offsetStore, cleanupOffset := setupOffsetStore(t)
 	defer cleanupOffset()
 
-	// Create mock CDCQuerier and verify it implements the interface
-	handler := mockmssql.HandlerForTest()
-	mockQuerier := mockmssql.NewCDCQuerier(handler)
-
-	// Verify we can use it through the cdc.Querier interface
+	// Create real cdc.Querier to verify it can query the mock database
+	ctx := context.Background()
 	q := cdc.NewQuerier(mockDB, time.UTC)
-	_ = q
+
+	// Verify cdc.Querier can use the mock database for LSN queries
+	maxLSN, err := q.GetMaxLSN(ctx)
+	require.NoError(t, err, "Failed to get max LSN via cdc.Querier")
+	assert.NotNil(t, maxLSN, "Max LSN should not be nil")
+	t.Logf("Max LSN via cdc.Querier: %x", maxLSN)
 
 	// Test offset store basic operations
-	ctx := context.Background()
-	err := offsetStore.Set("dbo.TestProducts", "000000000100000001", "000000000100000002")
+	err = offsetStore.Set("dbo.TestProducts", "000000000100000001", "000000000100000002")
 	require.NoError(t, err, "Failed to set offset")
 	err = offsetStore.Flush()
 	require.NoError(t, err, "Failed to flush offset")
@@ -263,9 +261,6 @@ func TestMockMSQLWithRealPoller(t *testing.T) {
 	require.NoError(t, err, "Failed to get offset")
 	assert.Equal(t, "000000000100000001", off.LastLSN, "LastLSN should match")
 	assert.Equal(t, "000000000100000002", off.NextLSN, "NextLSN should match")
-
-	// Verify mockQuerier returns changes
-	_, _ = mockQuerier.GetChanges(ctx, "dbo_TestProducts", "TestProducts", []byte{0, 0, 0, 0, 1, 0, 0, 0, 0, 1}, []byte{0, 0, 0, 0, 1, 0, 0, 0, 0, 2})
 
 	t.Log("Mock MSSQL is compatible with CDCQuerier interface")
 }
@@ -287,27 +282,26 @@ func TestCDCChangeTypes(t *testing.T) {
 	// Test INSERT operation
 	changes, err := querier.GetChanges(ctx, "dbo_TestProducts", "TestProducts", baseLSN, nextLSN)
 	require.NoError(t, err)
+	require.Greater(t, len(changes), 0, "Should have at least one change when LSNs differ")
 
-	if len(changes) > 0 {
-		change := changes[0]
+	change := changes[0]
 
-		// Verify operation types (2 = INSERT per MSSQL CDC)
-		assert.Equal(t, 2, change.Operation, "Operation should be INSERT (2)")
+	// Verify operation types (2 = INSERT per MSSQL CDC)
+	assert.Equal(t, 2, change.Operation, "Operation should be INSERT (2)")
 
-		// Verify data fields exist
-		assert.Contains(t, change.Data, "productid")
-		assert.Contains(t, change.Data, "productname")
-		assert.Contains(t, change.Data, "price")
-		assert.Contains(t, change.Data, "stock")
+	// Verify data fields exist
+	assert.Contains(t, change.Data, "productid")
+	assert.Contains(t, change.Data, "productname")
+	assert.Contains(t, change.Data, "price")
+	assert.Contains(t, change.Data, "stock")
 
-		t.Logf("CDC Change: op=%d, table=%s, data=%v",
-			change.Operation, change.Table, change.Data)
-	}
+	t.Logf("CDC Change: op=%d, table=%s, data=%v",
+		change.Operation, change.Table, change.Data)
 }
 
 // TestSQLiteStoreWrites verifies that real SQLite store can write data
 func TestSQLiteStoreWrites(t *testing.T) {
-	// Setup real SQLite store
+	// Setup real SQLite store (migrations are run automatically by store.New)
 	sqliteDB, cleanupSQLite := setupSQLiteTestDB(t)
 	defer cleanupSQLite()
 
@@ -332,13 +326,9 @@ func TestSQLiteStoreWrites(t *testing.T) {
 		},
 	}
 
-	// Write to store
+	// Write to store (schema should exist after Migrate)
 	count, err := storeWrapper.Write(changes)
-	if err != nil {
-		// Schema might not exist - create it
-		t.Logf("Store write error (may need schema): %v", err)
-	} else {
-		assert.Equal(t, 1, count, "Should write 1 change")
-		t.Logf("Successfully wrote %d changes to SQLite", count)
-	}
+	require.NoError(t, err, "Failed to write changes to SQLite store")
+	assert.Equal(t, 1, count, "Should write 1 change")
+	t.Logf("Successfully wrote %d changes to SQLite", count)
 }
