@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -25,6 +26,10 @@ type ReplayService struct {
 	dlq          *dlq.DLQ
 	monitorDB    *monitor.DB
 	stateManager *core.StateManager // State coordination with Poller/Snapshot
+
+	// runningCancel is the cancel func of the currently running replay (nil if not running)
+	runningCancel context.CancelFunc
+	runningMu     sync.Mutex
 }
 
 // NewReplayService creates a new ReplayService.
@@ -38,34 +43,54 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 	}
 }
 
-// Execute replays all CDC changes from the store in LSN order.
-// Returns error if StateManager indicates non-idle state or replay fails.
+// Execute starts replay in a goroutine and returns immediately.
+// Returns (nil, nil) if replay is already running.
+// This function manages StateReplay/StateIdle transitions.
+// Replay runs to completion - there is no stop functionality.
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
-	// Check state before starting
-	if !r.stateManager.CanStart(core.StateReplay) {
-		return nil, fmt.Errorf("cannot start replay: current state is %s", r.stateManager.Current())
+	// Check if replay is already running
+	r.runningMu.Lock()
+	if r.runningCancel != nil {
+		r.runningMu.Unlock()
+		return nil, nil // Already running
 	}
 
+	// Create a context that will never be cancelled (replay runs to completion)
+	runningCtx, cancel := context.WithCancel(context.Background())
+	r.runningCancel = cancel
+	r.runningMu.Unlock()
+
+	// Set state to replay - Poller will detect and skip processing
+	r.stateManager.Set(core.StateReplay)
+
+	// Start replay in goroutine
+	go func() {
+		defer func() {
+			r.runningMu.Lock()
+			r.runningCancel = nil
+			r.runningMu.Unlock()
+			r.stateManager.Set(core.StateIdle)
+		}()
+
+		r.runReplay(runningCtx, progressCb)
+	}()
+
+	return nil, nil // Started successfully
+}
+
+// runReplay does the actual replay work. Called from goroutine.
+func (r *ReplayService) runReplay(ctx context.Context, progressCb ProgressCallback) {
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get LSNs: %w", err)
+		slog.Error("replay failed to get LSNs", "error", err)
+		return
 	}
 
 	if len(lsns) == 0 {
 		slog.Info("no changes to replay")
-		return &ReplayResult{}, nil
+		return
 	}
-
-	// Create cancellable context and register with StateManager
-	replayCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	if err := r.stateManager.Start(core.StateReplay, cancel); err != nil {
-		cancel()
-		return nil, err
-	}
-	defer r.stateManager.Stop()
 
 	slog.Info("starting replay", "lsn_count", len(lsns))
 
@@ -74,19 +99,9 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	var totalFetchedRows, totalTxCount, totalDLQCount int
 
-	// Process each LSN in order
+	// Process each LSN in order (no cancellation - runs to completion)
 	for i, lsn := range lsns {
-		// Check for cancellation
-		if ctxErr := replayCtx.Err(); ctxErr != nil {
-			slog.Warn("replay cancelled",
-				"error", ctxErr,
-				"processed", result.ProcessedLSNs,
-				"failed", result.FailedLSNs,
-				"total", len(lsns))
-			break
-		}
-
-		lsnResult, err := r.replayLSN(replayCtx, lsn, result, batchCtx)
+		lsnResult, err := r.replayLSN(ctx, lsn, result, batchCtx)
 		if err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
@@ -116,9 +131,14 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	// Write batch_log
 	if r.monitorDB != nil && batchCtx.BatchID != "" {
-		status := monitor.PullStatusSuccess
-		if result.FailedLSNs > 0 {
+		var status monitor.PullStatus
+		switch {
+		case result.ProcessedLSNs == 0 && result.FailedLSNs > 0:
+			status = monitor.PullStatusFailed
+		case result.ProcessedLSNs < result.TotalLSNs:
 			status = monitor.PullStatusPartial
+		default:
+			status = monitor.PullStatusSuccess
 		}
 
 		batchLog := &monitor.BatchLog{
@@ -140,8 +160,6 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 		"processed", result.ProcessedLSNs,
 		"failed", result.FailedLSNs,
 		"total_changes", result.TotalChanges)
-
-	return result, nil
 }
 
 // replayLSN replays all changes for a specific LSN
@@ -178,9 +196,11 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	}, nil
 }
 
-// buildTransaction builds a Transaction from Change slice
+// buildTransaction builds a Transaction from Change slice.
+// All changes are aggregated into a single transaction (one LSN = one target-side transaction).
 func (r *ReplayService) buildTransaction(changes []core.Change) *core.Transaction {
-	txMap := make(map[string]*core.Transaction)
+	tx := core.NewTransaction("")
+	var txID string
 
 	for _, c := range changes {
 		if c.Operation == core.OpUpdateBefore {
@@ -191,23 +211,14 @@ func (r *ReplayService) buildTransaction(changes []core.Change) *core.Transactio
 			continue
 		}
 
-		tx, exists := txMap[c.TransactionID]
-		if !exists {
-			tx = core.NewTransaction(c.TransactionID)
-			txMap[c.TransactionID] = tx
+		if txID == "" {
+			txID = c.TransactionID
+			tx.ID = txID
 		}
 		tx.AddChange(c)
 	}
 
-	if len(txMap) == 0 {
-		return &core.Transaction{ID: "", Changes: []core.Change{}}
-	}
-
-	for _, tx := range txMap {
-		return tx
-	}
-
-	return &core.Transaction{ID: "", Changes: []core.Change{}}
+	return tx
 }
 
 // writeToDLQ writes a failed transaction to DLQ
@@ -227,7 +238,11 @@ func (r *ReplayService) writeToDLQ(tx *core.Transaction, handlerErr error, lsn s
 		"transaction_id": tx.ID,
 		"changes":        tx.Changes,
 	}
-	changeJSON, _ := json.Marshal(txData)
+	changeJSON, err := json.Marshal(txData)
+	if err != nil {
+		slog.Error("failed to marshal transaction for DLQ", "error", err, "tx_id", tx.ID)
+		changeJSON = []byte("{}")
+	}
 
 	entry := &dlq.DLQEntry{
 		TraceID:      tx.TraceID,
