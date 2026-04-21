@@ -1,9 +1,7 @@
 package core
 
 import (
-	"context"
 	"testing"
-	"time"
 )
 
 func TestStateManager_New(t *testing.T) {
@@ -16,15 +14,11 @@ func TestStateManager_New(t *testing.T) {
 	}
 }
 
-func TestStateManager_StartStop(t *testing.T) {
+func TestStateManager_Set(t *testing.T) {
 	sm := NewStateManager()
 
-	// Test successful start
-	ctx, cancel := context.WithCancel(context.Background())
-	err := sm.Start(StatePolling, cancel)
-	if err != nil {
-		t.Errorf("unexpected error starting polling: %v", err)
-	}
+	// Set to polling
+	sm.Set(StatePolling)
 	if sm.Current() != StatePolling {
 		t.Errorf("expected state to be polling, got %s", sm.Current())
 	}
@@ -32,27 +26,35 @@ func TestStateManager_StartStop(t *testing.T) {
 		t.Errorf("expected IsIdle() to be false")
 	}
 
-	// Test cannot start when not idle
-	err = sm.Start(StateReplay, nil)
-	if err == nil {
-		t.Errorf("expected error when starting replay while polling")
+	// Set to replay (take over)
+	sm.Set(StateReplay)
+	if sm.Current() != StateReplay {
+		t.Errorf("expected state to be replay, got %s", sm.Current())
 	}
 
-	// Test stop
-	sm.Stop()
+	// Set to idle
+	sm.Set(StateIdle)
 	if sm.Current() != StateIdle {
-		t.Errorf("expected state to be idle after stop, got %s", sm.Current())
+		t.Errorf("expected state to be idle, got %s", sm.Current())
 	}
 	if !sm.IsIdle() {
-		t.Errorf("expected IsIdle() to be true after stop")
+		t.Errorf("expected IsIdle() to be true")
+	}
+}
+
+func TestStateManager_SetNoChange(t *testing.T) {
+	sm := NewStateManager()
+
+	// Set to same state should do nothing
+	sm.Set(StateIdle)
+	if sm.Current() != StateIdle {
+		t.Errorf("expected state to remain idle")
 	}
 
-	// Verify context was cancelled
-	select {
-	case <-ctx.Done():
-		// Good - context was cancelled
-	case <-time.After(100 * time.Millisecond):
-		t.Errorf("expected context to be cancelled after Stop()")
+	sm.Set(StatePolling)
+	sm.Set(StatePolling) // No change
+	if sm.Current() != StatePolling {
+		t.Errorf("expected state to remain polling")
 	}
 }
 
@@ -73,20 +75,17 @@ func TestStateManager_CanStart(t *testing.T) {
 	}
 
 	// Cannot start when not idle
-	sm.Start(StatePolling, nil)
+	sm.Set(StatePolling)
 	if sm.CanStart(StateReplay) {
 		t.Errorf("expected CanStart(replay) to be false when polling")
 	}
-	sm.Stop()
+	sm.Set(StateIdle)
 }
 
 func TestStateManager_Metadata(t *testing.T) {
 	sm := NewStateManager()
 
-	// Start operation
-	sm.Start(StateReplay, nil)
-
-	// Set metadata
+	// Set metadata while idle
 	sm.SetMetadata("processed", 10)
 	sm.SetMetadata("total", 100)
 
@@ -105,36 +104,33 @@ func TestStateManager_Metadata(t *testing.T) {
 		t.Errorf("internal metadata should not be affected by external modification")
 	}
 
-	// Stop clears metadata
-	sm.Stop()
+	// Set to same state (idle) clears metadata (StateIdle always clears)
+	sm.Set(StateIdle)
 	metadata = sm.Metadata()
 	if len(metadata) != 0 {
-		t.Errorf("expected metadata to be empty after stop, got %v", metadata)
+		t.Errorf("expected metadata to be empty after Set(idle), got %v", metadata)
 	}
 }
 
-func TestStateManager_StopMultipleTimes(t *testing.T) {
+func TestStateManager_MetadataDuringOperation(t *testing.T) {
 	sm := NewStateManager()
 
-	sm.Start(StatePolling, nil)
+	// Simulate replay operation
+	sm.Set(StateReplay)
 
-	// Stop multiple times should be safe
-	sm.Stop()
-	sm.Stop()
-	sm.Stop()
+	sm.SetMetadata("processed", 50)
+	sm.SetMetadata("total", 100)
 
-	if sm.Current() != StateIdle {
-		t.Errorf("expected state to remain idle after multiple stops")
+	metadata := sm.Metadata()
+	if metadata["processed"] != 50 {
+		t.Errorf("expected processed=50, got %v", metadata["processed"])
 	}
-}
 
-func TestStateManager_StopWhenIdle(t *testing.T) {
-	sm := NewStateManager()
+	// After operation completes, set to idle - metadata cleared
+	sm.Set(StateIdle)
 
-	// Stop when idle should be safe
-	sm.Stop()
-
-	if sm.Current() != StateIdle {
-		t.Errorf("expected state to remain idle")
+	metadata = sm.Metadata()
+	if len(metadata) != 0 {
+		t.Errorf("metadata should be cleared after idle, got %v", metadata)
 	}
 }

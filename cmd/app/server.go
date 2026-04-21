@@ -204,10 +204,9 @@ func (s *Server) registerAPIRoutes() {
 	if s.store != nil {
 		api.Get("/cdc/changes", s.handleCDCChanges, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
-		// CDC replay routes
-		api.Post("/cdc/replay", s.handleCDCReplay, xun.WithViewer(&xun.JsonViewer{}))
-		api.Post("/cdc/replay/stop", s.handleCDCReplayStop, xun.WithViewer(&xun.JsonViewer{}))
-		api.Get("/cdc/replay/status", s.handleCDCReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
+		// Replay routes
+		api.Post("/replay", s.handleReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/replay/status", s.handleReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC changes/status routes registered")
 	} else {
 		slog.Warn("CDC changes/status routes skipped - store is nil")
@@ -582,36 +581,25 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 	return c.View(response)
 }
 
-// handleCDCReplay handles POST /api/cdc/replay
-func (s *Server) handleCDCReplay(c *xun.Context) error {
+// handleReplay handles POST /api/replay - starts replay (long-running, async)
+func (s *Server) handleReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
-	if !s.stateManager.CanStart(core.StateReplay) {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("cannot start replay: current state is %s", s.stateManager.Current()),
-			"state":   s.stateManager.Current(),
-		})
+
+	// Execute starts replay in goroutine, returns immediately
+	_, err := s.replayService.Execute(context.Background(), nil)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
-	go func() {
-		ctx := context.Background()
-		result, err := s.replayService.Execute(ctx, nil)
-		if err != nil {
-			slog.Error("replay failed", "error", err)
-		} else {
-			slog.Info("replay completed",
-				"total_lsns", result.TotalLSNs,
-				"processed", result.ProcessedLSNs,
-				"failed", result.FailedLSNs,
-				"total_changes", result.TotalChanges)
-		}
-	}()
-	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
+
+	// Execute returns (nil, nil) if already running, or (nil, nil) on success
+	// Both cases: replay started (or already running), tell client to poll status
+	return c.View(map[string]any{"success": true, "message": "replay started", "state": "replay"})
 }
 
-// handleCDCReplayStatus handles GET /api/cdc/replay/status
-func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
+// handleReplayStatus handles GET /api/replay/status
+func (s *Server) handleReplayStatus(c *xun.Context) error {
 	metadata := s.stateManager.Metadata()
 	return c.View(map[string]any{
 		"success": true,
@@ -619,15 +607,6 @@ func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
 		"total":   metadata["total"],
 		"processed": metadata["processed"],
 	})
-}
-
-// handleCDCReplayStop handles POST /api/cdc/replay/stop
-func (s *Server) handleCDCReplayStop(c *xun.Context) error {
-	if s.stateManager.Current() != core.StateReplay {
-		return c.View(map[string]any{"success": false, "error": "no replay is running"})
-	}
-	s.stateManager.Stop()
-	return c.View(map[string]any{"success": true, "message": "replay stopped"})
 }
 
 // Returns GAP status for all tracked tables including LSN info, lag bytes, and duration

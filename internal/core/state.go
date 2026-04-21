@@ -1,8 +1,6 @@
 package core
 
 import (
-	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -22,12 +20,11 @@ const (
 )
 
 // StateManager coordinates the running state of Poller, Replay, and Snapshot.
-// It ensures mutual exclusion - only one operation can run at a time.
+// It acts as a simple state marker - operations check state and pause themselves.
 // State is stored in memory and resets to idle on restart.
 type StateManager struct {
 	mu       sync.RWMutex
 	state    RunState
-	cancel   context.CancelFunc
 	metadata map[string]any
 }
 
@@ -53,8 +50,35 @@ func (sm *StateManager) IsIdle() bool {
 
 // CanStart checks if a new operation can be started.
 // Returns true only if current state is idle and requested state is not idle.
+// Note: For operations that want to "take over", use Set() directly.
 func (sm *StateManager) CanStart(want RunState) bool {
 	return sm.IsIdle() && want != StateIdle
+}
+
+// Set directly sets the state without checking.
+// Used by operations that want to "take over" (e.g., Replay when Poller is running).
+// Other operations will detect the state change and pause themselves.
+// StateIdle always clears metadata. Non-idle state transitions also clear metadata.
+func (sm *StateManager) Set(state RunState) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	old := sm.state
+
+	// StateIdle always clears metadata (even if already idle)
+	if state == StateIdle {
+		sm.metadata = make(map[string]any)
+	} else if old != state {
+		// Non-idle state transition also clears metadata to prevent stale data
+		sm.metadata = make(map[string]any)
+	}
+
+	if old == state {
+		return // No state change
+	}
+
+	sm.state = state
+	slog.Info("state transition", "from", old, "to", state)
 }
 
 // Metadata returns a copy of the current running metadata.
@@ -67,44 +91,6 @@ func (sm *StateManager) Metadata() map[string]any {
 		result[k] = v
 	}
 	return result
-}
-
-// Start begins a new operation. Returns error if current state is not idle.
-// The cancel function will be called when Stop() is invoked.
-func (sm *StateManager) Start(what RunState, cancel context.CancelFunc) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if sm.state != StateIdle {
-		return fmt.Errorf("cannot start %s: current state is %s", what, sm.state)
-	}
-
-	sm.state = what
-	sm.cancel = cancel
-	sm.metadata = make(map[string]any)
-
-	slog.Info("state transition", "from", StateIdle, "to", what)
-	return nil
-}
-
-// Stop cancels the current operation and resets state to idle.
-// Can be called from any state. Safe to call multiple times.
-func (sm *StateManager) Stop() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if sm.cancel != nil {
-		sm.cancel()
-		sm.cancel = nil
-	}
-
-	old := sm.state
-	sm.state = StateIdle
-	sm.metadata = make(map[string]any)
-
-	if old != StateIdle {
-		slog.Info("state transition", "from", old, "to", StateIdle)
-	}
 }
 
 // SetMetadata updates a metadata key-value pair.

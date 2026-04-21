@@ -273,21 +273,13 @@ func (p *Poller) SetReloadChan(ch <-chan *config.Config) {
 }
 
 // Start begins polling.
-// If StateManager is set, it checks state and registers before starting.
+// If StateManager is set, it registers StatePolling.
+// During polling, it skips processing when state changes to Replay/Snapshot.
 func (p *Poller) Start(ctx context.Context) error {
-	// Check state coordination
+	// Register polling state
 	if p.stateManager != nil {
-		if !p.stateManager.CanStart(StatePolling) {
-			return fmt.Errorf("cannot start poller: current state is %s", p.stateManager.Current())
-		}
-		// Create cancellable context and register
-		pollCtx, cancel := context.WithCancel(ctx)
-		if err := p.stateManager.Start(StatePolling, cancel); err != nil {
-			cancel()
-			return err
-		}
-		ctx = pollCtx
-		defer p.stateManager.Stop()
+		p.stateManager.Set(StatePolling)
+		defer p.stateManager.Set(StateIdle) // Reset on exit
 	}
 
 	// Load existing offsets
@@ -347,6 +339,11 @@ func (p *Poller) Start(ctx context.Context) error {
 			p.pendingCfg = newCfg
 			slog.Info("config reload pending, will apply at next poll cycle")
 		case <-ticker.C:
+			// Skip processing if other operation is running (Replay, Snapshot)
+			if p.stateManager != nil && p.stateManager.Current() != StatePolling {
+				slog.Debug("polling skipped", "state", p.stateManager.Current())
+				continue
+			}
 			if p.polling {
 				// Skip if previous poll is still running
 				continue
@@ -405,6 +402,12 @@ func (p *Poller) Stop() {
 // P0 fix: multi-table sync via min LSN checkpoint
 // P0-6 fix: CDC queries have timeout to prevent blocking
 func (p *Poller) poll(ctx context.Context) error {
+	// Check state: if changed to Replay/Snapshot, skip this poll cycle
+	if p.stateManager != nil && p.stateManager.Current() != StatePolling {
+		slog.Info("poll skipped due to state change", "state", p.stateManager.Current())
+		return nil
+	}
+
 	// Check if paused due to gap detection
 	if p.isPaused() {
 		slog.Warn("poller is paused due to CDC gap detection")

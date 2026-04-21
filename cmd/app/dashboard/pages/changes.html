@@ -481,7 +481,7 @@ function startReplay() {
         Starting...
     `;
 
-    fetch('/api/cdc/replay', { method: 'POST' })
+    fetch('/api/replay', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
@@ -536,7 +536,7 @@ function stopReplayPolling() {
 }
 
 function checkReplayStatus() {
-    fetch('/api/cdc/replay/status')
+    fetch('/api/replay/status')
         .then(r => r.json())
         .then(data => {
             if (data.success) {
@@ -544,7 +544,7 @@ function checkReplayStatus() {
                 replayStatusFailureCount = 0;
 
                 updateReplayUI(data);
-                if (data.status !== 'running') {
+                if (data.state !== 'replay') {
                     stopReplayPolling();
                     resetReplayButton();
                     hideReplayProgress();
@@ -574,7 +574,7 @@ function updateReplayUI(data) {
     document.getElementById('replay-processed').textContent = data.processed || 0;
     document.getElementById('replay-total').textContent = data.total || 0;
     document.getElementById('replay-failed').textContent = data.failed || 0;
-    document.getElementById('replay-status-text').textContent = data.status || 'Unknown';
+    document.getElementById('replay-status-text').textContent = data.state || 'Unknown';
 
     // Update progress bar
     const total = data.total || 0;
@@ -585,12 +585,12 @@ function updateReplayUI(data) {
     // Update status color
     const statusText = document.getElementById('replay-status-text');
     const progressBar = document.getElementById('replay-progress-bar');
-    if (data.status === 'completed') {
+    if (data.state === 'idle') {
         statusText.classList.remove('text-warning', 'text-error');
         statusText.classList.add('text-success');
         progressBar.classList.remove('bg-warning', 'bg-error');
         progressBar.classList.add('bg-success');
-    } else if (data.status === 'failed') {
+    } else if (data.state === 'failed') {
         statusText.classList.remove('text-warning', 'text-success');
         statusText.classList.add('text-error');
         progressBar.classList.remove('bg-warning', 'bg-success');
