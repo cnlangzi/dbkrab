@@ -585,16 +585,16 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 
 // handleCDCReplay handles POST /api/cdc/replay
 // Sets StateReplay so Poller will pause, then runs replay in a goroutine.
-// Only one replay can run at a time (enforced by CanStart check).
+// Only one replay can run at a time (enforced by checking if already in StateReplay).
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
-	// Check if replay (or other non-idle operation) is already running
-	if !s.stateManager.CanStart(core.StateReplay) {
+	// Prevent concurrent replay - only fail if replay is already running
+	if s.stateManager.Current() == core.StateReplay {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   fmt.Sprintf("cannot start replay: current state is %s", s.stateManager.Current()),
+			"error":   "replay is already running",
 			"state":   s.stateManager.Current(),
 		})
 	}
@@ -603,7 +603,7 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 	replayCtx, cancel := context.WithCancel(context.Background())
 	s.replayCancel = cancel // Store so stop can cancel it
 
-	// Set state to replay - Poller will detect and skip processing
+	// Set state to replay - Poller will detect at next cycle and skip processing
 	s.stateManager.Set(core.StateReplay)
 
 	go func() {
