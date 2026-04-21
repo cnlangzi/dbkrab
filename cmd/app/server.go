@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/replay"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/internal/snapshot"
 	"github.com/cnlangzi/dbkrab/internal/store"
 	"github.com/cnlangzi/dbkrab/plugin"
 	"github.com/yaitoo/xun"
@@ -64,6 +66,7 @@ type Server struct {
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	replayService   *replay.ReplayService // Replay service (in separate package)
 	poller          *core.Poller        // CDC poller reference
+	snapshotService *snapshot.SnapshotService   // Snapshot service
 }
 
 // NewServer creates a new API server with all features
@@ -80,6 +83,7 @@ func NewServer(
 	watcher *config.Watcher,
 	stateManager *core.StateManager,
 	poller *core.Poller,
+	db *sql.DB,
 ) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
@@ -105,6 +109,7 @@ func NewServer(
 		skillsPath:      skillsPath,
 		replayService:   replaySvc,
 		poller:          poller,
+		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, nil, sinkerMgr),
 	}
 }
 
@@ -210,6 +215,16 @@ func (s *Server) registerAPIRoutes() {
 		slog.Info("CDC changes/status routes registered")
 	} else {
 		slog.Warn("CDC changes/status routes skipped - store is nil")
+	}
+
+	// Snapshot routes
+	if s.snapshotService != nil {
+		api.Post("/snapshot/start", s.handleSnapshotStart, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/snapshot/status", s.handleSnapshotStatus, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/snapshot/tables", s.handleSnapshotTables, xun.WithViewer(&xun.JsonViewer{}))
+		slog.Info("Snapshot routes registered")
+	} else {
+		slog.Warn("Snapshot routes skipped - snapshot service is nil")
 	}
 
 	// CDC gap monitoring routes
@@ -1474,4 +1489,77 @@ func (s *Server) handleMonitorSinks(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{"success": true, "logs": logs})
+}
+
+// handleSnapshotStart handles POST /api/snapshot/start - starts a snapshot operation
+func (s *Server) handleSnapshotStart(c *xun.Context) error {
+	if s.snapshotService == nil {
+		return c.View(map[string]any{"success": false, "error": "snapshot service not initialized"})
+	}
+
+	// Get CDC tables from config
+	var tables []snapshot.CDCTable
+	if s.configWatcher != nil {
+		cfg := s.configWatcher.Get()
+		for _, t := range cfg.Tables {
+			parts := strings.SplitN(t, ".", 2)
+			if len(parts) == 2 {
+				tables = append(tables, snapshot.CDCTable{
+					Schema: parts[0],
+					Name:   parts[1],
+				})
+			}
+		}
+	}
+
+	// Start snapshot
+	err := s.snapshotService.Start(context.Background(), tables)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+
+	return c.View(map[string]any{"success": true, "message": "snapshot started"})
+}
+
+// handleSnapshotStatus handles GET /api/snapshot/status - returns current snapshot progress
+func (s *Server) handleSnapshotStatus(c *xun.Context) error {
+	if s.snapshotService == nil {
+		return c.View(map[string]any{"success": false, "error": "snapshot service not initialized"})
+	}
+
+	progress := s.snapshotService.GetProgress()
+	return c.View(map[string]any{
+		"success": true,
+		"state":   progress.State,
+		"tables":  progress.Tables,
+		"processed": progress.Processed,
+		"current_table": progress.CurrentTable,
+		"current_rows": progress.CurrentRows,
+		"current_total": progress.CurrentTotal,
+		"error": progress.Error,
+		"started_at": progress.StartedAt,
+		"completed_at": progress.CompletedAt,
+	})
+}
+
+// handleSnapshotTables handles GET /api/snapshot/tables - returns list of CDC tables
+func (s *Server) handleSnapshotTables(c *xun.Context) error {
+	if s.configWatcher == nil {
+		return c.View(map[string]any{"success": false, "error": "config not available"})
+	}
+
+	cfg := s.configWatcher.Get()
+	tables := make([]map[string]string, 0, len(cfg.Tables))
+	for _, t := range cfg.Tables {
+		parts := strings.SplitN(t, ".", 2)
+		if len(parts) == 2 {
+			tables = append(tables, map[string]string{
+				"schema": parts[0],
+				"name":  parts[1],
+				"full":  t,
+			})
+		}
+	}
+
+	return c.View(map[string]any{"success": true, "count": len(tables), "tables": tables})
 }
