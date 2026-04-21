@@ -131,10 +131,14 @@ func (r *ReplayService) runReplay(ctx context.Context, progressCb ProgressCallba
 
 	// Write batch_log
 	if r.monitorDB != nil && batchCtx.BatchID != "" {
-		status := monitor.PullStatusSuccess
-		// Mark as partial if: incomplete or had failures
-		if result.ProcessedLSNs < result.TotalLSNs || result.FailedLSNs > 0 {
+		var status monitor.PullStatus
+		switch {
+		case result.ProcessedLSNs == 0 && result.FailedLSNs > 0:
+			status = monitor.PullStatusFailed
+		case result.ProcessedLSNs < result.TotalLSNs:
 			status = monitor.PullStatusPartial
+		default:
+			status = monitor.PullStatusSuccess
 		}
 
 		batchLog := &monitor.BatchLog{

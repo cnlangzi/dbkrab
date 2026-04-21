@@ -588,16 +588,14 @@ func (s *Server) handleReplay(c *xun.Context) error {
 	}
 
 	// Execute starts replay in goroutine, returns immediately
-	result, err := s.replayService.Execute(context.Background(), nil)
+	_, err := s.replayService.Execute(context.Background(), nil)
 	if err != nil {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
-	if result == nil {
-		// result is nil means replay was already running
-		return c.View(map[string]any{"success": true, "message": "replay already running", "state": s.stateManager.Current()})
-	}
 
-	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
+	// Execute returns (nil, nil) if already running, or (nil, nil) on success
+	// Both cases: replay started (or already running), tell client to poll status
+	return c.View(map[string]any{"success": true, "message": "replay started", "replayState": "running"})
 }
 
 // handleReplayStatus handles GET /api/replay/status
