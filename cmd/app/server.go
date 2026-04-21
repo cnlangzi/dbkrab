@@ -64,7 +64,6 @@ type Server struct {
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	replayService   *replay.ReplayService // Replay service (in separate package)
 	poller          *core.Poller        // CDC poller reference
-	replayCancel    context.CancelFunc  // Cancel func for in-flight replay
 }
 
 // NewServer creates a new API server with all features
@@ -585,34 +584,22 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 
 // handleCDCReplay handles POST /api/cdc/replay
 // Sets StateReplay so Poller will pause, then runs replay in a goroutine.
-// Only one replay can run at a time (enforced by checking if already in StateReplay).
+// ReplayService ensures only one replay runs at a time.
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
-	// Prevent concurrent replay - only fail if replay is already running
-	if s.stateManager.Current() == core.StateReplay {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "replay is already running",
-			"state":   s.stateManager.Current(),
-		})
-	}
-
-	// Create cancellable context for replay
-	replayCtx, cancel := context.WithCancel(context.Background())
-	s.replayCancel = cancel // Store so stop can cancel it
 
 	// Set state to replay - Poller will detect at next cycle and skip processing
 	s.stateManager.Set(core.StateReplay)
 
 	go func() {
 		defer func() {
-			s.replayCancel = nil
 			s.stateManager.Set(core.StateIdle)
 		}()
 
-		result, err := s.replayService.Execute(replayCtx, nil)
+		ctx := context.Background()
+		result, err := s.replayService.Execute(ctx, nil)
 		if err != nil {
 			slog.Error("replay failed", "error", err)
 		} else {
@@ -643,11 +630,8 @@ func (s *Server) handleCDCReplayStop(c *xun.Context) error {
 	if s.stateManager.Current() != core.StateReplay {
 		return c.View(map[string]any{"success": false, "error": "no replay is running"})
 	}
-	// Cancel the replay context if stored
-	if s.replayCancel != nil {
-		s.replayCancel()
-		s.replayCancel = nil
-	}
+	// Cancel the replay via ReplayService (its internal lock ensures safety)
+	s.replayService.Stop()
 	return c.View(map[string]any{"success": true, "message": "replay stopped", "state": s.stateManager.Current()})
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -25,6 +26,10 @@ type ReplayService struct {
 	dlq          *dlq.DLQ
 	monitorDB    *monitor.DB
 	stateManager *core.StateManager // State coordination with Poller/Snapshot
+
+	// runningCancel is the cancel func of the currently running replay (nil if not running)
+	runningCancel context.CancelFunc
+	runningMu     sync.Mutex
 }
 
 // NewReplayService creates a new ReplayService.
@@ -39,8 +44,28 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 }
 
 // Execute replays all CDC changes from the store in LSN order.
+// Returns error if a replay is already running.
 // Caller (server.go) manages state via StateManager.Set().
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
+	// Check if replay is already running
+	r.runningMu.Lock()
+	if r.runningCancel != nil {
+		r.runningMu.Unlock()
+		return nil, fmt.Errorf("replay is already running")
+	}
+
+	// Create cancellable context for this replay
+	replayCtx, cancel := context.WithCancel(ctx)
+	r.runningCancel = cancel
+	r.runningMu.Unlock()
+
+	// Ensure we clear runningCancel when done
+	defer func() {
+		r.runningMu.Lock()
+		r.runningCancel = nil
+		r.runningMu.Unlock()
+	}()
+
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
@@ -51,11 +76,6 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 		slog.Info("no changes to replay")
 		return &ReplayResult{}, nil
 	}
-
-	// Create cancellable context
-	// Note: State is managed by caller (server.go) using Set(StateReplay/Set(StatePolling))
-	replayCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	slog.Info("starting replay", "lsn_count", len(lsns))
 
@@ -240,4 +260,18 @@ func (r *ReplayService) writeToDLQ(tx *core.Transaction, handlerErr error, lsn s
 		"table", tableName,
 		"operation", operation,
 		"lsn", lsn)
+}
+
+// Stop cancels the currently running replay if any.
+// Returns true if a replay was stopped, false if no replay was running.
+func (r *ReplayService) Stop() bool {
+	r.runningMu.Lock()
+	defer r.runningMu.Unlock()
+
+	if r.runningCancel == nil {
+		return false
+	}
+	r.runningCancel()
+	r.runningCancel = nil
+	return true
 }
