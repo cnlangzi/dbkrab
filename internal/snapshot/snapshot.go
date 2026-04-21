@@ -14,19 +14,23 @@ import (
 	scannerpkg "github.com/cnlangzi/dbkrab/internal/scanner"
 )
 
-// Config holds configuration for snapshot sync
+// Config holds configuration for snapshot sync operations.
+// BatchSize determines how many rows are fetched per batch during snapshot.
 type Config struct {
+	// BatchSize is the number of rows to fetch per batch (default: 10000).
 	BatchSize int `yaml:"batch_size"`
 }
 
-// DefaultConfig returns default snapshot configuration
+// DefaultConfig returns the default snapshot configuration with BatchSize=10000.
 func DefaultConfig() *Config {
 	return &Config{
 		BatchSize: 10000,
 	}
 }
 
-// Querier performs full-table snapshot sync (initial sync without CDC)
+// Querier performs full-table snapshot sync (initial sync without CDC).
+// It reads all rows from a table using snapshot isolation and converts them
+// to core.Change records for downstream processing.
 type Querier struct {
 	db       *sql.DB
 	timezone *time.Location
@@ -34,7 +38,9 @@ type Querier struct {
 	config   *Config
 }
 
-// NewQuerier creates a new snapshot Querier
+// NewQuerier creates a new snapshot Querier with the given database connection,
+// timezone for timestamp conversion, and optional configuration.
+// If config is nil, DefaultConfig() is used.
 func NewQuerier(db *sql.DB, timezone *time.Location, config *Config) *Querier {
 	if config == nil {
 		config = DefaultConfig()
@@ -47,7 +53,8 @@ func NewQuerier(db *sql.DB, timezone *time.Location, config *Config) *Querier {
 	}
 }
 
-// PrimaryKeyInfo holds primary key column information for a table
+// PrimaryKeyInfo holds primary key column information for pagination queries.
+// Columns are ordered by key_ordinal from sys.index_columns.
 type PrimaryKeyInfo struct {
 	Columns []string // Column names in key ordinal order
 }
@@ -93,7 +100,7 @@ func (q *Querier) DiscoverPrimaryKey(ctx context.Context, schema, table string) 
 	return &PrimaryKeyInfo{Columns: pkColumns}, nil
 }
 
-// BuildOrderBy builds ORDER BY clause from PK columns
+// BuildOrderBy builds ORDER BY clause from PK columns for pagination queries.
 func (pki *PrimaryKeyInfo) BuildOrderBy() string {
 	return strings.Join(pki.Columns, ", ")
 }
@@ -156,7 +163,8 @@ func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) 
 	return nextLSN, err
 }
 
-// Batch represents a batch of rows from snapshot
+// Batch represents a batch of rows fetched during snapshot pagination.
+// HasMore indicates whether more rows exist beyond the current batch.
 type Batch struct {
 	Table   string
 	Offset  int
@@ -319,32 +327,36 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler
 	return startLSN, nil
 }
 
-// Handler processes snapshot batches through skill pipeline and sink
+// Handler processes snapshot batches through skill pipeline and sink.
+// Implementations should handle each batch of core.Change records.
 type Handler interface {
 	HandleBatch(ctx context.Context, changes []core.Change) error
 }
 
-// HandlerFunc is a function type adapter for Handler
+// HandlerFunc is a function type adapter that allows using ordinary
+// functions as Handler implementations.
 type HandlerFunc func(ctx context.Context, changes []core.Change) error
 
-// HandleBatch implements Handler interface
+// HandleBatch implements the Handler interface by calling the function itself.
 func (f HandlerFunc) HandleBatch(ctx context.Context, changes []core.Change) error {
 	return f(ctx, changes)
 }
 
-// OffsetUpdater updates offset storage after snapshot completes
+// OffsetUpdater updates offset storage after snapshot completes.
+// It persists the LSN checkpoint so subsequent CDC sync can resume correctly.
 type OffsetUpdater interface {
 	Set(table string, lastLSN string, nextLSN string) error
 	Flush() error
 }
 
-// Runner coordinates full snapshot run with offset update
+// Runner coordinates full snapshot run with offset update.
+// It runs the snapshot querier and persists the resulting LSN checkpoint.
 type Runner struct {
 	querier     *Querier
 	offsetStore OffsetUpdater
 }
 
-// NewRunner creates a new snapshot Runner
+// NewRunner creates a new snapshot Runner with the given querier and offset store.
 func NewRunner(querier *Querier, offsetStore OffsetUpdater) *Runner {
 	return &Runner{
 		querier:     querier,
@@ -352,8 +364,9 @@ func NewRunner(querier *Querier, offsetStore OffsetUpdater) *Runner {
 	}
 }
 
-// RunFull runs snapshot for a table and updates offset store on success
-// schema should be like "dbo", table is the table name without schema
+// RunFull runs snapshot for a table and updates offset store on success.
+// The schema parameter should be like "dbo", and table is the table name without schema.
+// After snapshot completes, the LSN checkpoint is stored so CDC can resume.
 func (r *Runner) RunFull(ctx context.Context, schema, table string, handler Handler) error {
 	fullTableName := schema + "." + table
 

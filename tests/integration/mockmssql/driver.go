@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -115,7 +116,8 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	case "SELECT sys.fn_cdc_get_min_lsn('dbo_TestOrderItems')":
 		return &mockResult{rowsAffected: 1}, nil
 	default:
-		return &mockResult{rowsAffected: 0}, nil
+		// Fail on unsupported SQL to catch regressions
+		return nil, fmt.Errorf("mockmssql: unsupported Exec query: %s", query)
 	}
 }
 
@@ -159,13 +161,16 @@ func (c *conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 				values:  [][]interface{}{},
 			}, nil
 		}
+		// Check for primary key discovery query
+		if strings.Contains(query, "sys.index_columns") && strings.Contains(query, "is_primary_key = 1") {
+			return &rows{
+				columns: []string{"column_name"},
+				values:  [][]interface{}{{"ProductID"}},
+			}, nil
+		}
+		// Fail on unsupported SQL to catch regressions
+		return nil, fmt.Errorf("mockmssql: unsupported Query: %s", query)
 	}
-
-	// Default: return empty result
-	return &rows{
-		columns: []string{},
-		values:  [][]interface{}{},
-	}, nil
 }
 
 // tx implements driver.Tx

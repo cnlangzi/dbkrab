@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrimaryKeyInfo_BuildOrderBy(t *testing.T) {
@@ -185,7 +186,8 @@ func TestNewQuerier_WithDefaults(t *testing.T) {
 }
 
 func TestNewQuerier_Timezone(t *testing.T) {
-	loc, _ := time.LoadLocation("Asia/Shanghai")
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err, "Failed to load timezone")
 	q := NewQuerier(nil, loc, nil)
 
 	if q.timezone != loc {
