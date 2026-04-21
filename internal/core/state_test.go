@@ -85,7 +85,7 @@ func TestStateManager_CanStart(t *testing.T) {
 func TestStateManager_Metadata(t *testing.T) {
 	sm := NewStateManager()
 
-	// Set metadata
+	// Set metadata while idle
 	sm.SetMetadata("processed", 10)
 	sm.SetMetadata("total", 100)
 
@@ -104,11 +104,11 @@ func TestStateManager_Metadata(t *testing.T) {
 		t.Errorf("internal metadata should not be affected by external modification")
 	}
 
-	// Set to idle clears metadata
+	// Set to same state (idle) clears metadata (StateIdle always clears)
 	sm.Set(StateIdle)
 	metadata = sm.Metadata()
 	if len(metadata) != 0 {
-		t.Errorf("expected metadata to be empty after idle, got %v", metadata)
+		t.Errorf("expected metadata to be empty after Set(idle), got %v", metadata)
 	}
 }
 
@@ -126,12 +126,11 @@ func TestStateManager_MetadataDuringOperation(t *testing.T) {
 		t.Errorf("expected processed=50, got %v", metadata["processed"])
 	}
 
-	// After operation completes, set to polling
-	sm.Set(StatePolling)
+	// After operation completes, set to idle - metadata cleared
+	sm.Set(StateIdle)
 
-	// Metadata should NOT be cleared (only idle clears it)
 	metadata = sm.Metadata()
-	if metadata["processed"] != 50 {
-		t.Errorf("metadata should persist during polling state, got %v", metadata["processed"])
+	if len(metadata) != 0 {
+		t.Errorf("metadata should be cleared after idle, got %v", metadata)
 	}
 }

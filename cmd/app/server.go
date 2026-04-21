@@ -64,6 +64,7 @@ type Server struct {
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	replayService   *replay.ReplayService // Replay service (in separate package)
 	poller          *core.Poller        // CDC poller reference
+	replayCancel    context.CancelFunc  // Cancel func for in-flight replay
 }
 
 // NewServer creates a new API server with all features
@@ -583,17 +584,35 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 }
 
 // handleCDCReplay handles POST /api/cdc/replay
-// Directly set StateReplay - Poller will detect and pause itself.
+// Sets StateReplay so Poller will pause, then runs replay in a goroutine.
+// Only one replay can run at a time (enforced by CanStart check).
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
-	// Set state to replay first - Poller will detect and skip
+	// Check if replay (or other non-idle operation) is already running
+	if !s.stateManager.CanStart(core.StateReplay) {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("cannot start replay: current state is %s", s.stateManager.Current()),
+			"state":   s.stateManager.Current(),
+		})
+	}
+
+	// Create cancellable context for replay
+	replayCtx, cancel := context.WithCancel(context.Background())
+	s.replayCancel = cancel // Store so stop can cancel it
+
+	// Set state to replay - Poller will detect and skip processing
 	s.stateManager.Set(core.StateReplay)
 
 	go func() {
-		ctx := context.Background()
-		result, err := s.replayService.Execute(ctx, nil)
+		defer func() {
+			s.replayCancel = nil
+			s.stateManager.Set(core.StateIdle)
+		}()
+
+		result, err := s.replayService.Execute(replayCtx, nil)
 		if err != nil {
 			slog.Error("replay failed", "error", err)
 		} else {
@@ -603,8 +622,6 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 				"failed", result.FailedLSNs,
 				"total_changes", result.TotalChanges)
 		}
-		// Always reset to polling after replay (success or failure)
-		s.stateManager.Set(core.StatePolling)
 	}()
 	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
 }
@@ -621,12 +638,16 @@ func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
 }
 
 // handleCDCReplayStop handles POST /api/cdc/replay/stop
-// Directly set StatePolling to resume Poller.
+// Cancels the in-flight replay context and resets state to idle.
 func (s *Server) handleCDCReplayStop(c *xun.Context) error {
 	if s.stateManager.Current() != core.StateReplay {
 		return c.View(map[string]any{"success": false, "error": "no replay is running"})
 	}
-	s.stateManager.Set(core.StatePolling)
+	// Cancel the replay context if stored
+	if s.replayCancel != nil {
+		s.replayCancel()
+		s.replayCancel = nil
+	}
 	return c.View(map[string]any{"success": true, "message": "replay stopped", "state": s.stateManager.Current()})
 }
 

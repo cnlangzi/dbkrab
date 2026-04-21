@@ -276,9 +276,10 @@ func (p *Poller) SetReloadChan(ch <-chan *config.Config) {
 // If StateManager is set, it registers StatePolling.
 // During polling, it skips processing when state changes to Replay/Snapshot.
 func (p *Poller) Start(ctx context.Context) error {
-	// Register polling state (no CanStart check - just set it)
+	// Register polling state
 	if p.stateManager != nil {
 		p.stateManager.Set(StatePolling)
+		defer p.stateManager.Set(StateIdle) // Reset on exit
 	}
 
 	// Load existing offsets

@@ -58,20 +58,23 @@ func (sm *StateManager) CanStart(want RunState) bool {
 // Set directly sets the state without checking.
 // Used by operations that want to "take over" (e.g., Replay when Poller is running).
 // Other operations will detect the state change and pause themselves.
-// Setting StateIdle always clears metadata.
+// StateIdle always clears metadata. Non-idle state transitions also clear metadata.
 func (sm *StateManager) Set(state RunState) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	old := sm.state
 
-	// Always clear metadata when going to idle
+	// StateIdle always clears metadata (even if already idle)
 	if state == StateIdle {
+		sm.metadata = make(map[string]any)
+	} else if old != state {
+		// Non-idle state transition also clears metadata to prevent stale data
 		sm.metadata = make(map[string]any)
 	}
 
 	if old == state {
-		return // No state change, but metadata cleared if idle
+		return // No state change
 	}
 
 	sm.state = state
