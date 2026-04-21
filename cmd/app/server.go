@@ -204,9 +204,9 @@ func (s *Server) registerAPIRoutes() {
 	if s.store != nil {
 		api.Get("/cdc/changes", s.handleCDCChanges, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
-		// CDC replay routes
-		api.Post("/cdc/replay", s.handleCDCReplay, xun.WithViewer(&xun.JsonViewer{}))
-		api.Get("/cdc/replay/status", s.handleCDCReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
+		// Replay routes
+		api.Post("/replay", s.handleReplay, xun.WithViewer(&xun.JsonViewer{}))
+		api.Get("/replay/status", s.handleReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC changes/status routes registered")
 	} else {
 		slog.Warn("CDC changes/status routes skipped - store is nil")
@@ -581,34 +581,27 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 	return c.View(response)
 }
 
-// handleCDCReplay handles POST /api/cdc/replay
-// Execute manages state transitions. Starts replay in goroutine (long-running task).
-// If replay is already running, returns immediately without error.
-func (s *Server) handleCDCReplay(c *xun.Context) error {
+// handleReplay handles POST /api/replay - starts replay (long-running, async)
+func (s *Server) handleReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
 
-	// Try to start replay in goroutine (Execute has singleton lock)
-	go func() {
-		result, err := s.replayService.Execute(context.Background(), nil)
-		if err != nil {
-			slog.Error("replay failed", "error", err)
-		} else if result != nil {
-			slog.Info("replay completed",
-				"total_lsns", result.TotalLSNs,
-				"processed", result.ProcessedLSNs,
-				"failed", result.FailedLSNs,
-				"total_changes", result.TotalChanges)
-		}
-	}()
+	// Execute starts replay in goroutine, returns immediately
+	result, err := s.replayService.Execute(context.Background(), nil)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+	if result == nil {
+		// result is nil means replay was already running
+		return c.View(map[string]any{"success": true, "message": "replay already running", "state": s.stateManager.Current()})
+	}
 
-	// Return immediately - client polls /cdc/replay/status for progress
 	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
 }
 
-// handleCDCReplayStatus handles GET /api/cdc/replay/status
-func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
+// handleReplayStatus handles GET /api/replay/status
+func (s *Server) handleReplayStatus(c *xun.Context) error {
 	metadata := s.stateManager.Metadata()
 	return c.View(map[string]any{
 		"success": true,

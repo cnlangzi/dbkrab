@@ -43,8 +43,8 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 	}
 }
 
-// Execute replays all CDC changes from the store in LSN order.
-// If a replay is already running, returns immediately (nil, nil) without error.
+// Execute starts replay in a goroutine and returns immediately.
+// Returns (nil, nil) if replay is already running.
 // This function manages StateReplay/StateIdle transitions.
 // Replay runs to completion - there is no stop functionality.
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
@@ -57,30 +57,39 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	// Create a context that will never be cancelled (replay runs to completion)
 	runningCtx, cancel := context.WithCancel(context.Background())
-	_ = cancel // cancel is never called
 	r.runningCancel = cancel
 	r.runningMu.Unlock()
-
-	// Ensure we clear runningCancel and state when done
-	defer func() {
-		r.runningMu.Lock()
-		r.runningCancel = nil
-		r.runningMu.Unlock()
-		r.stateManager.Set(core.StateIdle)
-	}()
 
 	// Set state to replay - Poller will detect and skip processing
 	r.stateManager.Set(core.StateReplay)
 
+	// Start replay in goroutine
+	go func() {
+		defer func() {
+			r.runningMu.Lock()
+			r.runningCancel = nil
+			r.runningMu.Unlock()
+			r.stateManager.Set(core.StateIdle)
+		}()
+
+		r.runReplay(runningCtx, progressCb)
+	}()
+
+	return nil, nil // Started successfully
+}
+
+// runReplay does the actual replay work. Called from goroutine.
+func (r *ReplayService) runReplay(ctx context.Context, progressCb ProgressCallback) {
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get LSNs: %w", err)
+		slog.Error("replay failed to get LSNs", "error", err)
+		return
 	}
 
 	if len(lsns) == 0 {
 		slog.Info("no changes to replay")
-		return &ReplayResult{}, nil
+		return
 	}
 
 	slog.Info("starting replay", "lsn_count", len(lsns))
@@ -92,7 +101,7 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	// Process each LSN in order (no cancellation - runs to completion)
 	for i, lsn := range lsns {
-		lsnResult, err := r.replayLSN(runningCtx, lsn, result, batchCtx)
+		lsnResult, err := r.replayLSN(ctx, lsn, result, batchCtx)
 		if err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
@@ -147,8 +156,6 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 		"processed", result.ProcessedLSNs,
 		"failed", result.FailedLSNs,
 		"total_changes", result.TotalChanges)
-
-	return result, nil
 }
 
 // replayLSN replays all changes for a specific LSN
