@@ -582,32 +582,29 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 }
 
 // handleCDCReplay handles POST /api/cdc/replay
-// Execute manages state transitions. Returns immediately if already running.
+// Execute manages state transitions. Starts replay in goroutine (long-running task).
+// If replay is already running, returns immediately without error.
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
 
-	// Execute returns (nil, nil) if replay is already running
-	result, err := s.replayService.Execute(context.Background(), nil)
-	if err != nil {
-		return c.View(map[string]any{"success": false, "error": err.Error()})
-	}
-	if result == nil {
-		return c.View(map[string]any{
-			"success":     true,
-			"message":     "replay already running",
-			"state":       s.stateManager.Current(),
-			"replayState": "already_running",
-		})
-	}
+	// Try to start replay in goroutine (Execute has singleton lock)
+	go func() {
+		result, err := s.replayService.Execute(context.Background(), nil)
+		if err != nil {
+			slog.Error("replay failed", "error", err)
+		} else if result != nil {
+			slog.Info("replay completed",
+				"total_lsns", result.TotalLSNs,
+				"processed", result.ProcessedLSNs,
+				"failed", result.FailedLSNs,
+				"total_changes", result.TotalChanges)
+		}
+	}()
 
-	slog.Info("replay completed",
-		"total_lsns", result.TotalLSNs,
-		"processed", result.ProcessedLSNs,
-		"failed", result.FailedLSNs,
-		"total_changes", result.TotalChanges)
-	return c.View(map[string]any{"success": true, "message": "replay completed", "state": s.stateManager.Current()})
+	// Return immediately - client polls /cdc/replay/status for progress
+	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
 }
 
 // handleCDCReplayStatus handles GET /api/cdc/replay/status
