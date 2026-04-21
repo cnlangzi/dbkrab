@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"io"
+	"strings"
 )
 
 // Driver implements database/sql/driver.Driver
@@ -264,7 +265,7 @@ func normalizeQuery(query string) string {
 		}
 		result += string(c)
 	}
-	return result
+	return strings.TrimSpace(result)
 }
 
 func init() {

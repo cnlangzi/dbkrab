@@ -166,7 +166,7 @@ func TestIntegrationWithSQLite(t *testing.T) {
 	mockDB := setupMockDB(t)
 	defer func() { _ = mockDB.Close() }()
 
-	// Setup real SQLite store
+	// Setup real SQLite store (migrations are run automatically by store.New)
 	sqliteDB, cleanupSQLite := setupSQLiteTestDB(t)
 	defer cleanupSQLite()
 
@@ -212,12 +212,9 @@ func TestIntegrationWithSQLite(t *testing.T) {
 			}
 		}
 
-		// Try to write to SQLite store (this may fail due to schema, but that's expected)
+		// Write to SQLite store (schema should exist after Migrate)
 		_, err = storeWrapper.Write(coreChanges)
-		if err != nil {
-			// Schema might not exist - this is OK for integration test
-			t.Logf("Expected schema error: %v", err)
-		}
+		require.NoError(t, err, "Failed to write changes to SQLite store")
 
 		// Test offset store
 		err = offsetStore.Set("dbo.TestProducts", "000000000100000001", "000000000100000002")
@@ -307,7 +304,7 @@ func TestCDCChangeTypes(t *testing.T) {
 
 // TestSQLiteStoreWrites verifies that real SQLite store can write data
 func TestSQLiteStoreWrites(t *testing.T) {
-	// Setup real SQLite store
+	// Setup real SQLite store (migrations are run automatically by store.New)
 	sqliteDB, cleanupSQLite := setupSQLiteTestDB(t)
 	defer cleanupSQLite()
 
@@ -332,13 +329,9 @@ func TestSQLiteStoreWrites(t *testing.T) {
 		},
 	}
 
-	// Write to store
+	// Write to store (schema should exist after Migrate)
 	count, err := storeWrapper.Write(changes)
-	if err != nil {
-		// Schema might not exist - create it
-		t.Logf("Store write error (may need schema): %v", err)
-	} else {
-		assert.Equal(t, 1, count, "Should write 1 change")
-		t.Logf("Successfully wrote %d changes to SQLite", count)
-	}
+	require.NoError(t, err, "Failed to write changes to SQLite store")
+	assert.Equal(t, 1, count, "Should write 1 change")
+	t.Logf("Successfully wrote %d changes to SQLite", count)
 }
