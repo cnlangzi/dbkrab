@@ -218,8 +218,11 @@ func main() {
 	}()
 	slog.Info("config watcher initialized", "path", *configPath)
 
+	// Create StateManager for process-level coordination
+	stateManager := core.NewStateManager()
+
 	// Create poller with dynamic plugin support
-	poller := core.NewPoller(cfg, mssqlDB, pluginManager, appStore, offsetStore, dlqStore, monitorDB)
+	poller := core.NewPoller(cfg, mssqlDB, pluginManager, appStore, offsetStore, dlqStore, monitorDB, stateManager)
 
 	// Set config reload channel for hot reload
 	poller.SetReloadChan(configWatcher.ReloadChan())
@@ -264,7 +267,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, *configPath, cfg, configWatcher, poller, poller)
+	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, *configPath, cfg, configWatcher, stateManager, poller)
 	go func() {
 		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
 		if err := apiServer.Start(); err != nil {

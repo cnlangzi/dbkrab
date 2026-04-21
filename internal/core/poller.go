@@ -121,6 +121,9 @@ type Poller struct {
 	metricsMu     sync.RWMutex       // protects metrics
 	metrics       PollMetrics        // last poll metrics
 	metricsWindow *pollMetricsWindow // 1-minute sliding window (~60 samples at 1s interval)
+
+	// State coordination
+	stateManager *StateManager // Process-level state coordination with Replay/Snapshot
 }
 
 // Store interface for storing changes
@@ -222,12 +225,14 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 	return nil, nil
 }
 
-// NewPoller creates a new poller
-func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB) *Poller {
+// NewPoller creates a new poller.
+// stateManager is required for process-level coordination with Replay/Snapshot.
+func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB, stateManager *StateManager) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
+		stateManager:  stateManager,
 		handler:       handler,
 		cfg:           cfg,
 		db:            db,
@@ -267,8 +272,24 @@ func (p *Poller) SetReloadChan(ch <-chan *config.Config) {
 	p.reloadCh = ch
 }
 
-// Start begins polling
+// Start begins polling.
+// If StateManager is set, it checks state and registers before starting.
 func (p *Poller) Start(ctx context.Context) error {
+	// Check state coordination
+	if p.stateManager != nil {
+		if !p.stateManager.CanStart(StatePolling) {
+			return fmt.Errorf("cannot start poller: current state is %s", p.stateManager.Current())
+		}
+		// Create cancellable context and register
+		pollCtx, cancel := context.WithCancel(ctx)
+		if err := p.stateManager.Start(StatePolling, cancel); err != nil {
+			cancel()
+			return err
+		}
+		ctx = pollCtx
+		defer p.stateManager.Stop()
+	}
+
 	// Load existing offsets
 	if err := p.offsets.Load(); err != nil {
 		return fmt.Errorf("load offsets: %w", err)
