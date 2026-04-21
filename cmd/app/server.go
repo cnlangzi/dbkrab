@@ -595,7 +595,7 @@ func (s *Server) handleReplay(c *xun.Context) error {
 
 	// Execute returns (nil, nil) if already running, or (nil, nil) on success
 	// Both cases: replay started (or already running), tell client to poll status
-	return c.View(map[string]any{"success": true, "message": "replay started", "replayState": "running"})
+	return c.View(map[string]any{"success": true, "message": "replay started", "state": "replay"})
 }
 
 // handleReplayStatus handles GET /api/replay/status
