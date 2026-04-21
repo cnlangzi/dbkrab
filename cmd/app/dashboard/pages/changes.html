@@ -481,7 +481,7 @@ function startReplay() {
         Starting...
     `;
 
-    fetch('/api/cdc/replay', { method: 'POST' })
+    fetch('/api/replay', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
@@ -536,7 +536,7 @@ function stopReplayPolling() {
 }
 
 function checkReplayStatus() {
-    fetch('/api/cdc/replay/status')
+    fetch('/api/replay/status')
         .then(r => r.json())
         .then(data => {
             if (data.success) {
