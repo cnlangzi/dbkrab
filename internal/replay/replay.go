@@ -43,43 +43,34 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 	}
 }
 
-// CanStart returns true if a replay can be started (none currently running).
-// Also returns a result if a replay is already in progress (for progress tracking).
-func (r *ReplayService) CanStart(ctx context.Context) (bool, error) {
-	r.runningMu.Lock()
-	defer r.runningMu.Unlock()
-
-	if r.runningCancel != nil {
-		return false, nil // Already running
-	}
-	return true, nil
-}
-
 // Execute replays all CDC changes from the store in LSN order.
 // If a replay is already running, returns immediately (nil, nil) without error.
-// Caller (server.go) manages state via StateManager.Set().
+// This function manages StateReplay/StateIdle transitions.
 // Replay runs to completion - there is no stop functionality.
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
 	// Check if replay is already running
 	r.runningMu.Lock()
 	if r.runningCancel != nil {
 		r.runningMu.Unlock()
-		// Already running - return immediately without error
-		// Caller can query progress via Metadata()
-		return nil, nil
+		return nil, nil // Already running
 	}
 
-	// Create context for this replay (no cancellation - runs to completion)
-	runningCtx, cancel := context.WithCancel(ctx)
+	// Create a context that will never be cancelled (replay runs to completion)
+	runningCtx, cancel := context.WithCancel(context.Background())
+	_ = cancel // cancel is never called
 	r.runningCancel = cancel
 	r.runningMu.Unlock()
 
-	// Ensure we clear runningCancel when done
+	// Ensure we clear runningCancel and state when done
 	defer func() {
 		r.runningMu.Lock()
 		r.runningCancel = nil
 		r.runningMu.Unlock()
+		r.stateManager.Set(core.StateIdle)
 	}()
+
+	// Set state to replay - Poller will detect and skip processing
+	r.stateManager.Set(core.StateReplay)
 
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
