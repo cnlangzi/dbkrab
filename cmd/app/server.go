@@ -583,17 +583,14 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 }
 
 // handleCDCReplay handles POST /api/cdc/replay
+// Directly set StateReplay - Poller will detect and pause itself.
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
 	}
-	if !s.stateManager.CanStart(core.StateReplay) {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("cannot start replay: current state is %s", s.stateManager.Current()),
-			"state":   s.stateManager.Current(),
-		})
-	}
+	// Set state to replay first - Poller will detect and skip
+	s.stateManager.Set(core.StateReplay)
+
 	go func() {
 		ctx := context.Background()
 		result, err := s.replayService.Execute(ctx, nil)
@@ -606,6 +603,8 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 				"failed", result.FailedLSNs,
 				"total_changes", result.TotalChanges)
 		}
+		// Always reset to polling after replay (success or failure)
+		s.stateManager.Set(core.StatePolling)
 	}()
 	return c.View(map[string]any{"success": true, "message": "replay started", "state": s.stateManager.Current()})
 }
@@ -622,12 +621,13 @@ func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
 }
 
 // handleCDCReplayStop handles POST /api/cdc/replay/stop
+// Directly set StatePolling to resume Poller.
 func (s *Server) handleCDCReplayStop(c *xun.Context) error {
 	if s.stateManager.Current() != core.StateReplay {
 		return c.View(map[string]any{"success": false, "error": "no replay is running"})
 	}
-	s.stateManager.Stop()
-	return c.View(map[string]any{"success": true, "message": "replay stopped"})
+	s.stateManager.Set(core.StatePolling)
+	return c.View(map[string]any{"success": true, "message": "replay stopped", "state": s.stateManager.Current()})
 }
 
 // Returns GAP status for all tracked tables including LSN info, lag bytes, and duration

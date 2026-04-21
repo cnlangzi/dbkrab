@@ -39,13 +39,8 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 }
 
 // Execute replays all CDC changes from the store in LSN order.
-// Returns error if StateManager indicates non-idle state or replay fails.
+// Caller (server.go) manages state via StateManager.Set().
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
-	// Check state before starting
-	if !r.stateManager.CanStart(core.StateReplay) {
-		return nil, fmt.Errorf("cannot start replay: current state is %s", r.stateManager.Current())
-	}
-
 	// Get all unique LSNs from store
 	lsns, err := r.store.GetLSNs()
 	if err != nil {
@@ -57,15 +52,10 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 		return &ReplayResult{}, nil
 	}
 
-	// Create cancellable context and register with StateManager
+	// Create cancellable context
+	// Note: State is managed by caller (server.go) using Set(StateReplay/Set(StatePolling))
 	replayCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	if err := r.stateManager.Start(core.StateReplay, cancel); err != nil {
-		cancel()
-		return nil, err
-	}
-	defer r.stateManager.Stop()
 
 	slog.Info("starting replay", "lsn_count", len(lsns))
 
@@ -117,7 +107,8 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 	// Write batch_log
 	if r.monitorDB != nil && batchCtx.BatchID != "" {
 		status := monitor.PullStatusSuccess
-		if result.FailedLSNs > 0 {
+		// Mark as partial if: cancelled, incomplete, or had failures
+		if replayCtx.Err() != nil || result.ProcessedLSNs < result.TotalLSNs || result.FailedLSNs > 0 {
 			status = monitor.PullStatusPartial
 		}
 
@@ -178,9 +169,11 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	}, nil
 }
 
-// buildTransaction builds a Transaction from Change slice
+// buildTransaction builds a Transaction from Change slice.
+// All changes are aggregated into a single transaction (one LSN = one target-side transaction).
 func (r *ReplayService) buildTransaction(changes []core.Change) *core.Transaction {
-	txMap := make(map[string]*core.Transaction)
+	tx := core.NewTransaction("")
+	var txID string
 
 	for _, c := range changes {
 		if c.Operation == core.OpUpdateBefore {
@@ -191,23 +184,14 @@ func (r *ReplayService) buildTransaction(changes []core.Change) *core.Transactio
 			continue
 		}
 
-		tx, exists := txMap[c.TransactionID]
-		if !exists {
-			tx = core.NewTransaction(c.TransactionID)
-			txMap[c.TransactionID] = tx
+		if txID == "" {
+			txID = c.TransactionID
+			tx.ID = txID
 		}
 		tx.AddChange(c)
 	}
 
-	if len(txMap) == 0 {
-		return &core.Transaction{ID: "", Changes: []core.Change{}}
-	}
-
-	for _, tx := range txMap {
-		return tx
-	}
-
-	return &core.Transaction{ID: "", Changes: []core.Change{}}
+	return tx
 }
 
 // writeToDLQ writes a failed transaction to DLQ
@@ -227,7 +211,11 @@ func (r *ReplayService) writeToDLQ(tx *core.Transaction, handlerErr error, lsn s
 		"transaction_id": tx.ID,
 		"changes":        tx.Changes,
 	}
-	changeJSON, _ := json.Marshal(txData)
+	changeJSON, err := json.Marshal(txData)
+	if err != nil {
+		slog.Error("failed to marshal transaction for DLQ", "error", err, "tx_id", tx.ID)
+		changeJSON = []byte("{}")
+	}
 
 	entry := &dlq.DLQEntry{
 		TraceID:      tx.TraceID,
