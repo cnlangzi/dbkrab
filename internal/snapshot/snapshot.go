@@ -1,4 +1,4 @@
-package cdc
+package snapshot
 
 import (
 	"context"
@@ -9,38 +9,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/cdc"
+	"github.com/cnlangzi/dbkrab/internal/core"
 	scannerpkg "github.com/cnlangzi/dbkrab/internal/scanner"
 )
 
-// SnapshotConfig holds configuration for snapshot sync
-type SnapshotConfig struct {
+// Config holds configuration for snapshot sync
+type Config struct {
 	BatchSize int `yaml:"batch_size"`
 }
 
-// DefaultSnapshotConfig returns default snapshot configuration
-func DefaultSnapshotConfig() *SnapshotConfig {
-	return &SnapshotConfig{
+// DefaultConfig returns default snapshot configuration
+func DefaultConfig() *Config {
+	return &Config{
 		BatchSize: 10000,
 	}
 }
 
-// SnapshotQuerier performs full-table snapshot sync (initial sync without CDC)
-type SnapshotQuerier struct {
+// Querier performs full-table snapshot sync (initial sync without CDC)
+type Querier struct {
 	db       *sql.DB
 	timezone *time.Location
-	factory  *ScannerFactory
-	config   *SnapshotConfig
+	factory  *cdc.ScannerFactory
+	config   *Config
 }
 
-// NewSnapshotQuerier creates a new SnapshotQuerier
-func NewSnapshotQuerier(db *sql.DB, timezone *time.Location, config *SnapshotConfig) *SnapshotQuerier {
+// NewQuerier creates a new snapshot Querier
+func NewQuerier(db *sql.DB, timezone *time.Location, config *Config) *Querier {
 	if config == nil {
-		config = DefaultSnapshotConfig()
+		config = DefaultConfig()
 	}
-	return &SnapshotQuerier{
+	return &Querier{
 		db:       db,
 		timezone: timezone,
-		factory:  NewScannerFactory(timezone),
+		factory:  cdc.NewScannerFactory(timezone),
 		config:   config,
 	}
 }
@@ -52,7 +54,7 @@ type PrimaryKeyInfo struct {
 
 // DiscoverPrimaryKey discovers primary key columns for a table
 // Uses sys.index_columns / sys.indexes / sys.columns ordered by key_ordinal
-func (q *SnapshotQuerier) DiscoverPrimaryKey(ctx context.Context, schema, table string) (*PrimaryKeyInfo, error) {
+func (q *Querier) DiscoverPrimaryKey(ctx context.Context, schema, table string) (*PrimaryKeyInfo, error) {
 	query := `
 		SELECT c.name AS column_name
 		FROM sys.index_columns ic
@@ -109,7 +111,7 @@ func (pki *PrimaryKeyInfo) BuildPagedQuery(schema, table string, batchSize int, 
 
 // GetMaxLSN returns the current max LSN (outside read transaction)
 // This is used to capture a stable LSN checkpoint before snapshot
-func (q *SnapshotQuerier) GetMaxLSN(ctx context.Context) ([]byte, error) {
+func (q *Querier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	var lsn []byte
 	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_get_max_lsn()").Scan(&lsn)
 	return lsn, err
@@ -117,7 +119,7 @@ func (q *SnapshotQuerier) GetMaxLSN(ctx context.Context) ([]byte, error) {
 
 // CheckSnapshotIsolation checks if ALLOW_SNAPSHOT_ISOLATION is enabled on the database
 // and attempts to enable it if not. Returns error if not supported.
-func (q *SnapshotQuerier) CheckSnapshotIsolation(ctx context.Context) error {
+func (q *Querier) CheckSnapshotIsolation(ctx context.Context) error {
 	// Check current snapshot isolation state
 	var isAllowed int
 	err := q.db.QueryRowContext(ctx, `
@@ -148,24 +150,24 @@ func (q *SnapshotQuerier) CheckSnapshotIsolation(ctx context.Context) error {
 }
 
 // IncrementLSN returns the next LSN after the given one
-func (q *SnapshotQuerier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
+func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
 	var nextLSN []byte
 	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_increment_lsn(@p1)", lsn).Scan(&nextLSN)
 	return nextLSN, err
 }
 
-// SnapshotBatch represents a batch of rows from snapshot
-type SnapshotBatch struct {
+// Batch represents a batch of rows from snapshot
+type Batch struct {
 	Table   string
 	Offset  int
 	Rows    []map[string]interface{}
 	HasMore bool
 }
 
-// RunSnapshot runs a full-table snapshot for the given table
+// Run runs a full-table snapshot for the given table
 // It reads the table in batches and processes each batch through the handler
 // Returns the startLSN checkpoint that should be stored for subsequent CDC sync
-func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string, handler SnapshotHandler) ([]byte, error) {
+func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler) ([]byte, error) {
 	// Step 0: Check and enable snapshot isolation on the database (must be done before starting transaction)
 	if err := q.CheckSnapshotIsolation(ctx); err != nil {
 		return nil, fmt.Errorf("snapshot isolation check: %w", err)
@@ -265,13 +267,13 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 
 		// Process batch if we have rows
 		if len(batchRows) > 0 {
-			// Convert to cdc.Change format for skill pipeline
+			// Convert to core.Change format for skill pipeline
 			// Snapshot rows are treated as INSERT operations
-			changes := make([]Change, len(batchRows))
+			changes := make([]core.Change, len(batchRows))
 			for i, row := range batchRows {
-				changes[i] = Change{
+				changes[i] = core.Change{
 					Table:     table,
-					Operation: 2, // OpInsert = 2
+					Operation: core.OpInsert, // OpInsert = 2
 					Data:      row,
 					// LSN is set to empty bytes for snapshot rows (they don't come from CDC)
 					// The checkpoint is stored after snapshot completes
@@ -280,7 +282,7 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 			}
 
 			// Process batch through handler (skill pipeline + sink)
-			if err := handler.HandleSnapshotBatch(ctx, changes); err != nil {
+			if err := handler.HandleBatch(ctx, changes); err != nil {
 				return nil, fmt.Errorf("handle batch at offset %d: %w", offset, err)
 			}
 
@@ -317,17 +319,16 @@ func (q *SnapshotQuerier) RunSnapshot(ctx context.Context, schema, table string,
 	return startLSN, nil
 }
 
-// SnapshotHandler processes snapshot batches through skill pipeline and sink
-// Uses cdc.Change type to avoid import cycle with core package
-type SnapshotHandler interface {
-	HandleSnapshotBatch(ctx context.Context, changes []Change) error
+// Handler processes snapshot batches through skill pipeline and sink
+type Handler interface {
+	HandleBatch(ctx context.Context, changes []core.Change) error
 }
 
-// SnapshotHandlerFunc is a function type adapter for SnapshotHandler
-type SnapshotHandlerFunc func(ctx context.Context, changes []Change) error
+// HandlerFunc is a function type adapter for Handler
+type HandlerFunc func(ctx context.Context, changes []core.Change) error
 
-// HandleSnapshotBatch implements SnapshotHandler interface
-func (f SnapshotHandlerFunc) HandleSnapshotBatch(ctx context.Context, changes []Change) error {
+// HandleBatch implements Handler interface
+func (f HandlerFunc) HandleBatch(ctx context.Context, changes []core.Change) error {
 	return f(ctx, changes)
 }
 
@@ -337,27 +338,27 @@ type OffsetUpdater interface {
 	Flush() error
 }
 
-// SnapshotRunner coordinates full snapshot run with offset update
-type SnapshotRunner struct {
-	querier     *SnapshotQuerier
+// Runner coordinates full snapshot run with offset update
+type Runner struct {
+	querier     *Querier
 	offsetStore OffsetUpdater
 }
 
-// NewSnapshotRunner creates a new snapshot runner
-func NewSnapshotRunner(querier *SnapshotQuerier, offsetStore OffsetUpdater) *SnapshotRunner {
-	return &SnapshotRunner{
+// NewRunner creates a new snapshot Runner
+func NewRunner(querier *Querier, offsetStore OffsetUpdater) *Runner {
+	return &Runner{
 		querier:     querier,
 		offsetStore: offsetStore,
 	}
 }
 
-// RunFullSnapshot runs snapshot for a table and updates offset store on success
+// RunFull runs snapshot for a table and updates offset store on success
 // schema should be like "dbo", table is the table name without schema
-func (r *SnapshotRunner) RunFullSnapshot(ctx context.Context, schema, table string, handler SnapshotHandler) error {
+func (r *Runner) RunFull(ctx context.Context, schema, table string, handler Handler) error {
 	fullTableName := schema + "." + table
 
 	// Run snapshot and get start LSN checkpoint
-	startLSN, err := r.querier.RunSnapshot(ctx, schema, table, handler)
+	startLSN, err := r.querier.Run(ctx, schema, table, handler)
 	if err != nil {
 		return fmt.Errorf("snapshot run: %w", err)
 	}
