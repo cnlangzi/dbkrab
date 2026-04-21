@@ -43,19 +43,34 @@ func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB
 	}
 }
 
+// CanStart returns true if a replay can be started (none currently running).
+// Also returns a result if a replay is already in progress (for progress tracking).
+func (r *ReplayService) CanStart(ctx context.Context) (bool, error) {
+	r.runningMu.Lock()
+	defer r.runningMu.Unlock()
+
+	if r.runningCancel != nil {
+		return false, nil // Already running
+	}
+	return true, nil
+}
+
 // Execute replays all CDC changes from the store in LSN order.
-// Returns error if a replay is already running.
+// If a replay is already running, returns immediately (nil, nil) without error.
 // Caller (server.go) manages state via StateManager.Set().
+// Replay runs to completion - there is no stop functionality.
 func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback) (*ReplayResult, error) {
 	// Check if replay is already running
 	r.runningMu.Lock()
 	if r.runningCancel != nil {
 		r.runningMu.Unlock()
-		return nil, fmt.Errorf("replay is already running")
+		// Already running - return immediately without error
+		// Caller can query progress via Metadata()
+		return nil, nil
 	}
 
-	// Create cancellable context for this replay
-	replayCtx, cancel := context.WithCancel(ctx)
+	// Create context for this replay (no cancellation - runs to completion)
+	runningCtx, cancel := context.WithCancel(ctx)
 	r.runningCancel = cancel
 	r.runningMu.Unlock()
 
@@ -84,19 +99,9 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 
 	var totalFetchedRows, totalTxCount, totalDLQCount int
 
-	// Process each LSN in order
+	// Process each LSN in order (no cancellation - runs to completion)
 	for i, lsn := range lsns {
-		// Check for cancellation
-		if ctxErr := replayCtx.Err(); ctxErr != nil {
-			slog.Warn("replay cancelled",
-				"error", ctxErr,
-				"processed", result.ProcessedLSNs,
-				"failed", result.FailedLSNs,
-				"total", len(lsns))
-			break
-		}
-
-		lsnResult, err := r.replayLSN(replayCtx, lsn, result, batchCtx)
+		lsnResult, err := r.replayLSN(runningCtx, lsn, result, batchCtx)
 		if err != nil {
 			slog.Error("failed to replay LSN", "lsn", lsn, "index", i+1, "total", len(lsns), "error", err)
 			result.FailedLSNs++
@@ -127,8 +132,8 @@ func (r *ReplayService) Execute(ctx context.Context, progressCb ProgressCallback
 	// Write batch_log
 	if r.monitorDB != nil && batchCtx.BatchID != "" {
 		status := monitor.PullStatusSuccess
-		// Mark as partial if: cancelled, incomplete, or had failures
-		if replayCtx.Err() != nil || result.ProcessedLSNs < result.TotalLSNs || result.FailedLSNs > 0 {
+		// Mark as partial if: incomplete or had failures
+		if result.ProcessedLSNs < result.TotalLSNs || result.FailedLSNs > 0 {
 			status = monitor.PullStatusPartial
 		}
 
@@ -260,18 +265,4 @@ func (r *ReplayService) writeToDLQ(tx *core.Transaction, handlerErr error, lsn s
 		"table", tableName,
 		"operation", operation,
 		"lsn", lsn)
-}
-
-// Stop cancels the currently running replay if any.
-// Returns true if a replay was stopped, false if no replay was running.
-func (r *ReplayService) Stop() bool {
-	r.runningMu.Lock()
-	defer r.runningMu.Unlock()
-
-	if r.runningCancel == nil {
-		return false
-	}
-	r.runningCancel()
-	r.runningCancel = nil
-	return true
 }

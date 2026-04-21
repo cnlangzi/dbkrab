@@ -206,7 +206,6 @@ func (s *Server) registerAPIRoutes() {
 		api.Get("/cdc/status", s.handleCDCStatus, xun.WithViewer(&xun.JsonViewer{}))
 		// CDC replay routes
 		api.Post("/cdc/replay", s.handleCDCReplay, xun.WithViewer(&xun.JsonViewer{}))
-		api.Post("/cdc/replay/stop", s.handleCDCReplayStop, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/cdc/replay/status", s.handleCDCReplayStatus, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("CDC changes/status routes registered")
 	} else {
@@ -585,9 +584,26 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 // handleCDCReplay handles POST /api/cdc/replay
 // Sets StateReplay so Poller will pause, then runs replay in a goroutine.
 // ReplayService ensures only one replay runs at a time.
+// If replay is already running, returns immediately without starting a new one.
 func (s *Server) handleCDCReplay(c *xun.Context) error {
 	if s.store == nil {
 		return c.View(map[string]any{"success": false, "error": "store not initialized"})
+	}
+
+	// Check if replay can start (not already running)
+	ctx := context.Background()
+	canStart, err := s.replayService.CanStart(ctx)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
+	if !canStart {
+		// Replay already running, just return current state
+		return c.View(map[string]any{
+			"success":     true,
+			"message":     "replay already running",
+			"state":       s.stateManager.Current(),
+			"replayState": "already_running",
+		})
 	}
 
 	// Set state to replay - Poller will detect at next cycle and skip processing
@@ -598,11 +614,10 @@ func (s *Server) handleCDCReplay(c *xun.Context) error {
 			s.stateManager.Set(core.StateIdle)
 		}()
 
-		ctx := context.Background()
 		result, err := s.replayService.Execute(ctx, nil)
 		if err != nil {
 			slog.Error("replay failed", "error", err)
-		} else {
+		} else if result != nil {
 			slog.Info("replay completed",
 				"total_lsns", result.TotalLSNs,
 				"processed", result.ProcessedLSNs,
@@ -622,17 +637,6 @@ func (s *Server) handleCDCReplayStatus(c *xun.Context) error {
 		"total":   metadata["total"],
 		"processed": metadata["processed"],
 	})
-}
-
-// handleCDCReplayStop handles POST /api/cdc/replay/stop
-// Cancels the in-flight replay context and resets state to idle.
-func (s *Server) handleCDCReplayStop(c *xun.Context) error {
-	if s.stateManager.Current() != core.StateReplay {
-		return c.View(map[string]any{"success": false, "error": "no replay is running"})
-	}
-	// Cancel the replay via ReplayService (its internal lock ensures safety)
-	s.replayService.Stop()
-	return c.View(map[string]any{"success": true, "message": "replay stopped", "state": s.stateManager.Current()})
 }
 
 // Returns GAP status for all tracked tables including LSN info, lag bytes, and duration
