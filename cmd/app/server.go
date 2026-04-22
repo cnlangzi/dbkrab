@@ -21,6 +21,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
+	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/replay"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 	"github.com/cnlangzi/dbkrab/internal/snapshot"
@@ -83,6 +84,7 @@ func NewServer(
 	watcher *config.Watcher,
 	stateManager *core.StateManager,
 	poller *core.Poller,
+	offsetStore offset.StoreInterface,
 	db *sql.DB,
 ) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
@@ -109,7 +111,7 @@ func NewServer(
 		skillsPath:      skillsPath,
 		replayService:   replaySvc,
 		poller:          poller,
-		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, nil, sinkerMgr),
+		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, offsetStore, sinkerMgr),
 	}
 }
 
@@ -1510,6 +1512,11 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 				})
 			}
 		}
+	}
+
+	// Guard against empty table list
+	if len(tables) == 0 {
+		return c.View(map[string]any{"success": false, "error": "no CDC tables configured"})
 	}
 
 	// Start snapshot
