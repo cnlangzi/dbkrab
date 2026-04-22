@@ -205,21 +205,24 @@ func (s *Sinker) Reset(ctx context.Context) error {
 		"table_count", len(tables))
 
 	// Step 2: Capture original foreign_keys setting and disable for reset.
-	// Use the underlying *sql.DB (bypassing BufferWriter) to ensure PRAGMA
-	// executes immediately outside any buffered transaction.
+	// Use Writer (not raw DB) to stay within the buffer writer's locking.
+	// Flush immediately after so the PRAGMA commits before any DELETE runs.
 	var fkEnabled bool
-	row := s.db.Writer.DB.QueryRowContext(ctx, "PRAGMA foreign_keys")
+	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
 	if err := row.Scan(&fkEnabled); err != nil {
 		return fmt.Errorf("read foreign_keys setting: %w", err)
 	}
 
 	if fkEnabled {
-		if _, err := s.db.Writer.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = off"); err != nil {
+		if _, err := s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = off"); err != nil {
 			return fmt.Errorf("disable foreign keys: %w", err)
+		}
+		if err := s.db.Flush(); err != nil {
+			return fmt.Errorf("flush after disabling foreign keys: %w", err)
 		}
 		// Ensure FK is re-enabled even if context is canceled mid-reset.
 		defer func() {
-			_, _ = s.db.Writer.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = on")
+			_, _ = s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = on")
 		}()
 	}
 
