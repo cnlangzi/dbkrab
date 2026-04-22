@@ -204,17 +204,23 @@ func (s *Sinker) Reset(ctx context.Context) error {
 		"database", s.name,
 		"table_count", len(tables))
 
-	// Step 2: Capture original foreign_keys setting and disable for reset
+	// Step 2: Capture original foreign_keys setting and disable for reset.
+	// Use the underlying *sql.DB (bypassing BufferWriter) to ensure PRAGMA
+	// executes immediately outside any buffered transaction.
 	var fkEnabled bool
-	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
+	row := s.db.Writer.DB.QueryRowContext(ctx, "PRAGMA foreign_keys")
 	if err := row.Scan(&fkEnabled); err != nil {
 		return fmt.Errorf("read foreign_keys setting: %w", err)
 	}
 
 	if fkEnabled {
-		if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = off"); err != nil {
+		if _, err := s.db.Writer.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = off"); err != nil {
 			return fmt.Errorf("disable foreign keys: %w", err)
 		}
+		// Ensure FK is re-enabled even if context is canceled mid-reset.
+		defer func() {
+			_, _ = s.db.Writer.DB.ExecContext(context.Background(), "PRAGMA foreign_keys = on")
+		}()
 	}
 
 	// Step 3: Delete from each table, continuing on per-table errors
@@ -223,8 +229,8 @@ func (s *Sinker) Reset(ctx context.Context) error {
 			"database", s.name,
 			"table", tableName)
 
-		// Use double-quoted identifier (SQLite standard) for safety
-		query := fmt.Sprintf("DELETE FROM %q", tableName)
+		// Use QuoteIdent to properly escape table name (handles backticks, etc.)
+		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
 		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
 			// Log per-table error but continue with remaining tables
 			slog.Error("SQLiteSinker.Reset: failed to clear table, continuing",
@@ -239,14 +245,7 @@ func (s *Sinker) Reset(ctx context.Context) error {
 			"table", tableName)
 	}
 
-	// Step 4: Restore original foreign_keys setting
-	if fkEnabled {
-		if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = on"); err != nil {
-			return fmt.Errorf("re-enable foreign keys: %w", err)
-		}
-	}
-
-	// Step 5: Flush to ensure changes are persisted (non-fatal on failure)
+	// Step 4: Flush to ensure changes are persisted (non-fatal on failure)
 	if err := s.db.Flush(); err != nil {
 		slog.Warn("SQLiteSinker.Reset: flush failed, continuing",
 			"database", s.name,
