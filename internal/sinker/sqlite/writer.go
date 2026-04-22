@@ -167,3 +167,90 @@ func (s *Sinker) Migrate(ctx context.Context) error {
 
 	return nil
 }
+
+// Reset clears all user tables in the sink, disabling foreign key checks
+// during the clear operation and flushing changes to disk upon completion.
+// This is used by snapshot startup to prepare sinks before loading data.
+func (s *Sinker) Reset(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	slog.Info("SQLiteSinker.Reset: starting reset",
+		"database", s.name)
+
+	// Step 1: Query user tables from sqlite_master
+	rows, err := s.db.Writer.QueryContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type='table' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name`)
+	if err != nil {
+		return fmt.Errorf("query tables: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return fmt.Errorf("scan table name: %w", err)
+		}
+		tables = append(tables, tableName)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows iteration: %w", err)
+	}
+
+	slog.Debug("SQLiteSinker.Reset: found tables",
+		"database", s.name,
+		"table_count", len(tables))
+
+	// Step 2: Disable foreign key checks
+	if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = off"); err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
+
+	// Step 3: Delete from each table, continuing on per-table errors
+	var lastErr error
+	for _, tableName := range tables {
+		slog.Debug("SQLiteSinker.Reset: clearing table",
+			"database", s.name,
+			"table", tableName)
+
+		// Use quoted identifier for safety
+		query := fmt.Sprintf("DELETE FROM `%s`", tableName)
+		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
+			// Log per-table error but continue with remaining tables
+			slog.Error("SQLiteSinker.Reset: failed to clear table, continuing",
+				"database", s.name,
+				"table", tableName,
+				"error", err)
+			lastErr = err
+			continue
+		}
+
+		slog.Debug("SQLiteSinker.Reset: cleared table",
+			"database", s.name,
+			"table", tableName)
+	}
+
+	// Step 4: Re-enable foreign keys
+	if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = on"); err != nil {
+		return fmt.Errorf("re-enable foreign keys: %w", err)
+	}
+
+	// Step 5: Flush to ensure changes are persisted (non-fatal on failure)
+	if err := s.db.Flush(); err != nil {
+		slog.Warn("SQLiteSinker.Reset: flush failed, continuing",
+			"database", s.name,
+			"error", err)
+	}
+
+	slog.Info("SQLiteSinker.Reset: completed",
+		"database", s.name,
+		"tables_cleared", len(tables))
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return nil
+}
