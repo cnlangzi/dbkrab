@@ -106,30 +106,33 @@ func (m *Manager) Unload(name string) error {
 // BatchCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
 // Sink logs are written by the sinker for each sink write (per sink × table × operation).
+// Returns error if no SQL plugin is loaded (no skill pipeline available).
 func (m *Manager) Handle(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if m.sqlPlugin == nil {
+		return fmt.Errorf("no SQL plugin loaded, skill pipeline unavailable")
+	}
+
 	var allSinks []core.Sink
 
-	if m.sqlPlugin != nil {
-		// Reconstruct transaction from changes for compatibility with existing SQL plugin
-		batchID := ""
-		if batchCtx != nil {
-			batchID = batchCtx.BatchID
-		}
-		tx := &core.Transaction{
-			ID:      batchID,
-			Changes: changes,
-		}
-		// Process transaction through SQL plugin
-		// Skill logs are written internally by engine.HandleWithPull
-		sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
-		if err != nil {
-			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
-		}
-		allSinks = append(allSinks, sinks...)
+	// Reconstruct transaction from changes for compatibility with existing SQL plugin
+	batchID := ""
+	if batchCtx != nil {
+		batchID = batchCtx.BatchID
 	}
+	tx := &core.Transaction{
+		ID:      batchID,
+		Changes: changes,
+	}
+	// Process transaction through SQL plugin
+	// Skill logs are written internally by engine.HandleWithPull
+	sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
+	if err != nil {
+		return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
+	}
+	allSinks = append(allSinks, sinks...)
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
@@ -182,6 +185,36 @@ func (m *Manager) HasSQLPlugins() bool {
 // HasWASMPlugins returns true if any WASM plugins are loaded
 func (m *Manager) HasWASMPlugins() bool {
 	return false
+}
+
+// ListDatabases returns all configured database names from the sink manager
+func (m *Manager) ListDatabases() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil
+	}
+	return m.swManager.ListDatabases()
+}
+
+// GetSinker returns a Sinker for the given database name
+func (m *Manager) GetSinker(dbName string) (sinker.Sinker, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil, fmt.Errorf("sink manager not initialized for %s", dbName)
+	}
+	return m.swManager.GetSinker(dbName)
+}
+
+// QueryTables returns the list of tables in a sink database
+func (m *Manager) QueryTables(dbName string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil, fmt.Errorf("sink manager not initialized for %s", dbName)
+	}
+	return m.swManager.QueryTables(dbName)
 }
 
 // PluginInfo contains plugin metadata (used by API)
