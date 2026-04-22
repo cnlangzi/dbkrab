@@ -13,7 +13,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
-	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/plugin"
 )
 
 // SnapshotProgress holds the current state of a snapshot operation.
@@ -36,7 +36,7 @@ type SnapshotService struct {
 	stateManager *core.StateManager
 	querier      *Querier
 	offsetStore  offset.StoreInterface
-	sinkerMgr    *sinker.Manager
+	pluginMgr    *plugin.Manager
 	db           *sql.DB
 	progress     SnapshotProgress
 	cancelFunc   context.CancelFunc
@@ -48,14 +48,14 @@ func NewSnapshotService(
 	db *sql.DB,
 	timezone *time.Location,
 	offsetStore offset.StoreInterface,
-	sinkerMgr *sinker.Manager,
+	pluginMgr *plugin.Manager,
 ) *SnapshotService {
 	querier := NewQuerier(db, timezone, nil)
 	return &SnapshotService{
 		stateManager: stateManager,
 		querier:      querier,
 		offsetStore:  offsetStore,
-		sinkerMgr:    sinkerMgr,
+		pluginMgr:    pluginMgr,
 		db:           db,
 		progress:     SnapshotProgress{State: "idle"},
 	}
@@ -146,7 +146,7 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 		slog.Info("snapshot: processing table", "table", s.progress.CurrentTable, "progress", i+1, "/", len(tables))
 
 		// Create handler for this table
-		handler := NewSnapshotHandler(s.sinkerMgr, table.Name)
+		handler := NewSnapshotHandler(s.pluginMgr, table.Name)
 
 		// Run snapshot for this table
 		startLSN, err := s.querier.Run(ctx, table.Schema, table.Name, handler)
@@ -213,8 +213,8 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable) error {
 	slog.Info("snapshot: clearing sink tables")
 
-	// Get all sink names from sinker manager
-	sinkNames := s.sinkerMgr.ListDatabases()
+	// Get all sink names from plugin manager (which exposes sinker operations)
+	sinkNames := s.pluginMgr.ListDatabases()
 	if len(sinkNames) == 0 {
 		slog.Warn("snapshot: no sinks configured, skipping clear")
 		return nil
@@ -222,14 +222,14 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 
 	// For each sink, truncate all tables
 	for _, sinkName := range sinkNames {
-		sinker, err := s.sinkerMgr.GetSinker(sinkName)
+		sink, err := s.pluginMgr.GetSinker(sinkName)
 		if err != nil {
 			slog.Warn("snapshot: failed to get sinker", "sink", sinkName, "error", err)
 			continue
 		}
 
 		// Get tables in this sink
-		sinkTables, err := s.sinkerMgr.QueryTables(sinkName)
+		sinkTables, err := s.pluginMgr.QueryTables(sinkName)
 		if err != nil {
 			slog.Warn("snapshot: failed to query tables", "sink", sinkName, "error", err)
 			continue
@@ -240,7 +240,7 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 			// Build full table name (without schema, just table name)
 			// Sink tables are typically created with just the original table name
 			query := fmt.Sprintf("DELETE FROM %s", tableName)
-			if err := sinker.ExecContext(ctx, query); err != nil {
+			if err := sink.ExecContext(ctx, query); err != nil {
 				slog.Warn("snapshot: failed to clear table", "sink", sinkName, "table", tableName, "error", err)
 				// Continue with other tables
 			} else {
@@ -252,76 +252,34 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 	return nil
 }
 
-// SnapshotHandler handles snapshot batches by writing to sink.
+// SnapshotHandler handles snapshot batches by writing to sink through plugin manager.
 type SnapshotHandler struct {
-	sinkerMgr *sinker.Manager
+	pluginMgr *plugin.Manager
 	tableName string
 }
 
 // NewSnapshotHandler creates a new SnapshotHandler.
-func NewSnapshotHandler(sinkerMgr *sinker.Manager, tableName string) *SnapshotHandler {
+func NewSnapshotHandler(pluginMgr *plugin.Manager, tableName string) *SnapshotHandler {
 	return &SnapshotHandler{
-		sinkerMgr: sinkerMgr,
+		pluginMgr: pluginMgr,
 		tableName: tableName,
 	}
 }
 
-// HandleBatch processes a batch of changes from snapshot.
+// HandleBatch processes a batch of changes from snapshot through the plugin pipeline.
+// This routes changes through skills so that sink metadata (e.g., PrimaryKey) is properly set.
 func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
 	if len(changes) == 0 {
 		return nil
 	}
 
-	sinkNames := h.sinkerMgr.ListDatabases()
-	if len(sinkNames) == 0 {
-		return fmt.Errorf("no sinks configured")
-	}
+	// Create batch context for observability
+	batchCtx := core.NewBatchContext()
 
-	// Group changes by sink (in practice, we write to all sinks)
-	for _, sinkName := range sinkNames {
-		sinker, err := h.sinkerMgr.GetSinker(sinkName)
-		if err != nil {
-			return fmt.Errorf("get sinker %s: %w", sinkName, err)
-		}
-
-		// Convert changes to sink ops
-		// First pass: determine columns from first change
-		firstChange := changes[0]
-		columns := make([]string, 0, len(firstChange.Data))
-		for col := range firstChange.Data {
-			columns = append(columns, col)
-		}
-
-		// Build rows
-		rows := make([][]interface{}, 0, len(changes))
-		for _, change := range changes {
-			row := make([]interface{}, 0, len(change.Data))
-			for _, col := range columns {
-				if val, ok := change.Data[col]; ok {
-					row = append(row, val)
-				} else {
-					row = append(row, nil)
-				}
-			}
-			rows = append(rows, row)
-		}
-
-		dataSet := &core.DataSet{
-			Columns: columns,
-			Rows:    rows,
-		}
-
-		op := core.Sink{
-			OpType:  core.OpInsert,
-			Config:  core.SinkConfig{Output: h.tableName},
-			DataSet: dataSet,
-		}
-		ops := []core.Sink{op}
-
-		// Write to sink
-		if err := sinker.Write(ctx, ops); err != nil {
-			return fmt.Errorf("write to sink %s: %w", sinkName, err)
-		}
+	// Route changes through plugin.Manager.Handle which processes them through skills
+	// and then writes to sinks with proper SinkConfig (including PrimaryKey)
+	if err := h.pluginMgr.Handle(ctx, changes, batchCtx); err != nil {
+		return fmt.Errorf("plugin handle: %w", err)
 	}
 
 	return nil

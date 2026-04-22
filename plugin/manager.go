@@ -184,6 +184,36 @@ func (m *Manager) HasWASMPlugins() bool {
 	return false
 }
 
+// ListDatabases returns all configured database names from the sink manager
+func (m *Manager) ListDatabases() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil
+	}
+	return m.swManager.ListDatabases()
+}
+
+// GetSinker returns a Sinker for the given database name
+func (m *Manager) GetSinker(dbName string) (sinker.Sinker, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil, fmt.Errorf("sink manager not initialized")
+	}
+	return m.swManager.GetSinker(dbName)
+}
+
+// QueryTables returns the list of tables in a sink database
+func (m *Manager) QueryTables(dbName string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.swManager == nil {
+		return nil, fmt.Errorf("sink manager not initialized")
+	}
+	return m.swManager.QueryTables(dbName)
+}
+
 // PluginInfo contains plugin metadata (used by API)
 type PluginInfo struct {
 	Name     string    `json:"name"` // YAML name field

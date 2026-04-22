@@ -111,7 +111,7 @@ func NewServer(
 		skillsPath:      skillsPath,
 		replayService:   replaySvc,
 		poller:          poller,
-		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, offsetStore, sinkerMgr),
+		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, offsetStore, manager),
 	}
 }
 
