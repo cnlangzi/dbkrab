@@ -18,6 +18,9 @@ type Sinker interface {
 	// Write writes a batch of sink operations to the sink with context for timeout/cancellation
 	Write(ctx context.Context, ops []core.Sink) error
 
+	// ExecContext executes a raw SQL query (used for table maintenance like TRUNCATE/DELETE)
+	ExecContext(ctx context.Context, query string) error
+
 	// Migrate runs the migration for this sinker's database.
 	// It re-discovers and re-applies migrations from the configured migrations path.
 	Migrate(ctx context.Context) error

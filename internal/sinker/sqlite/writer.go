@@ -79,6 +79,12 @@ func (s *Sinker) Write(ctx context.Context, ops []core.Sink) error {
 	return nil
 }
 
+// ExecContext executes a raw SQL query
+func (s *Sinker) ExecContext(ctx context.Context, query string) error {
+	_, err := s.db.Writer.ExecContext(ctx, query)
+	return err
+}
+
 func (s *Sinker) writeOp(ctx context.Context, tx sqliteutil.TxExec, op core.Sink) error {
 	config := sqliteutil.TableConfig{
 		Output:     op.Config.Output,
