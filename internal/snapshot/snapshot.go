@@ -120,15 +120,35 @@ func (pki *PrimaryKeyInfo) BuildOrderBy() string {
 	return strings.Join(pki.Columns, ", ")
 }
 
-// BuildPagedQuery builds a paginated SELECT query using OFFSET/FETCH
-// Uses lexicographic ordering by PK columns
+// BuildPagedQuery builds a paginated SELECT query using TOP + ROW_NUMBER()
+// Orders by primary key for stable pagination
 func (pki *PrimaryKeyInfo) BuildPagedQuery(schema, table string, batchSize int, offset int) string {
-	orderBy := pki.BuildOrderBy()
+	// Build ORDER BY clause from primary key columns
+	orderBy := ""
+	if len(pki.Columns) > 0 {
+		orderBy = "ORDER BY " + strings.Join(pki.Columns, ", ")
+	}
+
+	if offset == 0 {
+		// First batch: simple TOP with ORDER BY
+		if orderBy != "" {
+			return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s %s; SET ROWCOUNT 0`, batchSize, schema, table, orderBy)
+		}
+		return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s; SET ROWCOUNT 0`, batchSize, schema, table)
+	}
+
+	// Subsequent batches: use ROW_NUMBER() with ORDER BY
+	orderClause := "(SELECT NULL)"
+	if orderBy != "" {
+		orderClause = strings.TrimPrefix(orderBy, "ORDER BY ")
+	}
 	return fmt.Sprintf(`
-		SELECT * FROM %s.%s
-		ORDER BY %s
-		OFFSET %d ROWS FETCH FIRST %d ROWS ONLY
-	`, schema, table, orderBy, offset, batchSize)
+		SELECT * FROM (
+			SELECT *, ROW_NUMBER() OVER(%s) AS _rn
+			FROM %s.%s
+		) AS _page
+		WHERE _rn > %d AND _rn <= %d
+	`, orderClause, schema, table, offset, offset+batchSize)
 }
 
 // GetMaxLSN returns the current max LSN (outside read transaction)

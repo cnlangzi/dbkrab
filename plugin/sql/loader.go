@@ -99,6 +99,13 @@ func (l *Loader) Load(file string) (*Skill, error) {
 	skill.File = file
 	skill.Id = hashFile(file)
 
+	// Compute OnLower for all sinks (performance optimization)
+	for i := range skill.Sinks {
+		if skill.Sinks[i].On != "" {
+			skill.Sinks[i].OnLower = strings.ToLower(skill.Sinks[i].On)
+		}
+	}
+
 	// Load external SQL files (skillDir is the directory containing the skill.yml)
 	skillDir := filepath.Dir(skillPath)
 	if err := l.loadSQLFiles(&skill, skillDir); err != nil {
