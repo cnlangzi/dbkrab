@@ -181,7 +181,7 @@ func (s *Sinker) Reset(ctx context.Context) error {
 	// Step 1: Query user tables from sqlite_master
 	rows, err := s.db.Writer.QueryContext(ctx, `
 		SELECT name FROM sqlite_master
-		WHERE type='table' AND name NOT LIKE 'sqlite_%'
+		WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'sqle_%'
 		ORDER BY name`)
 	if err != nil {
 		return fmt.Errorf("query tables: %w", err)
