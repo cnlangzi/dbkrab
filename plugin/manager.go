@@ -106,30 +106,33 @@ func (m *Manager) Unload(name string) error {
 // BatchCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
 // Sink logs are written by the sinker for each sink write (per sink × table × operation).
+// Returns error if no SQL plugin is loaded (no skill pipeline available).
 func (m *Manager) Handle(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if m.sqlPlugin == nil {
+		return fmt.Errorf("no SQL plugin loaded, skill pipeline unavailable")
+	}
+
 	var allSinks []core.Sink
 
-	if m.sqlPlugin != nil {
-		// Reconstruct transaction from changes for compatibility with existing SQL plugin
-		batchID := ""
-		if batchCtx != nil {
-			batchID = batchCtx.BatchID
-		}
-		tx := &core.Transaction{
-			ID:      batchID,
-			Changes: changes,
-		}
-		// Process transaction through SQL plugin
-		// Skill logs are written internally by engine.HandleWithPull
-		sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
-		if err != nil {
-			return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
-		}
-		allSinks = append(allSinks, sinks...)
+	// Reconstruct transaction from changes for compatibility with existing SQL plugin
+	batchID := ""
+	if batchCtx != nil {
+		batchID = batchCtx.BatchID
 	}
+	tx := &core.Transaction{
+		ID:      batchID,
+		Changes: changes,
+	}
+	// Process transaction through SQL plugin
+	// Skill logs are written internally by engine.HandleWithPull
+	sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
+	if err != nil {
+		return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
+	}
+	allSinks = append(allSinks, sinks...)
 
 	// Route sinks to appropriate writers based on Database field
 	if len(allSinks) > 0 {
