@@ -2,7 +2,10 @@ package snapshot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,5 +259,99 @@ func TestRunner_GetNonExistentOffset(t *testing.T) {
 	_, _, ok := store.Get("dbo.non_existent")
 	if ok {
 		t.Error("should not find non-existent offset")
+	}
+}
+
+// mockDBForTxOptions tests that BeginTx is called with correct options.
+// SQL Server rejects snapshot isolation + ReadOnly:true combination,
+// so the code must use ReadOnly:false (or omit it) when using LevelSnapshot.
+type mockDBForTxOptions struct {
+	beginTxCalled    bool
+	beginTxOptions   *sql.TxOptions
+	beginTxErr       error
+}
+
+func (m *mockDBForTxOptions) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	m.beginTxCalled = true
+	m.beginTxOptions = opts
+	if m.beginTxErr != nil {
+		return nil, m.beginTxErr
+	}
+	// Simulate SQL Server behavior: snapshot isolation + ReadOnly:true is rejected.
+	if opts != nil && opts.Isolation == sql.LevelSnapshot && opts.ReadOnly {
+		return nil, fmt.Errorf("read-only transactions are not supported")
+	}
+	// Return a minimal mock tx
+	return &sql.Tx{}, nil
+}
+
+func (m *mockDBForTxOptions) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return nil, nil
+}
+
+func (m *mockDBForTxOptions) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	return &sql.Row{}
+}
+
+func (m *mockDBForTxOptions) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return nil, nil
+}
+
+// TestBeginTxWithSnapshotIsolation_NoReadOnly verifies that:
+// 1. The production snapshotTxOptions() returns correct options (ReadOnly:false).
+// 2. Those options do NOT trigger the SQL Server rejection error when passed to BeginTx.
+// This guards against a regression where snapshotTxOptions() is changed to ReadOnly:true.
+func TestBeginTxWithSnapshotIsolation_NoReadOnly(t *testing.T) {
+	// First: verify production snapshotTxOptions() returns the correct format.
+	opts := snapshotTxOptions()
+	if opts.Isolation != sql.LevelSnapshot {
+		t.Errorf("Isolation = %v, want sql.LevelSnapshot", opts.Isolation)
+	}
+	if opts.ReadOnly != false {
+		t.Errorf("ReadOnly = %v, want false (must NOT be true for SQL Server snapshot)", opts.ReadOnly)
+	}
+
+	// Second: verify those options don't trigger the SQL Server rejection.
+	mock := &mockDBForTxOptions{}
+	_, err := mock.BeginTx(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("BeginTx with production snapshotTxOptions() should not fail: %v", err)
+	}
+}
+
+// TestBeginTxWithSnapshotIsolation_ErrorsOnReadOnly verifies that the mock
+// correctly rejects the ReadOnly:true + LevelSnapshot combination.
+// The mock now checks opts in BeginTx (not a static error), so this test
+// proves the conditional rejection logic works: ReadOnly:true → error.
+func TestBeginTxWithSnapshotIsolation_ErrorsOnReadOnly(t *testing.T) {
+	mock := &mockDBForTxOptions{}
+
+	// Pass ReadOnly:true + LevelSnapshot — the buggy combination that SQL Server rejects.
+	_, err := mock.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelSnapshot,
+		ReadOnly:  true,
+	})
+
+	if err == nil {
+		t.Fatal("expected error when using ReadOnly:true with snapshot, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "read-only transactions are not supported") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "read-only transactions are not supported")
+	}
+}
+
+// TestSnapshotTransactionOptions_CorrectFormat verifies the production
+// snapshotTxOptions() function returns the correct TxOptions format for
+// snapshot isolation. This guards against a future regression where
+// snapshotTxOptions() is accidentally changed.
+func TestSnapshotTransactionOptions_CorrectFormat(t *testing.T) {
+	opts := snapshotTxOptions()
+
+	if opts.Isolation != sql.LevelSnapshot {
+		t.Errorf("Isolation = %v, want sql.LevelSnapshot", opts.Isolation)
+	}
+	if opts.ReadOnly != false {
+		t.Errorf("ReadOnly = %v, want false (SQL Server rejects ReadOnly:true with snapshot)", opts.ReadOnly)
 	}
 }
