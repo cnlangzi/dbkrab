@@ -213,6 +213,10 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable) error {
 	slog.Info("snapshot: clearing sink tables")
 
+	if s.pluginMgr == nil {
+		return fmt.Errorf("snapshot plugin manager not initialized")
+	}
+
 	// Get all sink names from plugin manager (which exposes sinker operations)
 	sinkNames := s.pluginMgr.ListDatabases()
 	if len(sinkNames) == 0 {
@@ -271,6 +275,10 @@ func NewSnapshotHandler(pluginMgr *plugin.Manager, tableName string) *SnapshotHa
 func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
 	if len(changes) == 0 {
 		return nil
+	}
+
+	if h.pluginMgr == nil {
+		return fmt.Errorf("snapshot plugin manager not initialized")
 	}
 
 	// Create batch context for observability

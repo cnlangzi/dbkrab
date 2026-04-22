@@ -199,7 +199,7 @@ func (m *Manager) GetSinker(dbName string) (sinker.Sinker, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.swManager == nil {
-		return nil, fmt.Errorf("sink manager not initialized")
+		return nil, fmt.Errorf("sink manager not initialized for %s", dbName)
 	}
 	return m.swManager.GetSinker(dbName)
 }
@@ -209,7 +209,7 @@ func (m *Manager) QueryTables(dbName string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.swManager == nil {
-		return nil, fmt.Errorf("sink manager not initialized")
+		return nil, fmt.Errorf("sink manager not initialized for %s", dbName)
 	}
 	return m.swManager.QueryTables(dbName)
 }
