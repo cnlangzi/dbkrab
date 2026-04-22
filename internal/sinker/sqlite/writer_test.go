@@ -601,8 +601,15 @@ CREATE TABLE IF NOT EXISTS orders (
 	err = sinker.Reset(context.Background())
 	assert.NoError(t, err, "Reset should succeed")
 
-	// Verify tables are empty by checking row count
-	// (This would require a query method, so we just verify Reset doesn't error)
+	// Verify both tables are empty after Reset
+	var usersCount, ordersCount int
+	err = sinker.db.Writer.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM users").Scan(&usersCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, usersCount, "users table should be empty after Reset")
+
+	err = sinker.db.Writer.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM orders").Scan(&ordersCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, ordersCount, "orders table should be empty after Reset")
 }
 
 // TestSinker_Reset_ContinueOnTableError verifies that Reset continues
