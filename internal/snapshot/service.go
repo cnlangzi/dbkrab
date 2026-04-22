@@ -91,8 +91,8 @@ func (s *SnapshotService) Start(ctx context.Context, tables []CDCTable) error {
 	}
 	s.mu.Unlock()
 
-	// Create cancellable context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create cancellable context based on the passed-in context
+	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancelFunc = cancel
 	s.mu.Unlock()
