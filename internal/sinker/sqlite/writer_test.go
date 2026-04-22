@@ -624,7 +624,15 @@ CREATE TABLE IF NOT EXISTS orders (
 	require.NoError(t, err)
 	defer func() { _ = sinker.Close() }()
 
-	// Insert data
+	// Add a trigger that will cause DELETE on users to fail
+	_, err = sinker.db.Writer.ExecContext(context.Background(), `
+		CREATE TRIGGER users_delete_trigger BEFORE DELETE ON users BEGIN
+			SELECT RAISE(ABORT, 'cannot delete from users');
+		END;
+	`)
+	require.NoError(t, err, "trigger creation should succeed")
+
+	// Insert data into both tables
 	ops := []core.Sink{
 		{
 			Config: core.SinkConfig{
@@ -654,10 +662,16 @@ CREATE TABLE IF NOT EXISTS orders (
 	err = sinker.Write(context.Background(), ops)
 	require.NoError(t, err)
 
-	// Reset should not return an error even if one table fails to clear.
-	// We can't easily inject a failure, but the implementation continues on error.
+	// Reset should NOT return an error even though users DELETE will fail due to trigger.
+	// Reset should catch the per-table error, log it, continue clearing orders, and return nil.
 	err = sinker.Reset(context.Background())
-	assert.NoError(t, err, "Reset should complete even if per-table errors occur")
+	assert.NoError(t, err, "Reset should return nil even if per-table DELETE fails - it continues and returns nil")
+
+	// Verify orders was cleared despite users DELETE failure
+	var ordersCount int
+	err = sinker.db.Writer.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM orders").Scan(&ordersCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, ordersCount, "orders table should be cleared even though users DELETE failed")
 }
 
 // TestSinker_Reset_EmptyDatabase verifies that Reset works on a database

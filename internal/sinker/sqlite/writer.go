@@ -210,7 +210,6 @@ func (s *Sinker) Reset(ctx context.Context) error {
 	}
 
 	// Step 3: Delete from each table, continuing on per-table errors
-	var lastErr error
 	for _, tableName := range tables {
 		slog.Debug("SQLiteSinker.Reset: clearing table",
 			"database", s.name,
@@ -224,7 +223,6 @@ func (s *Sinker) Reset(ctx context.Context) error {
 				"database", s.name,
 				"table", tableName,
 				"error", err)
-			lastErr = err
 			continue
 		}
 
@@ -249,8 +247,5 @@ func (s *Sinker) Reset(ctx context.Context) error {
 		"database", s.name,
 		"tables_cleared", len(tables))
 
-	if lastErr != nil {
-		return lastErr
-	}
 	return nil
 }
