@@ -209,7 +209,7 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 	slog.Info("snapshot: all tables completed")
 }
 
-// clearSinkTables truncates all sink tables for the given CDC tables.
+// clearSinkTables clears all sink tables for the given CDC tables.
 func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable) error {
 	slog.Info("snapshot: clearing sink tables")
 
@@ -217,34 +217,31 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 		return fmt.Errorf("snapshot plugin manager not initialized")
 	}
 
-	// Get all sink names from plugin manager (which exposes sinker operations)
+	// Get all sink names from plugin manager
 	sinkNames := s.pluginMgr.ListDatabases()
 	if len(sinkNames) == 0 {
 		slog.Warn("snapshot: no sinks configured, skipping clear")
 		return nil
 	}
 
-	// For each sink, truncate all tables
+	// For each sink, call Reset to clear all tables
 	for _, sinkName := range sinkNames {
 		sink, err := s.pluginMgr.GetSinker(sinkName)
 		if err != nil {
-			return fmt.Errorf("snapshot: failed to get sinker %s: %w", sinkName, err)
+			slog.Warn("snapshot: failed to get sinker, skipping",
+				"sink", sinkName,
+				"error", err)
+			continue
 		}
 
-		// Get tables in this sink
-		sinkTables, err := s.pluginMgr.QueryTables(sinkName)
-		if err != nil {
-			return fmt.Errorf("snapshot: failed to query tables for sink %s: %w", sinkName, err)
+		if err := sink.Reset(ctx); err != nil {
+			slog.Warn("snapshot: failed to reset sink, continuing with other sinks",
+				"sink", sinkName,
+				"error", err)
+			continue
 		}
 
-		// Truncate each table
-		for _, tableName := range sinkTables {
-			query := fmt.Sprintf("DELETE FROM %s", tableName)
-			if err := sink.ExecContext(ctx, query); err != nil {
-				return fmt.Errorf("snapshot: failed to clear table %s in sink %s: %w", tableName, sinkName, err)
-			}
-			slog.Info("snapshot: cleared table", "sink", sinkName, "table", tableName)
-		}
+		slog.Info("snapshot: cleared sink", "sink", sinkName)
 	}
 
 	return nil
