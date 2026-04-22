@@ -28,6 +28,21 @@ func DefaultConfig() *Config {
 	}
 }
 
+// snapshotTxOptions returns the sql.TxOptions for starting a snapshot transaction.
+// Callers should pass the returned *sql.TxOptions to db.BeginTx.
+//
+// NOTE: ReadOnly is intentionally set to false (not omitted). On SQL Server
+// (mssql-go driver), combining sql.LevelSnapshot with ReadOnly:true causes
+// "read-only transactions are not supported" at BeginTx. Snapshot isolation
+// already provides MVCC consistent reads, so ReadOnly is not needed and
+// would trigger the error. See: https://docs.microsoft.com/en-us/sql/t-sql/statements/set-transaction-isolation-level-transact-sql
+func snapshotTxOptions() *sql.TxOptions {
+	return &sql.TxOptions{
+		Isolation: sql.LevelSnapshot,
+		ReadOnly:  false,
+	}
+}
+
 // Querier performs full-table snapshot sync (initial sync without CDC).
 // It reads all rows from a table using snapshot isolation and converts them
 // to core.Change records for downstream processing.
@@ -195,12 +210,9 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler
 	}
 	slog.Debug("snapshot: discovered PK", "table", table, "columns", pkInfo.Columns)
 
-	// Step 3: Start a read-only transaction with snapshot isolation for consistent reads
-	// This ensures we get a stable view of the table during snapshot
-	tx, err := q.db.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelSnapshot, // Use SNAPSHOT isolation for MVCC consistency
-		ReadOnly:  true,
-	})
+	// Step 3: Start a transaction with snapshot isolation for consistent reads.
+	// This ensures we get a stable view of the table during snapshot.
+	tx, err := q.db.BeginTx(ctx, snapshotTxOptions())
 	if err != nil {
 		return nil, fmt.Errorf("begin snapshot transaction: %w", err)
 	}
