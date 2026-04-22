@@ -12,6 +12,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
 )
 
@@ -30,11 +31,11 @@ type SnapshotProgress struct {
 
 // SnapshotService manages snapshot operations with singleton behavior.
 type SnapshotService struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	running      bool
 	stateManager *core.StateManager
 	querier      *Querier
-	offsetStore  OffsetUpdater
+	offsetStore  offset.StoreInterface
 	sinkerMgr    *sinker.Manager
 	db           *sql.DB
 	progress     SnapshotProgress
@@ -46,7 +47,7 @@ func NewSnapshotService(
 	stateManager *core.StateManager,
 	db *sql.DB,
 	timezone *time.Location,
-	offsetStore OffsetUpdater,
+	offsetStore offset.StoreInterface,
 	sinkerMgr *sinker.Manager,
 ) *SnapshotService {
 	querier := NewQuerier(db, timezone, nil)
@@ -62,8 +63,8 @@ func NewSnapshotService(
 
 // GetProgress returns the current snapshot progress.
 func (s *SnapshotService) GetProgress() SnapshotProgress {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.progress
 }
 
@@ -91,14 +92,14 @@ func (s *SnapshotService) Start(ctx context.Context, tables []CDCTable) error {
 	}
 	s.mu.Unlock()
 
-	// Create cancellable context based on the passed-in context
-	ctx, cancel := context.WithCancel(ctx)
+	// Create cancellable context detached from HTTP/2 request context
+	_, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	s.cancelFunc = cancel
 	s.mu.Unlock()
 
 	// Run snapshot in background
-	go s.runSnapshot(ctx, tables)
+	go s.runSnapshot(context.Background(), tables)
 
 	return nil
 }
@@ -335,14 +336,16 @@ type CDCTable struct {
 // GetCDCTables returns the list of CDC-enabled tables from config.
 func GetCDCTables(cfg *config.Config) []CDCTable {
 	tables := make([]CDCTable, 0, len(cfg.Tables))
-	for _, t := range cfg.Tables {
+	for i, t := range cfg.Tables {
 		parts := strings.SplitN(t, ".", 2)
-		if len(parts) == 2 {
-			tables = append(tables, CDCTable{
-				Schema: parts[0],
-				Name:   parts[1],
-			})
+		if len(parts) != 2 {
+			slog.Warn("snapshot: skipped malformed table entry", "index", i, "entry", t)
+			continue
 		}
+		tables = append(tables, CDCTable{
+			Schema: parts[0],
+			Name:   parts[1],
+		})
 	}
 	return tables
 }
