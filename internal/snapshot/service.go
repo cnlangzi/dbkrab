@@ -228,28 +228,22 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 	for _, sinkName := range sinkNames {
 		sink, err := s.pluginMgr.GetSinker(sinkName)
 		if err != nil {
-			slog.Warn("snapshot: failed to get sinker", "sink", sinkName, "error", err)
-			continue
+			return fmt.Errorf("snapshot: failed to get sinker %s: %w", sinkName, err)
 		}
 
 		// Get tables in this sink
 		sinkTables, err := s.pluginMgr.QueryTables(sinkName)
 		if err != nil {
-			slog.Warn("snapshot: failed to query tables", "sink", sinkName, "error", err)
-			continue
+			return fmt.Errorf("snapshot: failed to query tables for sink %s: %w", sinkName, err)
 		}
 
 		// Truncate each table
 		for _, tableName := range sinkTables {
-			// Build full table name (without schema, just table name)
-			// Sink tables are typically created with just the original table name
 			query := fmt.Sprintf("DELETE FROM %s", tableName)
 			if err := sink.ExecContext(ctx, query); err != nil {
-				slog.Warn("snapshot: failed to clear table", "sink", sinkName, "table", tableName, "error", err)
-				// Continue with other tables
-			} else {
-				slog.Info("snapshot: cleared table", "sink", sinkName, "table", tableName)
+				return fmt.Errorf("snapshot: failed to clear table %s in sink %s: %w", tableName, sinkName, err)
 			}
+			slog.Info("snapshot: cleared table", "sink", sinkName, "table", tableName)
 		}
 	}
 
