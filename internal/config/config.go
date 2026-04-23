@@ -257,16 +257,16 @@ func Load(path string) (*Config, error) {
 	if cfg.Logging.Path == "" {
 		cfg.Logging.Path = "./logs/dbkrab.log"
 	}
-	if cfg.Logging.MaxSizeMB == 0 {
+	if cfg.Logging.MaxSizeMB <= 0 {
 		cfg.Logging.MaxSizeMB = 100
 	}
-	if cfg.Logging.MaxAgeDays == 0 {
+	if cfg.Logging.MaxAgeDays <= 0 {
 		cfg.Logging.MaxAgeDays = 7
 	}
-	if cfg.Logging.MaxFiles == 0 {
+	if cfg.Logging.MaxFiles <= 0 {
 		cfg.Logging.MaxFiles = 4
 	}
-	// compress defaults to false if not specified
+	// Compress defaults to false if not specified
 
 	// Generate sink IDs (12-char hash based on name+path)
 	for i := range cfg.Sinks {
