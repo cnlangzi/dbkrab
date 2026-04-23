@@ -271,7 +271,11 @@ func Load(path string) (*Config, error) {
 		slog.Warn("logging.max_files is invalid, using default", "value", cfg.Logging.MaxFiles, "default", 4)
 		cfg.Logging.MaxFiles = 4
 	}
-	// Compress defaults to false if not specified
+	if cfg.Logging.Compress == nil {
+		slog.Warn("logging.compress not configured, using default", "default", true)
+		t := true
+		cfg.Logging.Compress = &t
+	}
 
 	// Generate sink IDs (12-char hash based on name+path)
 	for i := range cfg.Sinks {
