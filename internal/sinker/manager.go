@@ -40,6 +40,44 @@ func (m *Manager) Configure(dbConfigs map[string]config.SinkConfig) {
 	m.dbConfigs = dbConfigs
 }
 
+// InitAll initializes all configured sinks and runs their migrations.
+// This should be called during startup to ensure all sink databases exist
+// and are migrated before any CDC processing begins.
+func (m *Manager) InitAll(ctx context.Context) error {
+	m.mu.RLock()
+	configs := make(map[string]config.SinkConfig, len(m.dbConfigs))
+	for k, v := range m.dbConfigs {
+		configs[k] = v
+	}
+	m.mu.RUnlock()
+
+	if len(configs) == 0 {
+		slog.Debug("sinker.Manager.InitAll: no sinks configured")
+		return nil
+	}
+
+	slog.Info("sinker.Manager.InitAll: initializing all sinks", "count", len(configs))
+
+	for name, cfg := range configs {
+		slog.Info("sinker.Manager.InitAll: initializing sink", "name", name, "type", cfg.Type)
+
+		sinker, err := m.GetSinker(name)
+		if err != nil {
+			return fmt.Errorf("get sinker %s: %w", name, err)
+		}
+
+		// Run migrations to ensure database file is created and tables exist
+		if err := sinker.Migrate(ctx); err != nil {
+			return fmt.Errorf("migrate sinker %s: %w", name, err)
+		}
+
+		slog.Info("sinker.Manager.InitAll: sink initialized", "name", name)
+	}
+
+	slog.Info("sinker.Manager.InitAll: all sinks initialized", "count", len(configs))
+	return nil
+}
+
 // GetSinker returns a Sinker for the given database name, creating one if needed
 func (m *Manager) GetSinker(dbName string) (Sinker, error) {
 	m.mu.RLock()
