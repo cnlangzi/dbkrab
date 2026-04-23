@@ -252,18 +252,23 @@ func Load(path string) (*Config, error) {
 
 	// Logging defaults
 	if cfg.Logging.Level == "" {
+		slog.Warn("logging.level not configured, using default", "default", "info")
 		cfg.Logging.Level = "info"
 	}
 	if cfg.Logging.Path == "" {
+		slog.Warn("logging.path not configured, using default", "default", "./logs/dbkrab.log")
 		cfg.Logging.Path = "./logs/dbkrab.log"
 	}
 	if cfg.Logging.MaxSizeMB <= 0 {
+		slog.Warn("logging.max_size_mb is invalid, using default", "value", cfg.Logging.MaxSizeMB, "default", 100)
 		cfg.Logging.MaxSizeMB = 100
 	}
 	if cfg.Logging.MaxAgeDays <= 0 {
+		slog.Warn("logging.max_age_days is invalid, using default", "value", cfg.Logging.MaxAgeDays, "default", 7)
 		cfg.Logging.MaxAgeDays = 7
 	}
 	if cfg.Logging.MaxFiles <= 0 {
+		slog.Warn("logging.max_files is invalid, using default", "value", cfg.Logging.MaxFiles, "default", 4)
 		cfg.Logging.MaxFiles = 4
 	}
 	// Compress defaults to false if not specified
