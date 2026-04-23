@@ -16,7 +16,7 @@ type LoggingConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"` // 100MB
 	MaxAgeDays int    `yaml:"max_age_days"` // 7
 	MaxFiles   int    `yaml:"max_files"`    // 4
-	Compress   bool   `yaml:"compress"`     // gzip, defaults to true
+	Compress   bool   `yaml:"compress"`     // gzip, defaults to false
 }
 
 // Init initializes the global slog logger with a lumberjack file handler.
