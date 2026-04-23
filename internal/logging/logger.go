@@ -2,6 +2,7 @@
 package logging
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func Init(cfg LoggingConfig) error {
 	// Ensure log directory exists
 	logDir := filepath.Dir(cfg.Path)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return err
+		return fmt.Errorf("creating log directory %s: %w", logDir, err)
 	}
 
 	lumberjackLogger := &lumberjack.Logger{
