@@ -85,7 +85,7 @@ func (w *Watcher) Start() {
 				}
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Chmod) {
 					slog.Info("config file changed, reloading...", "path", w.path)
-					newCfg, err := Load(w.path)
+					newCfg, _, err := Load(w.path)
 					if err != nil {
 						slog.Error("failed to reload config", "error", err)
 						continue

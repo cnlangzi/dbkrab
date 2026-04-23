@@ -37,7 +37,7 @@ func main() {
 	flag.Parse()
 
 	// Load config
-	cfg, err := config.Load(*configPath)
+	cfg, warnings, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
@@ -47,6 +47,11 @@ func main() {
 	if err := logging.Init(cfg.Logging); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logging: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Emit config warnings now that logging is initialized
+	for _, w := range warnings {
+		slog.Warn(w)
 	}
 
 	// Connect to MSSQL

@@ -161,15 +161,15 @@ type RecoveryConfig struct {
 	Strategy string `yaml:"strategy"` // snapshot | timestamp | manual
 }
 
-func Load(path string) (*Config, error) {
+func Load(path string) (*Config, []string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Set defaults
@@ -250,28 +250,30 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	var warnings []string
+
 	// Logging defaults
 	if cfg.Logging.Level == "" {
+		warnings = append(warnings, "logging.level not configured, using default: info")
 		cfg.Logging.Level = "info"
 	}
-	if cfg.Logging.File.Path == "" {
-		cfg.Logging.File.Path = "./logs/dbkrab.log"
+	if cfg.Logging.Path == "" {
+		warnings = append(warnings, "logging.path not configured, using default: ./logs/dbkrab.log")
+		cfg.Logging.Path = "./logs/dbkrab.log"
 	}
-	if cfg.Logging.File.MaxSizeMB == 0 {
-		cfg.Logging.File.MaxSizeMB = 100
+	if cfg.Logging.MaxSizeMB <= 0 {
+		warnings = append(warnings, fmt.Sprintf("logging.max_size_mb is invalid (%d), using default: 100", cfg.Logging.MaxSizeMB))
+		cfg.Logging.MaxSizeMB = 100
 	}
-	if cfg.Logging.File.MaxAgeDays == 0 {
-		cfg.Logging.File.MaxAgeDays = 7
+	if cfg.Logging.MaxAgeDays <= 0 {
+		warnings = append(warnings, fmt.Sprintf("logging.max_age_days is invalid (%d), using default: 7", cfg.Logging.MaxAgeDays))
+		cfg.Logging.MaxAgeDays = 7
 	}
-	if cfg.Logging.File.MaxFiles == 0 {
-		cfg.Logging.File.MaxFiles = 4
+	if cfg.Logging.MaxFiles <= 0 {
+		warnings = append(warnings, fmt.Sprintf("logging.max_files is invalid (%d), using default: 4", cfg.Logging.MaxFiles))
+		cfg.Logging.MaxFiles = 4
 	}
-	// Console enabled defaults to true if not specified
-	// File enabled defaults to true if not specified
-	if !cfg.Logging.Console.Enabled && !cfg.Logging.File.Enabled {
-		cfg.Logging.Console.Enabled = true
-		cfg.Logging.File.Enabled = true
-	}
+	// Compress defaults to false if not specified
 
 	// Generate sink IDs (12-char hash based on name+path)
 	for i := range cfg.Sinks {
@@ -280,7 +282,7 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	return &cfg, nil
+	return &cfg, warnings, nil
 }
 
 // generateSinkId generates a 12-char hash ID from name+path

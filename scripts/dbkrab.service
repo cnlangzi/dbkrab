@@ -11,8 +11,8 @@ WorkingDirectory=/opt/dbkrab
 ExecStart=/opt/dbkrab/dbkrab -config /opt/dbkrab/config.yaml
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/var/log/dbkrab/dbkrab.log
-StandardError=append:/var/log/dbkrab/dbkrab.error.log
+StandardOutput=null
+StandardError=null
 
 # Security hardening
 NoNewPrivileges=true
