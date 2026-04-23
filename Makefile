@@ -141,11 +141,11 @@ stop:
 ## restart: Restart dbkrab
 restart: stop deploy
 
-## reset: Reset dbkrab state (clear DB and logs under /opt/dbkrab) and restart
+## reset: Reset dbkrab state (clear DB and logs under /opt/dbkrab) and restart via systemd
 reset:
 	@echo "Resetting dbkrab state..."
 	@echo "Stopping dbkrab..."
-	@pkill -x dbkrab 2>/dev/null || true
+	@sudo systemctl stop dbkrab 2>/dev/null || pkill -9 -f /opt/dbkrab/dbkrab 2>/dev/null || true
 	@sleep 2
 	@echo "Deleting app data files..."
 	@rm -rf /opt/dbkrab/data/app/*
@@ -154,11 +154,11 @@ reset:
 	@echo "Deleting logs..."
 	@rm -rf /opt/dbkrab/logs/*
 	@mkdir -p /opt/dbkrab/logs
-	@echo "Starting dbkrab..."
-	@cd /opt/dbkrab && nohup ./dbkrab --config config.yaml > logs/dbkrab.log 2>&1 &
+	@echo "Starting dbkrab via systemd..."
+	@sudo systemctl start dbkrab
 	@sleep 3
-	@if pgrep -x dbkrab >/dev/null; then \
-		echo "✅ dbkrab restarted"; \
+	@if systemctl is-active --quiet dbkrab; then \
+		echo "✅ dbkrab restarted via systemd"; \
 	else \
 		echo "❌ dbkrab failed to start"; \
 	fi
