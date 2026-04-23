@@ -148,15 +148,8 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 		// Create handler for this table
 		handler := NewSnapshotHandler(s.pluginMgr, table.Name)
 
-		// Wrap handler to track CurrentRows after each batch
-		progressHandler := &progressHandler{
-			handler:  handler,
-			progress: &s.progress,
-			mu:       &s.mu,
-		}
-
 		// Run snapshot for this table
-		startLSN, err := s.querier.Run(ctx, table.Schema, table.Name, progressHandler)
+		startLSN, err := s.querier.Run(ctx, table.Schema, table.Name, handler)
 		if err != nil {
 			s.mu.Lock()
 			s.progress.State = "failed"
@@ -216,7 +209,7 @@ func (s *SnapshotService) runSnapshot(ctx context.Context, tables []CDCTable) {
 	slog.Info("snapshot: all tables completed")
 }
 
-// clearSinkTables truncates all sink tables for the given CDC tables.
+// clearSinkTables clears all sink tables for the given CDC tables.
 func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable) error {
 	slog.Info("snapshot: clearing sink tables")
 
@@ -224,34 +217,31 @@ func (s *SnapshotService) clearSinkTables(ctx context.Context, tables []CDCTable
 		return fmt.Errorf("snapshot plugin manager not initialized")
 	}
 
-	// Get all sink names from plugin manager (which exposes sinker operations)
+	// Get all sink names from plugin manager
 	sinkNames := s.pluginMgr.ListDatabases()
 	if len(sinkNames) == 0 {
 		slog.Warn("snapshot: no sinks configured, skipping clear")
 		return nil
 	}
 
-	// For each sink, truncate all tables
+	// For each sink, call Reset to clear all tables
 	for _, sinkName := range sinkNames {
 		sink, err := s.pluginMgr.GetSinker(sinkName)
 		if err != nil {
-			return fmt.Errorf("snapshot: failed to get sinker %s: %w", sinkName, err)
+			slog.Warn("snapshot: failed to get sinker, skipping",
+				"sink", sinkName,
+				"error", err)
+			continue
 		}
 
-		// Get tables in this sink
-		sinkTables, err := s.pluginMgr.QueryTables(sinkName)
-		if err != nil {
-			return fmt.Errorf("snapshot: failed to query tables for sink %s: %w", sinkName, err)
+		if err := sink.Reset(ctx); err != nil {
+			slog.Warn("snapshot: failed to reset sink, continuing with other sinks",
+				"sink", sinkName,
+				"error", err)
+			continue
 		}
 
-		// Truncate each table
-		for _, tableName := range sinkTables {
-			query := fmt.Sprintf("DELETE FROM %s", tableName)
-			if err := sink.ExecContext(ctx, query); err != nil {
-				return fmt.Errorf("snapshot: failed to clear table %s in sink %s: %w", tableName, sinkName, err)
-			}
-			slog.Info("snapshot: cleared table", "sink", sinkName, "table", tableName)
-		}
+		slog.Info("snapshot: cleared sink", "sink", sinkName)
 	}
 
 	return nil
@@ -284,7 +274,6 @@ func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change
 
 	// Create batch context for observability
 	batchCtx := core.NewBatchContext()
-	// SkillName is set by engine.HandleWithPull during execution
 
 	// Route changes through plugin.Manager.Handle which processes them through skills
 	// and then writes to sinks with proper SinkConfig (including PrimaryKey)
@@ -292,24 +281,6 @@ func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change
 		return fmt.Errorf("plugin handle: %w", err)
 	}
 
-	return nil
-}
-
-// progressHandler wraps a Handler and updates CurrentRows after each batch.
-type progressHandler struct {
-	handler  Handler
-	progress *SnapshotProgress
-	mu       *sync.RWMutex
-}
-
-// HandleBatch updates CurrentRows after calling the wrapped handler.
-func (h *progressHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
-	if err := h.handler.HandleBatch(ctx, changes); err != nil {
-		return err
-	}
-	h.mu.Lock()
-	h.progress.CurrentRows += len(changes)
-	h.mu.Unlock()
 	return nil
 }
 

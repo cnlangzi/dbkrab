@@ -124,31 +124,22 @@ func (pki *PrimaryKeyInfo) BuildOrderBy() string {
 // Orders by primary key for stable pagination
 func (pki *PrimaryKeyInfo) BuildPagedQuery(schema, table string, batchSize int, offset int) string {
 	// Build ORDER BY clause from primary key columns
-	orderBy := ""
-	if len(pki.Columns) > 0 {
-		orderBy = "ORDER BY " + strings.Join(pki.Columns, ", ")
-	}
+	// Note: DiscoverPrimaryKey guarantees pki.Columns is non-empty
+	orderBy := "ORDER BY " + strings.Join(pki.Columns, ", ")
 
 	if offset == 0 {
 		// First batch: simple TOP with ORDER BY
-		if orderBy != "" {
-			return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s %s; SET ROWCOUNT 0`, batchSize, schema, table, orderBy)
-		}
-		return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s; SET ROWCOUNT 0`, batchSize, schema, table)
+		return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s %s; SET ROWCOUNT 0`, batchSize, schema, table, orderBy)
 	}
 
 	// Subsequent batches: use ROW_NUMBER() with ORDER BY
-	orderClause := "(SELECT NULL)"
-	if orderBy != "" {
-		orderClause = strings.TrimPrefix(orderBy, "ORDER BY ")
-	}
 	return fmt.Sprintf(`
 		SELECT * FROM (
 			SELECT *, ROW_NUMBER() OVER(%s) AS _rn
 			FROM %s.%s
 		) AS _page
 		WHERE _rn > %d AND _rn <= %d
-	`, orderClause, schema, table, offset, offset+batchSize)
+	`, orderBy, schema, table, offset, offset+batchSize)
 }
 
 // GetMaxLSN returns the current max LSN (outside read transaction)

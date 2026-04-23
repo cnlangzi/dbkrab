@@ -25,6 +25,11 @@ type Sinker interface {
 	// It re-discovers and re-applies migrations from the configured migrations path.
 	Migrate(ctx context.Context) error
 
+	// Reset clears all user tables in the sink, disabling foreign key checks
+	// during the clear operation and flushing changes to disk upon completion.
+	// This is used by snapshot startup to prepare sinks before loading data.
+	Reset(ctx context.Context) error
+
 	// Close closes the sinker and releases resources
 	Close() error
 }

@@ -235,7 +235,7 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 				slog.Info("Engine.Handle: executing sink", "sink", sinkCfg.Name, "table", change.Table)
 				// Use cached lowercase comparison instead of strings.EqualFold
 				if sinkCfg.On != "" {
-					tableToMatch := changeTableLower
+					var tableToMatch string
 					if sinkCfg.OnLower != "" {
 						tableToMatch = sinkCfg.OnLower
 					} else {

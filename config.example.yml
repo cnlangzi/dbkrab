@@ -125,14 +125,12 @@ plugins:
 # -----------------------------------------------------------------------------
 # Logging Configuration
 # -----------------------------------------------------------------------------
+# Simplified flat structure - file logging is always enabled.
+# All fields are optional with sensible defaults.
 logging:
   level: info
-  console:
-    enabled: true
-  file:
-    enabled: true
-    path: ./logs/dbkrab.log
-    max_size_mb: 100
-    max_age_days: 7
-    max_files: 4
-    compress: true
+  path: ./logs/dbkrab.log
+  max_size_mb: 100
+  max_age_days: 7
+  max_files: 4
+  compress: false
