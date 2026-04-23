@@ -2,7 +2,7 @@
 package logging
 
 import (
-	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,112 +12,39 @@ import (
 
 // LoggingConfig defines the logging configuration structure.
 type LoggingConfig struct {
-	Level   string           `yaml:"level"` // debug|info|warn|error
-	File    FileLogConfig    `yaml:"file"`
-	Console ConsoleLogConfig `yaml:"console"`
-}
-
-// FileLogConfig defines file-based logging configuration.
-type FileLogConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	Path       string `yaml:"path"`         // ./logs/dbkrab.log
-	MaxSizeMB  int    `yaml:"max_size_mb"`  // 100MB
+	Level      string `yaml:"level"`      // debug|info|warn|error
+	Path       string `yaml:"path"`        // ./logs/dbkrab.log
+	MaxSizeMB  int    `yaml:"max_size_mb"` // 100MB
 	MaxAgeDays int    `yaml:"max_age_days"` // 7
 	MaxFiles   int    `yaml:"max_files"`    // 4
-	Compress   bool   `yaml:"compress"`     // gzip
+	Compress   bool   `yaml:"compress"`     // gzip, defaults to false
 }
 
-// ConsoleLogConfig defines console logging configuration.
-type ConsoleLogConfig struct {
-	Enabled bool `yaml:"enabled"`
-}
-
-// Init initializes the global slog logger with console and file handlers using lumberjack.
+// Init initializes the global slog logger with a lumberjack file handler.
+// File logging is always enabled by default.
 func Init(cfg LoggingConfig) error {
-	var handlers []slog.Handler
-
-	// Console handler (text format for human readability)
-	if cfg.Console.Enabled {
-		opts := &slog.HandlerOptions{
-			Level: parseLevel(cfg.Level),
-		}
-		handlers = append(handlers, slog.NewTextHandler(os.Stdout, opts))
+	// Ensure log directory exists
+	logDir := filepath.Dir(cfg.Path)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("creating log directory %s: %w", logDir, err)
 	}
 
-	// File handler (JSON format for structured logging)
-	if cfg.File.Enabled {
-		// Ensure log directory exists
-		logDir := filepath.Dir(cfg.File.Path)
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			return err
-		}
-
-		lumberjackLogger := &lumberjack.Logger{
-			Filename:   cfg.File.Path,
-			MaxSize:    cfg.File.MaxSizeMB,
-			MaxAge:     cfg.File.MaxAgeDays,
-			MaxBackups: cfg.File.MaxFiles,
-			Compress:   cfg.File.Compress,
-		}
-
-		opts := &slog.HandlerOptions{
-			Level: parseLevel(cfg.Level),
-		}
-		handlers = append(handlers, slog.NewJSONHandler(lumberjackLogger, opts))
+	lumberjackLogger := &lumberjack.Logger{
+		Filename:   cfg.Path,
+		MaxSize:    cfg.MaxSizeMB,
+		MaxAge:     cfg.MaxAgeDays,
+		MaxBackups: cfg.MaxFiles,
+		Compress:   cfg.Compress,
 	}
 
-	// Use the first handler as base, wrap with multi-handler if multiple
-	var handler slog.Handler
-	if len(handlers) == 1 {
-		handler = handlers[0]
-	} else {
-		handler = newMultiHandler(handlers...)
+	opts := &slog.HandlerOptions{
+		Level: parseLevel(cfg.Level),
 	}
-
+	handler := slog.NewJSONHandler(lumberjackLogger, opts)
 	slog.SetDefault(slog.New(handler))
 	return nil
 }
 
-// multiHandler implements slog.Handler by dispatching to multiple handlers.
-type multiHandler struct {
-	handlers []slog.Handler
-}
-
-// newMultiHandler creates a handler that writes to all provided handlers.
-func newMultiHandler(handlers ...slog.Handler) slog.Handler {
-	return &multiHandler{handlers: handlers}
-}
-
-func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return true
-}
-
-func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {
-	for _, handler := range h.handlers {
-		if err := handler.Handle(ctx, r); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (h *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	handlers := make([]slog.Handler, len(h.handlers))
-	for i, handler := range h.handlers {
-		handlers[i] = handler.WithAttrs(attrs)
-	}
-	return &multiHandler{handlers: handlers}
-}
-
-func (h *multiHandler) WithGroup(name string) slog.Handler {
-	handlers := make([]slog.Handler, len(h.handlers))
-	for i, handler := range h.handlers {
-		handlers[i] = handler.WithGroup(name)
-	}
-	return &multiHandler{handlers: handlers}
-}
-
-// parseLevel converts a level string to slog.Level.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":
