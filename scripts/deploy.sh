@@ -40,18 +40,6 @@ if command -v systemctl &> /dev/null && systemctl is-active --quiet dbkrab 2>/de
     sleep 2
 fi
 
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "   Stopping PID $OLD_PID..."
-        kill "$OLD_PID" || true
-        sleep 2
-        # Force kill if still running
-        if kill -0 "$OLD_PID" 2>/dev/null; then
-            kill -9 "$OLD_PID" 2>/dev/null || true
-        fi
-    fi
-    # Remove PID file (might need sudo if created by root)
-fi
-
 # Kill any running dbkrab processes using full path
 # Use -f to match the full command line with specific path
 pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
