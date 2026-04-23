@@ -93,11 +93,19 @@ mod:
 	$(GO) mod tidy
 	$(GO) mod download
 
-## deploy: Deploy to /opt/dbkrab (build, install, restart)
+## deploy: Deploy to /opt/dbkrab (build, install, restart via systemd)
 deploy:
 	@echo "Deploying to /opt/dbkrab..."
 	@chmod +x scripts/deploy.sh
 	@./scripts/deploy.sh config.yaml
+	@echo "Restarting via systemd..."
+	@sudo systemctl restart dbkrab
+	@sleep 3
+	@if systemctl is-active --quiet dbkrab; then \
+		echo "✅ Deployed and started"; \
+	else \
+		echo "❌ Failed to start"; \
+	fi
 
 ## deploy-systemd: Deploy and install systemd service
 deploy-systemd: deploy
@@ -126,26 +134,40 @@ status:
 logs:
 	@tail -50 /var/log/dbkrab/dbkrab.log
 
-## stop: Stop dbkrab
+## stop: Stop dbkrab (via systemd)
 stop:
 	@echo "Stopping dbkrab..."
-	@if [ -f /var/run/dbkrab.pid ]; then \
-		kill $$(cat /var/run/dbkrab.pid) 2>/dev/null || true; \
-		rm -f /var/run/dbkrab.pid; \
-		echo "✅ Stopped"; \
+	@sudo systemctl stop dbkrab 2>/dev/null || echo "Service not installed, using pkill..."
+	@pkill -f /opt/dbkrab/dbkrab 2>/dev/null || true
+	@echo "✅ Stopped"
+
+## start: Start dbkrab (via systemd)
+start:
+	@echo "Starting dbkrab..."
+	@sudo systemctl start dbkrab
+	@sleep 2
+	@if systemctl is-active --quiet dbkrab; then \
+		echo "✅ Started"; \
 	else \
-		pkill -x dbkrab 2>/dev/null || true; \
-		echo "✅ Stopped"; \
+		echo "❌ Failed to start"; \
 	fi
 
-## restart: Restart dbkrab
-restart: stop deploy
+## restart: Restart dbkrab (via systemd)
+restart:
+	@echo "Restarting dbkrab..."
+	@sudo systemctl restart dbkrab
+	@sleep 3
+	@if systemctl is-active --quiet dbkrab; then \
+		echo "✅ Restarted"; \
+	else \
+		echo "❌ Failed to restart"; \
+	fi
 
 ## reset: Reset dbkrab state (clear DB and logs under /opt/dbkrab) and restart via systemd
 reset:
 	@echo "Resetting dbkrab state..."
 	@echo "Stopping dbkrab..."
-	@sudo systemctl stop dbkrab 2>/dev/null || pkill -9 -f /opt/dbkrab/dbkrab 2>/dev/null || true
+	@sudo systemctl stop dbkrab 2>/dev/null || true
 	@sleep 2
 	@echo "Deleting app data files..."
 	@rm -rf /opt/dbkrab/data/app/*
