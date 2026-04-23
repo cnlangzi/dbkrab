@@ -5,12 +5,10 @@
 
 set -e
 
-BINARY_NAME="dbkrab"
+BINARY_PATH="/opt/dbkrab/dbkrab"
 INSTALL_DIR="/opt/dbkrab"
 CONFIG_SRC="${1:-config.yaml}"
 CONFIG_DEST="$INSTALL_DIR/config.yaml"
-PID_FILE="/var/run/dbkrab.pid"
-LOG_FILE="/var/log/dbkrab/dbkrab.log"
 
 echo "🦀 Deploying dbkrab..."
 
@@ -19,20 +17,29 @@ echo "🦀 Deploying dbkrab..."
 # ============================================
 echo "📁 Creating directories..."
 sudo mkdir -p "$INSTALL_DIR"
-sudo mkdir -p /var/log/dbkrab
-sudo mkdir -p /var/lib/dbkrab/data
 
 # Change ownership to current user (requires sudo)
 sudo chown -R $(whoami):$(whoami) "$INSTALL_DIR"
-sudo chown -R $(whoami):$(whoami) /var/log/dbkrab
-sudo chown -R $(whoami):$(whoami) /var/lib/dbkrab
 
 # ============================================
-# Step 2: Stop old process (normal user)
+# Step 2: Build binary first (verify it works)
+# ============================================
+echo "🔨 Building..."
+make build
+
+# ============================================
+# Step 3: Stop old process
 # ============================================
 echo "🛑 Stopping old process..."
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
+
+# Stop systemd service first (if installed and running)
+# This prevents systemd from auto-restarting the process during deployment
+if command -v systemctl &> /dev/null && systemctl is-active --quiet dbkrab 2>/dev/null; then
+    echo "   Stopping systemd service..."
+    sudo systemctl stop dbkrab || true
+    sleep 2
+fi
+
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "   Stopping PID $OLD_PID..."
         kill "$OLD_PID" || true
@@ -43,34 +50,27 @@ if [ -f "$PID_FILE" ]; then
         fi
     fi
     # Remove PID file (might need sudo if created by root)
-    sudo rm -f "$PID_FILE"
 fi
 
-# Also kill any running dbkrab processes (match by process name)
-pkill -9 -x "$BINARY_NAME" 2>/dev/null || true
-pkill -9 -f "$BINARY_NAME.*-config" 2>/dev/null || true
+# Kill any running dbkrab processes using full path
+# Use -f to match the full command line with specific path
+pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
 
 # Wait for process to fully exit and release the binary file
 echo "   Waiting for process to exit..."
 for i in {1..10}; do
-    if ! pgrep -x "$BINARY_NAME" > /dev/null 2>&1; then
+    if ! pgrep -f "$BINARY_PATH" > /dev/null 2>&1; then
         break
     fi
     sleep 0.5
 done
 
 # Final check - force kill any remaining
-if pgrep -x "$BINARY_NAME" > /dev/null 2>&1; then
+if pgrep -f "$BINARY_PATH" > /dev/null 2>&1; then
     echo "   Force killing remaining processes..."
-    pkill -9 -x "$BINARY_NAME" 2>/dev/null || true
+    pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
     sleep 1
 fi
-
-# ============================================
-# Step 3: Build binary (normal user - NO sudo)
-# ============================================
-echo "🔨 Building..."
-make build
 
 # ============================================
 # Step 4: Install binary (normal user)
@@ -96,28 +96,23 @@ else
 fi
 
 # ============================================
-# Step 6: Start new process (normal user)
+# Step 6: Start via systemd
 # ============================================
 echo "🚀 Starting dbkrab..."
-cd "$INSTALL_DIR"
-nohup "$INSTALL_DIR/dbkrab" -config "$CONFIG_DEST" > "$LOG_FILE" 2>&1 &
-NEW_PID=$!
 
-# Save PID file (requires sudo for /var/run)
-echo "$NEW_PID" | sudo tee "$PID_FILE" > /dev/null
-
-sleep 3
-
-# ============================================
-# Step 7: Verify deployment
-# ============================================
-if kill -0 "$NEW_PID" 2>/dev/null; then
-    echo "✅ Deployment successful!"
-    echo "   PID: $NEW_PID"
-    echo "   Log: $LOG_FILE"
-    echo "   Dashboard: http://localhost:9021"
+if command -v systemctl &> /dev/null; then
+    echo "   Starting via systemd..."
+    sudo systemctl start dbkrab
+    sleep 3
+    if systemctl is-active --quiet dbkrab 2>/dev/null; then
+        echo "✅ Deployment successful!"
+        echo "   Dashboard: http://localhost:9021"
+    else
+        echo "❌ systemd service failed to start"
+        echo "Check log in config.yaml"
+        exit 1
+    fi
 else
-    echo "❌ Failed to start dbkrab"
-    echo "Check log: $LOG_FILE"
+    echo "❌ systemd not available, cannot start"
     exit 1
 fi
