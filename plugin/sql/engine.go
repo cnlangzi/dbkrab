@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -20,14 +21,83 @@ import (
 type Engine struct {
 	skill    *Skill
 	executor *Executor // MSSQL executor for SQL execution
+
+	// caches for performance optimization
+	shortTableCache  map[string]string                       // "dbo.Cost" → "cost"
+	fieldNameCache   map[string]map[string]string            // table → (field → "cost_field")
+	sinkOpCache      map[Operation][]SinkConfig              // operation → sinks
+	tableLowerCache  map[string]string                       // "dbo.Cost" → "dbo.cost" for comparison
 }
 
 // NewEngine creates a new SQL Plugin engine
 func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
-	return &Engine{
-		skill:    skill,
-		executor: NewExecutorWithDriver(mssqlDB, DriverMSSQL),
+	e := &Engine{
+		skill:            skill,
+		executor:         NewExecutorWithDriver(mssqlDB, DriverMSSQL),
+		shortTableCache:  make(map[string]string),
+		fieldNameCache:   make(map[string]map[string]string),
+		sinkOpCache:      make(map[Operation][]SinkConfig),
+		tableLowerCache:  make(map[string]string),
 	}
+	return e
+}
+
+// getShortTable returns cached short table name (lowercased for backward compatibility)
+func (e *Engine) getShortTable(table string) string {
+	if e.shortTableCache != nil {
+		if v, ok := e.shortTableCache[table]; ok {
+			return v
+		}
+	}
+	short := strings.ToLower(shortTableName(table))
+	if e.shortTableCache != nil {
+		e.shortTableCache[table] = short
+	}
+	return short
+}
+
+// getTableLower returns cached lowercase table name for comparison
+func (e *Engine) getTableLower(table string) string {
+	if e.tableLowerCache != nil {
+		if v, ok := e.tableLowerCache[table]; ok {
+			return v
+		}
+	}
+	lower := strings.ToLower(table)
+	if e.tableLowerCache != nil {
+		e.tableLowerCache[table] = lower
+	}
+	return lower
+}
+
+// getFieldName returns cached field name with table prefix
+func (e *Engine) getFieldName(table, field string) string {
+	short := e.getShortTable(table)
+	if e.fieldNameCache != nil {
+		if fieldCache, ok := e.fieldNameCache[short]; ok {
+			if v, ok := fieldCache[field]; ok {
+				return v
+			}
+		}
+	}
+	name := short + "_" + strings.ToLower(field)
+	if e.fieldNameCache != nil {
+		if _, ok := e.fieldNameCache[short]; !ok {
+			e.fieldNameCache[short] = make(map[string]string)
+		}
+		e.fieldNameCache[short][field] = name
+	}
+	return name
+}
+
+// getSinksForOperation returns cached sink list for operation type
+func (e *Engine) getSinksForOperation(op Operation) []SinkConfig {
+	if cached, ok := e.sinkOpCache[op]; ok {
+		return cached
+	}
+	result := e.skill.FilterByOperation(op)
+	e.sinkOpCache[op] = result
+	return result
 }
 
 // HandleWithSkill executes the engine with a specific skill, then restores the original skill.
@@ -148,8 +218,8 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 			return nil, fmt.Errorf("build params: %w", err)
 		}
 
-		// Get sinks for this operation using FilterByOperation
-		sinkConfigs := e.skill.FilterByOperation(sinkType)
+		// Get sinks for this operation using cached FilterByOperation (avoids repeated filtering)
+		sinkConfigs := e.getSinksForOperation(sinkType)
 		slog.Debug("Engine.Handle: sink filtering",
 			"skill", e.skill.Name,
 			"sinkType", sinkType,
@@ -157,16 +227,27 @@ func (e *Engine) Handle(tx *core.Transaction) ([]core.Sink, error) {
 
 		if len(sinkConfigs) > 0 {
 			sinkParams := e.cdcParamsToMap(cdcParams)
+			// Use cached lowercase table name for comparison
+			changeTableLower := e.getTableLower(change.Table)
 
 			// Filter sinks by table and evaluate 'if' conditions
 			for _, sinkCfg := range sinkConfigs {
 				slog.Info("Engine.Handle: executing sink", "sink", sinkCfg.Name, "table", change.Table)
-				if sinkCfg.On != "" && !strings.EqualFold(sinkCfg.On, change.Table) {
-					slog.Debug("Engine.Handle: sink table mismatch",
-						"sink", sinkCfg.Name,
-						"sink.On", sinkCfg.On,
-						"change.Table", change.Table)
-					continue
+				// Use cached lowercase comparison instead of strings.EqualFold
+				if sinkCfg.On != "" {
+					var tableToMatch string
+					if sinkCfg.OnLower != "" {
+						tableToMatch = sinkCfg.OnLower
+					} else {
+						tableToMatch = strings.ToLower(sinkCfg.On)
+					}
+					if tableToMatch != changeTableLower {
+						slog.Debug("Engine.Handle: sink table mismatch",
+							"sink", sinkCfg.Name,
+							"sink.On", sinkCfg.On,
+							"change.Table", change.Table)
+						continue
+					}
 				}
 
 				// Evaluate 'if' condition if present
@@ -389,24 +470,26 @@ func convertDataSet(ds *DataSet) *core.DataSet {
 }
 
 // buildCDCParams builds CDC parameters from a single change
+// Uses caches for field names and table names to avoid repeated string operations
 func (e *Engine) buildCDCParams(change *core.Change) (CDCParameters, error) {
 	params := CDCParameters{
 		CDCLSN:       hex.EncodeToString(change.LSN),
 		CDCTxID:      change.TransactionID,
 		CDCTable:     change.Table,
 		CDCOperation: int(change.Operation),
-		Fields:       make(map[string]interface{}),
+		Fields:       make(map[string]interface{}, len(change.Data)+5),
 	}
 
-	// Add all data fields with table prefix (lowercase for consistency)
-	shortTable := strings.ToLower(shortTableName(change.Table))
+	// Use cached short table name (eliminates repeated shortTableName() calls)
+	shortTable := e.getShortTable(change.Table)
 	slog.Debug("Engine.buildCDCParams: mapping fields",
 		"table", change.Table,
 		"shortTable", shortTable,
 		"data_fields", len(change.Data))
 
+	// Use cached field names (eliminates repeated strings.ToLower() and fmt.Sprintf calls)
 	for k, v := range change.Data {
-		fieldName := fmt.Sprintf("%s_%s", shortTable, strings.ToLower(k))
+		fieldName := e.getFieldName(change.Table, k)
 		params.Fields[fieldName] = v
 		slog.Debug("Engine.buildCDCParams: field mapped",
 			"original", k,

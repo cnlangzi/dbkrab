@@ -104,6 +104,7 @@ type SinkConfig struct {
 	OnConflict string `yaml:"on_conflict"` // Conflict strategy: overwrite | skip | error (default: skip)
 
 	compiledIf *govaluate.EvaluableExpression `yaml:"-"` // Precompiled expression (internal use)
+	OnLower   string `yaml:"-"`            // Precomputed lowercase of On (for performance)
 }
 
 // GetOnConflict returns the OnConflictStrategy for this job
