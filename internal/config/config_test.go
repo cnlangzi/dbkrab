@@ -46,7 +46,7 @@ app:
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, _, err := Load(configPath)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -110,7 +110,7 @@ tables:
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, _, err := Load(configPath)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

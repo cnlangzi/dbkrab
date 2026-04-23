@@ -161,15 +161,15 @@ type RecoveryConfig struct {
 	Strategy string `yaml:"strategy"` // snapshot | timestamp | manual
 }
 
-func Load(path string) (*Config, error) {
+func Load(path string) (*Config, []string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Set defaults
@@ -250,28 +250,35 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	var warnings []string
+
 	// Logging defaults
 	if cfg.Logging.Level == "" {
-		slog.Warn("logging.level not configured, using default", "default", "info")
+		warnings = append(warnings, "logging.level not configured, using default: info")
 		cfg.Logging.Level = "info"
 	}
 	if cfg.Logging.Path == "" {
-		slog.Warn("logging.path not configured, using default", "default", "./logs/dbkrab.log")
+		warnings = append(warnings, "logging.path not configured, using default: ./logs/dbkrab.log")
 		cfg.Logging.Path = "./logs/dbkrab.log"
 	}
 	if cfg.Logging.MaxSizeMB <= 0 {
-		slog.Warn("logging.max_size_mb is invalid, using default", "value", cfg.Logging.MaxSizeMB, "default", 100)
+		warnings = append(warnings, fmt.Sprintf("logging.max_size_mb is invalid (%d), using default: 100", cfg.Logging.MaxSizeMB))
 		cfg.Logging.MaxSizeMB = 100
 	}
 	if cfg.Logging.MaxAgeDays <= 0 {
-		slog.Warn("logging.max_age_days is invalid, using default", "value", cfg.Logging.MaxAgeDays, "default", 7)
+		warnings = append(warnings, fmt.Sprintf("logging.max_age_days is invalid (%d), using default: 7", cfg.Logging.MaxAgeDays))
 		cfg.Logging.MaxAgeDays = 7
 	}
 	if cfg.Logging.MaxFiles <= 0 {
-		slog.Warn("logging.max_files is invalid, using default", "value", cfg.Logging.MaxFiles, "default", 4)
+		warnings = append(warnings, fmt.Sprintf("logging.max_files is invalid (%d), using default: 4", cfg.Logging.MaxFiles))
 		cfg.Logging.MaxFiles = 4
 	}
-	// Compress defaults to false if not specified
+	// Compress defaults to true when not set
+	if cfg.Logging.Compress == nil {
+		warnings = append(warnings, "logging.compress not configured, using default: true")
+		t := true
+		cfg.Logging.Compress = &t
+	}
 
 	// Generate sink IDs (12-char hash based on name+path)
 	for i := range cfg.Sinks {
@@ -280,7 +287,7 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	return &cfg, nil
+	return &cfg, warnings, nil
 }
 
 // generateSinkId generates a 12-char hash ID from name+path

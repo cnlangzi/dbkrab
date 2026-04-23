@@ -17,7 +17,7 @@ type LoggingConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"` // 100MB
 	MaxAgeDays int    `yaml:"max_age_days"` // 7
 	MaxFiles   int    `yaml:"max_files"`    // 4
-	Compress   bool   `yaml:"compress"`     // gzip, defaults to false
+	Compress   *bool  `yaml:"compress"`     // gzip, defaults to true
 }
 
 // Init initializes the global slog logger with a lumberjack file handler.
@@ -34,7 +34,7 @@ func Init(cfg LoggingConfig) error {
 		MaxSize:    cfg.MaxSizeMB,
 		MaxAge:     cfg.MaxAgeDays,
 		MaxBackups: cfg.MaxFiles,
-		Compress:   cfg.Compress,
+		Compress:   cfg.Compress != nil && *cfg.Compress,
 	}
 
 	opts := &slog.HandlerOptions{
