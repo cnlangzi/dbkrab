@@ -56,7 +56,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	globalMaxLSN, err := c.querier.GetMaxLSN(ctx)
 	if err != nil {
 		slog.Error("ChangeCapturer: failed to get max LSN", "error", err)
-		return &core.CaptureResult{BatchID: batchCtx.BatchID, EOS: false}
+		return &core.CaptureResult{BatchID: batchCtx.BatchID, NextCapturer: core.CapturerCDC}
 	}
 
 	var allChanges []core.CaptureChange
@@ -149,9 +149,9 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	}
 
 	return &core.CaptureResult{
-		Changes: allChanges,
-		BatchID: batchCtx.BatchID,
-		EOS:     false,
+		Changes:      allChanges,
+		BatchID:      batchCtx.BatchID,
+		NextCapturer: core.CapturerCDC,
 	}
 }
 

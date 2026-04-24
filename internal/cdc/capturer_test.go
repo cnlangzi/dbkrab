@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 )
 
@@ -389,8 +390,8 @@ func TestChangeCapturer_Fetch_Integration(t *testing.T) {
 	if result == nil {
 		t.Fatal("Expected non-nil CaptureResult")
 	}
-	if result.EOS {
-		t.Error("Expected EOS=false (data available)")
+	if result.NextCapturer != core.CapturerCDC {
+		t.Error("Expected NextCapturer=ChangeCapturer")
 	}
 	if len(result.Changes) != 1 {
 		t.Errorf("Expected 1 change, got %d", len(result.Changes))

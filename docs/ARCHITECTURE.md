@@ -53,23 +53,47 @@ MSSQL CDC Tables
 
 `Runtime` 是统一的数据管道编排器，负责所有捕获后的处理逻辑：
 
+- **Capturer 管理**：维护所有 3 个 Capturer，根据 `NextCapturer` 切换
 - **Transformer 处理**：调用 ETL 插件处理 CDC 变更
 - **DLQ 处理**：失败数据写入死信队列
-- **状态管理**：协调 Capturer 之间的切换
 
 **注意**：
 - Store 和 Offset 管理已移入 `ChangeCapturer` 内部
 - `ChangeCapturer` 自己管理 LSN offset 和 cdc.db 写入
+- 3 个 Capturer 同时初始化，串行执行（不可并行）
 
 ```go
+// CapturerName represents the name of a data capturer.
+type CapturerName string
+
+const (
+    CapturerCDC     CapturerName = "cdc"
+    CapturerSnapshot CapturerName = "snapshot"
+    CapturerReplay  CapturerName = "replay"
+)
+
+// CaptureResult carries data and metadata from a Capturer fetch operation.
+type CaptureResult struct {
+    Changes      []CaptureChange
+    BatchID      string
+    NextCapturer CapturerName   // Which capturer to use for next fetch
+}
+
 // Runtime orchestrates data capture and ETL processing.
 type Runtime struct {
+    capturers   map[CapturerName]Capturer
+    current     CapturerName
     transformer Transformer
-    stateMgr    *StateManager
     dlq         *dlq.DLQ
     monitorDB   *monitor.DB
-    currentCapturer Capturer
+    mu          sync.RWMutex
 }
+
+// Runtime methods for Dashboard
+func (r *Runtime) CDC() Capturer
+func (r *Runtime) Snapshot() Capturer
+func (r *Runtime) Replay() Capturer
+func (r *Runtime) SwitchTo(name CapturerName)
 ```
 
 ### 2. Capturer 接口 (`internal/core/capturer.go`)
@@ -85,11 +109,18 @@ type Capturer interface {
 
 #### 实现类型
 
-| 实现 | 位置 | 说明 |
-|------|------|------|
-| `ChangeCapturer` | `internal/cdc/capturer.go` | 增量轮询，从 MSSQL CDC 表读取变更 |
-| `SnapshotCapturer` | `internal/snapshot/capturer.go` | 全量同步，从 MSSQL 表读取快照 |
-| `ReplayCapturer` | `internal/replay/capturer.go` | 历史重放，从 cdc.db 读取历史 |
+| 实现 | 位置 | 说明 | NextCapturer |
+|------|------|------|--------------|
+| `ChangeCapturer` | `internal/cdc/capturer.go` | 增量轮询，从 MSSQL CDC 表读取变更 | `CapturerCDC` |
+| `SnapshotCapturer` | `internal/snapshot/capturer.go` | 全量同步，从 MSSQL 表读取快照 | `CapturerCDC` |
+| `ReplayCapturer` | `internal/replay/capturer.go` | 历史重放，从 cdc.db 读取历史 | `CapturerCDC` |
+
+**设计说明**：
+- 3 个 Capturer 全局只有一个实例，存储在 `Runtime.capturers` map 中
+- Dashboard 通过 `runtime.Snapshot()` / `runtime.Replay()` 获取对应 Capturer 实例
+- `runtime.SwitchTo()` 供 Dashboard 手动切换当前运行的 Capturer
+- `Fetch()` 返回 `NextCapturer` 指示自动切回 CDC
+- `Stop()` 仅在 Runtime 关闭时调用，非切换时调用
 
 ### 3. CDC Query (`internal/cdc/`)
 
@@ -124,19 +155,30 @@ Go + HTMX 仪表板用于运维：
 ```
 CDC Change (single row)
     │
-    └──► Capturer.Fetch() → CaptureChange[]
-                                        │
+    └──► Capturer.Fetch() → CaptureResult
+                            ├─ Changes: []CaptureChange
+                            └─ NextCapturer: CapturerName
+
+Runtime.Run() loop:
+    for {
+        result := capturer[current].Fetch(ctx)
+        process(result.Changes)
+        current = result.NextCapturer  // Auto-switch via Fetch result
+    }
+
+Dashboard:
+    runtime.SwitchTo(core.CapturerSnapshot)  // Manual switch
+    runtime.Snapshot().Fetch(ctx)             // Direct interaction
+
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
            ChangeCapturer      SnapshotCapturer      ReplayCapturer
            ├─OffsetManager     (no store)           (no store)
            ├─Store (cdc.db)                          │
-           └─Transformer                               │
+           └─NextCapturer:                          │
+                   CapturerCDC (always)              │
                     │                   │                   │
                     └───────────────────┴───────────────────┘
-                                        │
-                                        ▼
-                            Runtime.Run(ctx, capturer)
                                         │
                                         ▼
                               Transformer
@@ -151,6 +193,8 @@ CDC Change (single row)
 **Per-Change Processing**：每行 CDC 变更触发一次 sink 执行，参数按变更隔离。
 
 **架构说明**：
+- 3 个 Capturer 同时初始化，存储在 `Runtime.capturers` map 中
+- `Runtime` 根据 `NextCapturer` 切换当前使用的 Capturer
 - `ChangeCapturer` 内部管理 `OffsetManager`（LSN offset）和 `Store`（cdc.db 写入）
 - `SnapshotCapturer` 和 `ReplayCapturer` 只返回数据，不写 store
 - `Runtime` 只负责调用 `Transformer`，不再管理 Store

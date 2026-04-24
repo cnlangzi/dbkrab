@@ -33,13 +33,13 @@ func NewReplayCapturer(store Store) *ReplayCapturer {
 }
 
 // Fetch returns the next batch of changes grouped by LSN.
-// Returns CaptureResult with EOS=true when all changes have been replayed.
+// Returns CaptureResult with NextCapturer: CapturerCDC when all changes have been replayed.
 func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.stopped {
-		return &core.CaptureResult{EOS: true}
+		return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 	}
 
 	// Initialize LSNs on first call
@@ -48,7 +48,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		lsns, err := c.store.GetLSNs()
 		if err != nil {
 			slog.Error("ReplayCapturer: failed to get LSNs", "error", err)
-			return &core.CaptureResult{EOS: true}
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 		}
 		c.lsns = lsns
 		c.lsnIndex = 0
@@ -56,7 +56,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		if len(lsns) == 0 {
 			slog.Info("ReplayCapturer: no changes to replay")
 			c.completed = true
-			return &core.CaptureResult{EOS: true}
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 		}
 
 		slog.Info("ReplayCapturer: starting", "lsn_count", len(lsns))
@@ -72,9 +72,9 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		}
 		batchCtx := core.NewBatchContext()
 		result := &core.CaptureResult{
-			Changes: c.changes[c.changeIndex:endIndex],
-			BatchID: batchCtx.BatchID,
-			EOS:     false,
+			Changes:      c.changes[c.changeIndex:endIndex],
+			BatchID:      batchCtx.BatchID,
+			NextCapturer: core.CapturerReplay, // Stay with replay until done
 		}
 		c.changeIndex = endIndex
 		return result
@@ -131,16 +131,16 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		slog.Debug("ReplayCapturer: replaying LSN", "lsn", lsn, "changes", len(c.changes))
 
 		return &core.CaptureResult{
-			Changes: c.changes[c.changeIndex:endIndex],
-			BatchID: batchCtx.BatchID,
-			EOS:     false,
+			Changes:      c.changes[c.changeIndex:endIndex],
+			BatchID:      batchCtx.BatchID,
+			NextCapturer: core.CapturerReplay, // Stay with replay until done
 		}
 	}
 
 	// All LSNs processed
 	c.completed = true
 	slog.Info("ReplayCapturer: replay completed", "total_lsns", len(c.lsns))
-	return &core.CaptureResult{EOS: true}
+	return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 }
 
 // Stop signals the capturer to stop.

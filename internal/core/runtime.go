@@ -19,119 +19,140 @@ type Transformer interface {
 }
 
 // Runtime orchestrates data capture and ETL processing.
-// It holds a Capturer for data ingestion and handles post-fetch logic
-// (Transformer, DLQ, state management).
+// It manages all three capturers (CDC, Snapshot, Replay) and handles
+// post-fetch logic (Transformer, DLQ, state management).
 // Note: Store is now internal to ChangeCapturer; Runtime does not manage it.
 type Runtime struct {
+	capturers   map[CapturerName]Capturer
+	current     CapturerName
 	transformer Transformer
-	stateMgr    *StateManager
 	dlq         *dlq.DLQ
 	monitorDB   *monitor.DB
-
-	currentCapturer Capturer
-	mu              sync.Mutex
+	mu          sync.RWMutex
 }
 
-// NewRuntime creates a new Runtime.
+// NewRuntime creates a new Runtime with all capturers initialized.
 func NewRuntime(
+	capturers map[CapturerName]Capturer,
 	transformer Transformer,
-	stateMgr *StateManager,
 	dlq *dlq.DLQ,
 	monitorDB *monitor.DB,
 ) *Runtime {
 	return &Runtime{
+		capturers:   capturers,
+		current:     CapturerCDC,
 		transformer: transformer,
-		stateMgr:    stateMgr,
 		dlq:         dlq,
 		monitorDB:   monitorDB,
 	}
 }
 
-// Run starts the runtime with the given Capturer and runs until EOS or error.
-func (r *Runtime) Run(ctx context.Context, capturer Capturer) error {
-	r.mu.Lock()
-	if r.currentCapturer != nil {
-		r.currentCapturer.Stop()
-	}
-	r.currentCapturer = capturer
-	r.mu.Unlock()
+// CDC returns the CDC capturer instance.
+func (r *Runtime) CDC() Capturer {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.capturers[CapturerCDC]
+}
 
-	// Use a ticker to drive polling cycles.
-	// For ChangeCapturer: polls at configured interval.
-	// For Snapshot/Replay (one-shot): returns EOS on first Fetch, loop exits immediately.
+// Snapshot returns the Snapshot capturer instance.
+func (r *Runtime) Snapshot() Capturer {
+	return r.capturers[CapturerSnapshot]
+}
+
+// Replay returns the Replay capturer instance.
+func (r *Runtime) Replay() Capturer {
+	return r.capturers[CapturerReplay]
+}
+
+// SwitchTo switches the current capturer to the specified one.
+// Called by Dashboard to manually switch between capturers.
+func (r *Runtime) SwitchTo(name CapturerName) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.current = name
+}
+
+// Run starts the runtime and loops until context is cancelled.
+// It polls the current capturer on each tick and switches capturers based on NextCapturer.
+func (r *Runtime) Run(ctx context.Context) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	defer r.Close()
 
 	for {
-		// Wait for next poll cycle or context cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			// Poll when ticker fires
-		}
+			capturer := r.capturers[r.current]
+			result := capturer.Fetch(ctx)
 
-		result := capturer.Fetch(ctx)
-		if result.EOS {
-			return nil
-		}
-
-		// Skip processing if context is already cancelled
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		if len(result.Changes) == 0 {
-			continue
-		}
-
-		batchCtx := &BatchContext{
-			BatchID:   result.BatchID,
-			StartTime: time.Now(),
-		}
-
-		// Convert capture.Change to core.Change
-		changes := r.convertChanges(result.Changes)
-
-		// Transformer processing with retry
-		if r.transformer != nil {
-			var transformerErr error
-			err := retry.DoWithName(ctx, func() error {
-				transformerErr = r.transformer.Transform(ctx, changes, batchCtx)
-				return transformerErr
-			}, retry.DefaultRetryConfig(), "transform")
-			if err != nil {
-				slog.Error("transformer error", "error", err, "batch_id", batchCtx.BatchID)
-				r.writeToDLQ(changes, transformerErr, "transformer")
+			// Switch capturer if needed
+			if result.NextCapturer != r.current {
+				r.mu.Lock()
+				r.current = result.NextCapturer
+				r.mu.Unlock()
 			}
-		}
 
-		// Write batch log (after transformer, regardless of capturer type)
-		if r.monitorDB != nil {
-			pullStatus := monitor.PullStatusSuccess
-			durationMs := time.Since(batchCtx.StartTime).Milliseconds()
-			batchLog := &monitor.BatchLog{
-				BatchID:     batchCtx.BatchID,
-				FetchedRows: len(changes),
-				TxCount:     0,
-				DLQCount:    0,
-				DurationMs:  durationMs,
-				Status:      pullStatus,
-				CreatedAt:   batchCtx.StartTime,
+			// Skip processing if context is already cancelled
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-			if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
-				slog.Warn("failed to write batch_log", "error", err)
+
+			if len(result.Changes) == 0 {
+				continue
 			}
-			if err := r.monitorDB.Flush(); err != nil {
-				slog.Warn("failed to flush logs_db", "error", err)
+
+			batchCtx := &BatchContext{
+				BatchID:   result.BatchID,
+				StartTime: time.Now(),
+			}
+
+			// Convert capture.Change to core.Change
+			changes := r.convertChanges(result.Changes)
+
+			// Transformer processing with retry
+			if r.transformer != nil {
+				var transformerErr error
+				err := retry.DoWithName(ctx, func() error {
+					transformerErr = r.transformer.Transform(ctx, changes, batchCtx)
+					return transformerErr
+				}, retry.DefaultRetryConfig(), "transform")
+				if err != nil {
+					slog.Error("transformer error", "error", err, "batch_id", batchCtx.BatchID)
+					r.writeToDLQ(changes, transformerErr, "transformer")
+				}
+			}
+
+			// Write batch log (after transformer, regardless of capturer type)
+			if r.monitorDB != nil {
+				pullStatus := monitor.PullStatusSuccess
+				durationMs := time.Since(batchCtx.StartTime).Milliseconds()
+				batchLog := &monitor.BatchLog{
+					BatchID:     batchCtx.BatchID,
+					FetchedRows: len(changes),
+					TxCount:     0,
+					DLQCount:    0,
+					DurationMs:  durationMs,
+					Status:      pullStatus,
+					CreatedAt:   batchCtx.StartTime,
+				}
+				if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
+					slog.Warn("failed to write batch_log", "error", err)
+				}
+				if err := r.monitorDB.Flush(); err != nil {
+					slog.Warn("failed to flush logs_db", "error", err)
+				}
 			}
 		}
 	}
 }
 
-// SwitchCapturer stops the current Capturer and starts a new one.
-func (r *Runtime) SwitchCapturer(ctx context.Context, capturer Capturer) error {
-	return r.Run(ctx, capturer)
+// Close stops all capturers. Called when runtime is shutting down.
+func (r *Runtime) Close() {
+	for _, capturer := range r.capturers {
+		capturer.Stop()
+	}
 }
 
 // convertChanges converts CaptureChange (map) to core.Change.

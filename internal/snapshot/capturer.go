@@ -34,63 +34,66 @@ func NewSnapshotCapturer(querier *Querier, tables []CDCTable) *SnapshotCapturer 
 	}
 }
 
-// Fetch runs the snapshot and returns all changes.
-// The first call to Fetch starts the snapshot and returns all rows.
-// Subsequent calls return EOS=true immediately.
+// Fetch runs the snapshot and returns changes in batches.
+// The first call to Fetch starts the snapshot.
+// After all tables are processed, returns NextCapturer: CapturerCDC to switch back.
 // This is a blocking call that runs the full snapshot.
 func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	c.mu.Lock()
 	if c.stopped {
 		c.mu.Unlock()
-		return &core.CaptureResult{EOS: true}
+		return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 	}
 	if c.completed {
 		c.mu.Unlock()
-		return &core.CaptureResult{EOS: true}
+		return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 	}
-	if c.started {
+	if !c.started {
+		c.started = true
 		c.mu.Unlock()
-		return &core.CaptureResult{EOS: true}
-	}
-	c.started = true
-	c.mu.Unlock()
 
-	batchCtx := core.NewBatchContext()
-	fetchTime := time.Now()
+		batchCtx := core.NewBatchContext()
+		fetchTime := time.Now()
 
-	// Run snapshot for each table
-	for _, table := range c.tables {
-		slog.Info("SnapshotCapturer: processing table", "table", table.Schema+"."+table.Name)
+		// Run snapshot for each table
+		for _, table := range c.tables {
+			slog.Info("SnapshotCapturer: processing table", "table", table.Schema+"."+table.Name)
 
-		// Create a handler that collects changes
-		handler := newCollectingHandler(table.Name)
+			// Create a handler that collects changes
+			handler := newCollectingHandler(table.Name)
 
-		// Run snapshot for this table
-		_, err := c.querier.Run(ctx, table.Schema, table.Name, handler)
-		if err != nil {
-			slog.Error("SnapshotCapturer: failed to run snapshot", "table", table.Schema+"."+table.Name, "error", err)
-			// Continue with other tables
-			continue
+			// Run snapshot for this table
+			_, err := c.querier.Run(ctx, table.Schema, table.Name, handler)
+			if err != nil {
+				slog.Error("SnapshotCapturer: failed to run snapshot", "table", table.Schema+"."+table.Name, "error", err)
+				// Continue with other tables
+				continue
+			}
+
+			// Append handler changes to capturer changes
+			c.changes = append(c.changes, handler.Changes...)
+
+			slog.Info("SnapshotCapturer: table completed", "table", table.Schema+"."+table.Name, "rows", len(handler.Changes))
 		}
 
-		// Append handler changes to capturer changes
-		c.changes = append(c.changes, handler.Changes...)
+		duration := time.Since(fetchTime)
+		slog.Info("SnapshotCapturer: snapshot completed", "total_changes", len(c.changes), "duration_ms", duration.Milliseconds())
 
-		slog.Info("SnapshotCapturer: table completed", "table", table.Schema+"."+table.Name, "rows", len(handler.Changes))
+		c.mu.Lock()
+		c.completed = true
+		c.mu.Unlock()
+
+		// Return all changes with instruction to switch to ChangeCapturer
+		return &core.CaptureResult{
+			Changes:      c.changes,
+			BatchID:      batchCtx.BatchID,
+			NextCapturer: core.CapturerCDC,
+		}
 	}
-
-	duration := time.Since(fetchTime)
-	slog.Info("SnapshotCapturer: snapshot completed", "total_changes", len(c.changes), "duration_ms", duration.Milliseconds())
-
-	c.mu.Lock()
-	c.completed = true
 	c.mu.Unlock()
 
-	return &core.CaptureResult{
-		Changes: c.changes,
-		BatchID: batchCtx.BatchID,
-		EOS:     false,
-	}
+	// After started and not completed, but Fetch called again - shouldn't happen
+	return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 }
 
 // Stop signals the capturer to stop.
