@@ -1,7 +1,8 @@
 # Build output
-./dbkrab
-bin/
+dbkrab
+bin/dbkrab
 dbkrab_test
+dist/
 dist/
 
 # Dependencies
