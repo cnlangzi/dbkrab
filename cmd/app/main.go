@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/cdcadmin"
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -106,15 +107,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("connected to MSSQL",
-		"user", cfg.MSSQL.User,
-		"host", cfg.MSSQL.Host,
-		"port", cfg.MSSQL.Port,
-		"database", cfg.MSSQL.Database,
-		"pool_max_open", maxOpenConns,
-		"pool_max_idle", maxIdleConns,
-		"pool_max_lifetime", connMaxLifetime,
-		"pool_max_idle_time", connMaxIdleTime)
+		fmt.Fprintf(os.Stdout, "MSSQL: %s@%s:%d/%s pool:%d/%d lifetime:%v idle:%v\n",
+		cfg.MSSQL.User, cfg.MSSQL.Host, cfg.MSSQL.Port, cfg.MSSQL.Database,
+		maxOpenConns, maxIdleConns, connMaxLifetime, connMaxIdleTime)
 
 	// Create CDC store DB and Offset DB as separate databases
 	ctx := context.Background()
@@ -150,7 +145,7 @@ func main() {
 				slog.Warn("appStore.Close error", "error", err)
 			}
 		}()
-		slog.Info("CDC store initialized", "path", cfg.App.DB.CDC)
+			fmt.Fprintf(os.Stdout, "CDC store: %s\n", cfg.App.DB.CDC)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
@@ -167,7 +162,7 @@ func main() {
 			slog.Warn("offsetStore.Close error", "error", err)
 		}
 	}()
-	slog.Info("offset store initialized", "path", cfg.App.DB.Offset)
+		fmt.Fprintf(os.Stdout, "Offset store: %s\n", cfg.App.DB.Offset)
 
 	// Create DLQ with its own separate DB
 	dlqStore, err := dlq.New(ctx, cfg.App.DB.DLQ)
@@ -180,7 +175,7 @@ func main() {
 			slog.Warn("dlqStore.Close error", "error", err)
 		}
 	}()
-	slog.Info("dead letter queue initialized", "path", cfg.App.DB.DLQ)
+		fmt.Fprintf(os.Stdout, "DLQ: %s\n", cfg.App.DB.DLQ)
 
 	// Create monitor DB
 	monitorDB, err := monitor.New(ctx, cfg.App.DB.Monitor)
@@ -193,7 +188,7 @@ func main() {
 			slog.Warn("monitorDB.Close error", "error", err)
 		}
 	}()
-	slog.Info("monitor initialized", "path", cfg.App.DB.Monitor)
+		fmt.Fprintf(os.Stdout, "Monitor: %s\n", cfg.App.DB.Monitor)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
@@ -211,7 +206,7 @@ func main() {
 			slog.Warn("sinkerMgr.Close error", "error", err)
 		}
 	}()
-	slog.Info("sinker manager initialized")
+		fmt.Fprintf(os.Stdout, "Sinker: %d databases\n", len(cfg.Sinks.ToMap()))
 
 	// Create plugin manager
 	pluginManager := plugin.NewManager(monitorDB)
@@ -227,12 +222,20 @@ func main() {
 			slog.Warn("error stopping config watcher", "error", err)
 		}
 	}()
-	slog.Info("config watcher initialized", "path", *configPath)
+		fmt.Fprintf(os.Stdout, "Config: %s\n", *configPath)
 
 	// Create StateManager for process-level coordination
 	stateManager := core.NewStateManager()
 
-	// Create poller with dynamic plugin support
+	// Create Runtime for unified pipeline orchestration
+	runtime := core.NewRuntime(pluginManager, stateManager, offsetStore, appStore, dlqStore, monitorDB)
+
+	// Create ChangeCapturer for CDC incremental polling
+	cdcQuerier := cdc.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone))
+	interval, _ := cfg.Interval()
+	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetStore, interval)
+
+	// Create poller with dynamic plugin support (kept for shutdown and CDC admin)
 	poller := core.NewPoller(cfg, mssqlDB, pluginManager, appStore, offsetStore, dlqStore, monitorDB, stateManager)
 
 	// Set config reload channel for hot reload
@@ -260,7 +263,7 @@ func main() {
 
 	// Create CDC admin
 	cdcAdmin := cdcadmin.NewAdmin(&cfg.MSSQL)
-	slog.Info("CDC admin initialized")
+		fmt.Fprintf(os.Stdout, "CDC admin: ok\n")
 
 	// Check and set CDC retention to 7 days
 	retention, err := cdcAdmin.CheckAndSetCDCRetention()
@@ -268,9 +271,7 @@ func main() {
 		slog.Warn("failed to check/set CDC retention", "error", err)
 	} else {
 		retentionDays := float64(retention) / 1440
-		slog.Info("CDC retention configured",
-			"retention_minutes", retention,
-			"retention_days", retentionDays)
+		fmt.Fprintf(os.Stdout, "CDC retention: %.1f days\n", retentionDays)
 	}
 
 	// Start API/Dashboard server
@@ -280,7 +281,7 @@ func main() {
 	}
 	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, *configPath, cfg, configWatcher, stateManager, poller, offsetStore, mssqlDB)
 	go func() {
-		slog.Info("Dashboard starting", "port", apiPort, "url", fmt.Sprintf("http://localhost:%d", apiPort))
+			fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
 		if err := apiServer.Start(); err != nil {
 			slog.Warn("Dashboard stopped", "error", err)
 		}
@@ -299,20 +300,21 @@ func main() {
 
 	go func() {
 		<-sigCh
-		slog.Info("shutting down")
+		fmt.Fprintf(os.Stdout, "shutting down...\n")
 		cancel()
 		poller.Stop()
 		if err := apiServer.Stop(); err != nil {
-			slog.Warn("Dashboard stop error", "error", err)
+			fmt.Fprintf(os.Stderr, "Dashboard stop error: %v\n", err)
 		}
+		fmt.Fprintf(os.Stdout, "shutdown complete\n")
 	}()
 
-	// Start polling
-	slog.Info("starting dbkrab", "version", Version, "built", BuildTime)
-	if err := poller.Start(ctx); err != nil && err != context.Canceled {
-		slog.Error("poller error", "error", err)
+// Start polling via Runtime
+	fmt.Fprintf(os.Stdout, "dbkrab %s (built %s)\n", Version, BuildTime)
+	fmt.Fprintf(os.Stdout, "CDC polling: %d tables\n", len(cfg.Tables))
+	if err := runtime.Run(ctx, changeCapturer); err != nil && err != context.Canceled {
+		fmt.Fprintf(os.Stderr, "runtime error: %v\n", err)
 		os.Exit(1)
 	}
-
-	slog.Info("goodbye")
+	fmt.Fprintf(os.Stdout, "goodbye\n")
 }
