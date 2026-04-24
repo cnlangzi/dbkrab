@@ -224,14 +224,21 @@ func main() {
 	// Create StateManager for process-level coordination
 	stateManager := core.NewStateManager()
 
-	// Create Runtime for unified pipeline orchestration
-	runtime := core.NewRuntime(pluginManager, stateManager, dlqStore, monitorDB)
-
 	// Create ChangeCapturer for CDC incremental polling
 	cdcQuerier := cdc.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone))
 	offsetManager := cdc.NewOffsetManager(offsetStore, cdcQuerier)
 	interval, _ := cfg.Interval()
 	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetManager, appStore, interval)
+
+	// Create capturers map for Runtime
+	capturers := map[core.CapturerName]core.Capturer{
+		core.CapturerCDC:    changeCapturer,
+		core.CapturerSnapshot: nil, // TODO: initialize when needed
+		core.CapturerReplay:    nil, // TODO: initialize when needed
+	}
+
+	// Create Runtime for unified pipeline orchestration
+	runtime := core.NewRuntime(capturers, pluginManager, dlqStore, monitorDB)
 
 	// Start config watcher
 	go configWatcher.Start()
@@ -271,7 +278,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, nil, offsetStore, mssqlDB)
+	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, nil, offsetStore, mssqlDB, runtime)
 	go func() {
 			fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
 		if err := apiServer.Start(); err != nil {
@@ -304,7 +311,7 @@ func main() {
 // Start polling via Runtime
 	fmt.Fprintf(os.Stdout, "dbkrab %s (built %s)\n", Version, BuildTime)
 	fmt.Fprintf(os.Stdout, "CDC polling: %d tables\n", len(cfg.Tables))
-	if err := runtime.Run(ctx, changeCapturer); err != nil && err != context.Canceled {
+	if err := runtime.Run(ctx); err != nil && err != context.Canceled {
 		fmt.Fprintf(os.Stderr, "runtime error: %v\n", err)
 		os.Exit(1)
 	}

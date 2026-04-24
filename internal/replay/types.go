@@ -17,3 +17,12 @@ type LSNReplayResult struct {
 	TxCount     int
 	DLQCount    int
 }
+
+// Progress represents replay progress.
+type Progress struct {
+	TotalLSNs     int
+	ProcessedLSNs int
+	Started       bool
+	Completed     bool
+	Stopped       bool
+}

@@ -65,7 +65,8 @@ type Server struct {
 	sinksRoot       *os.Root            // Secure root for sinks directory access
 	skillsPath      string              // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
-	replayService   *replay.ReplayService // Replay service (in separate package)
+	runtime         *core.Runtime       // Runtime for capturer management
+	replayService   *replay.ReplayService // Replay service (legacy, to be removed)
 	poller          interface{}        // CDC poller (deprecated, use Runtime/Capturer)
 	snapshotService *snapshot.SnapshotService   // Snapshot service
 }
@@ -86,6 +87,7 @@ func NewServer(
 	poller interface{},
 	offsetStore offset.StoreInterface,
 	db *sql.DB,
+	runtime *core.Runtime,
 ) *Server {
 	// Get skills path from config, default to ./skills/sql if not configured
 	skillsPath := cfg.Plugins.SQL.Path
@@ -93,7 +95,7 @@ func NewServer(
 		skillsPath = "./skills/sql"
 	}
 
-	// Create ReplayService with StateManager
+	// Create ReplayService with StateManager (legacy, to be removed)
 	replaySvc := replay.NewReplayService(store, manager, dlqStore, monitorDB, stateManager)
 
 	return &Server{
@@ -112,6 +114,7 @@ func NewServer(
 		replayService:   replaySvc,
 		poller:          poller,
 		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, offsetStore, manager),
+		runtime:         runtime,
 	}
 }
 
@@ -600,29 +603,32 @@ func (s *Server) handleCDCStatus(c *xun.Context) error {
 
 // handleReplay handles POST /api/replay - starts replay (long-running, async)
 func (s *Server) handleReplay(c *xun.Context) error {
-	if s.store == nil {
-		return c.View(map[string]any{"success": false, "error": "store not initialized"})
+	if s.runtime == nil {
+		return c.View(map[string]any{"success": false, "error": "runtime not initialized"})
 	}
 
-	// Execute starts replay in goroutine, returns immediately
-	_, err := s.replayService.Execute(context.Background(), nil)
-	if err != nil {
-		return c.View(map[string]any{"success": false, "error": err.Error()})
-	}
+	// Switch to replay capturer
+	s.runtime.SwitchTo(core.CapturerReplay)
 
-	// Execute returns (nil, nil) if already running, or (nil, nil) on success
-	// Both cases: replay started (or already running), tell client to poll status
 	return c.View(map[string]any{"success": true, "message": "replay started", "state": "replay"})
 }
 
 // handleReplayStatus handles GET /api/replay/status
 func (s *Server) handleReplayStatus(c *xun.Context) error {
-	metadata := s.stateManager.Metadata()
+	if s.runtime == nil {
+		return c.View(map[string]any{"success": false, "error": "runtime not initialized"})
+	}
+
+	replayCapturer := s.runtime.Replay().(*replay.ReplayCapturer)
+	progress := replayCapturer.Progress()
+
 	return c.View(map[string]any{
-		"success": true,
-		"state":   s.stateManager.Current(),
-		"total":   metadata["total"],
-		"processed": metadata["processed"],
+		"success":    true,
+		"total":     progress.TotalLSNs,
+		"processed":  progress.ProcessedLSNs,
+		"started":    progress.Started,
+		"completed":  progress.Completed,
+		"stopped":    progress.Stopped,
 	})
 }
 

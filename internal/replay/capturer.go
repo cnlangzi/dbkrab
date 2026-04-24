@@ -151,6 +151,19 @@ func (c *ReplayCapturer) Stop() {
 	close(c.stopCh)
 }
 
+// Progress returns the current replay progress.
+func (c *ReplayCapturer) Progress() Progress {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Progress{
+		TotalLSNs:     len(c.lsns),
+		ProcessedLSNs: c.lsnIndex,
+		Started:       c.started,
+		Completed:     c.completed,
+		Stopped:       c.stopped,
+	}
+}
+
 // OpUpdateBefore is the operation type for UPDATE_BEFORE
 const OpUpdateBefore = 3
 
