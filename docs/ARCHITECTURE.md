@@ -54,18 +54,18 @@ MSSQL CDC Tables
 `Runtime` 是统一的数据管道编排器，负责所有捕获后的处理逻辑：
 
 - **Transformer 处理**：调用 ETL 插件处理 CDC 变更
-- **Store 写入**：将变更持久化到 cdc.db
 - **DLQ 处理**：失败数据写入死信队列
-- **Offset 管理**：维护 LSN 偏移量
 - **状态管理**：协调 Capturer 之间的切换
+
+**注意**：
+- Store 和 Offset 管理已移入 `ChangeCapturer` 内部
+- `ChangeCapturer` 自己管理 LSN offset 和 cdc.db 写入
 
 ```go
 // Runtime orchestrates data capture and ETL processing.
 type Runtime struct {
     transformer Transformer
     stateMgr    *StateManager
-    offsetStore offset.StoreInterface
-    store       Store
     dlq         *dlq.DLQ
     monitorDB   *monitor.DB
     currentCapturer Capturer
@@ -97,7 +97,7 @@ type Capturer interface {
 
 - **Querier**：执行 CDC 查询 (`fn_cdc_get_net_changes_*`)
 - **GapDetector**：CDC 间隙检测，防止数据丢失
-- **LSN 管理**：递增 LSN，维护偏移量
+- **OffsetManager**：LSN 偏移量管理，计算并持久化 next_lsn
 
 ### 4. SQL Plugin Engine (`plugin/sql/`)
 
@@ -129,21 +129,31 @@ CDC Change (single row)
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
            ChangeCapturer      SnapshotCapturer      ReplayCapturer
+           ├─OffsetManager     (no store)           (no store)
+           ├─Store (cdc.db)                          │
+           └─Transformer                               │
                     │                   │                   │
                     └───────────────────┴───────────────────┘
                                         │
                                         ▼
                             Runtime.Run(ctx, capturer)
                                         │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-              Transformer         Store.Write          DLQ.Write
-                    │                   │
-                    ▼                   ▼
-              Sink SQL ──────► SQLite (upsert)
+                                        ▼
+                              Transformer
+                                        │
+                                        ▼
+                              Sink SQL ──────► SQLite (upsert)
+                                        │
+                                        ▼
+                                   DLQ.Write
 ```
 
 **Per-Change Processing**：每行 CDC 变更触发一次 sink 执行，参数按变更隔离。
+
+**架构说明**：
+- `ChangeCapturer` 内部管理 `OffsetManager`（LSN offset）和 `Store`（cdc.db 写入）
+- `SnapshotCapturer` 和 `ReplayCapturer` 只返回数据，不写 store
+- `Runtime` 只负责调用 `Transformer`，不再管理 Store
 
 ---
 
@@ -161,6 +171,7 @@ dbkrab/
 │   │   └── ...
 │   ├── cdc/              # CDC query & ChangeCapturer
 │   │   ├── capturer.go  # ChangeCapturer (implements Capturer)
+│   │   ├── offset_manager.go # LSN offset management
 │   │   ├── query.go     # CDC query functions
 │   │   ├── gap_detector.go # Gap detection
 │   │   └── ...

@@ -10,7 +10,6 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
-	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
@@ -19,21 +18,13 @@ type Transformer interface {
 	Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 }
 
-// Store interface for persisting CDC changes
-type Store interface {
-	Write(changes []Change) (int, error)
-	Flush() error
-	Close() error
-}
-
 // Runtime orchestrates data capture and ETL processing.
-// It holds a Capturer for data ingestion and handles all post-fetch logic
-// (Transformer, DLQ, offset advancement, state management).
+// It holds a Capturer for data ingestion and handles post-fetch logic
+// (Transformer, DLQ, state management).
+// Note: Store is now internal to ChangeCapturer; Runtime does not manage it.
 type Runtime struct {
 	transformer Transformer
 	stateMgr    *StateManager
-	offsetStore offset.StoreInterface
-	store       Store
 	dlq         *dlq.DLQ
 	monitorDB   *monitor.DB
 
@@ -45,16 +36,12 @@ type Runtime struct {
 func NewRuntime(
 	transformer Transformer,
 	stateMgr *StateManager,
-	offsetStore offset.StoreInterface,
-	store Store,
 	dlq *dlq.DLQ,
 	monitorDB *monitor.DB,
 ) *Runtime {
 	return &Runtime{
 		transformer: transformer,
 		stateMgr:    stateMgr,
-		offsetStore: offsetStore,
-		store:       store,
 		dlq:         dlq,
 		monitorDB:   monitorDB,
 	}
@@ -119,44 +106,24 @@ func (r *Runtime) Run(ctx context.Context, capturer Capturer) error {
 			}
 		}
 
-		// Store write with retry
-		if r.store != nil {
-			var inserted int
-			err := retry.DoWithName(ctx, func() error {
-				var writeErr error
-				inserted, writeErr = r.store.Write(changes)
-				return writeErr
-			}, retry.DefaultRetryConfig(), "store")
-			if err != nil {
-				slog.Error("store error", "error", err)
-				r.writeToDLQ(changes, err, "store")
-			} else {
-				// Flush store
-				if err := r.store.Flush(); err != nil {
-					slog.Error("store flush error", "error", err)
-				}
+		// Write batch log (after transformer, regardless of capturer type)
+		if r.monitorDB != nil {
+			pullStatus := monitor.PullStatusSuccess
+			durationMs := time.Since(batchCtx.StartTime).Milliseconds()
+			batchLog := &monitor.BatchLog{
+				BatchID:     batchCtx.BatchID,
+				FetchedRows: len(changes),
+				TxCount:     0,
+				DLQCount:    0,
+				DurationMs:  durationMs,
+				Status:      pullStatus,
+				CreatedAt:   batchCtx.StartTime,
 			}
-
-			// Write batch log
-			if r.monitorDB != nil {
-				pullStatus := monitor.PullStatusSuccess
-				durationMs := time.Since(batchCtx.StartTime).Milliseconds()
-				batchLog := &monitor.BatchLog{
-					BatchID:     batchCtx.BatchID,
-					FetchedRows: len(changes),
-					TxCount:     0,
-					DLQCount:    0,
-					DurationMs:  durationMs,
-					Status:      pullStatus,
-					CreatedAt:   batchCtx.StartTime,
-				}
-				if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
-					slog.Warn("failed to write batch_log", "error", err)
-				}
-				if err := r.monitorDB.Flush(); err != nil {
-					slog.Warn("failed to flush logs_db", "error", err)
-				}
-				_ = inserted
+			if err := r.monitorDB.WriteBatchLog(batchLog); err != nil {
+				slog.Warn("failed to write batch_log", "error", err)
+			}
+			if err := r.monitorDB.Flush(); err != nil {
+				slog.Warn("failed to flush logs_db", "error", err)
 			}
 		}
 	}

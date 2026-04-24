@@ -55,7 +55,7 @@ func (m *mockQuerier) GetChanges(ctx context.Context, captureInstance string, ta
 	return m.changes, nil
 }
 
-// mockOffsetStore implements OffsetGetter for testing
+// mockOffsetStore implements offset.StoreInterface for testing
 type mockOffsetStore struct {
 	offsets map[string]storedOffset
 }
@@ -71,11 +71,21 @@ func newMockOffsetStore() *mockOffsetStore {
 	}
 }
 
+func (m *mockOffsetStore) Load() error   { return nil }
+func (m *mockOffsetStore) Save() error   { return nil }
+func (m *mockOffsetStore) Flush() error  { return nil }
+func (m *mockOffsetStore) GetAll() (map[string]offset.Offset, error) { return nil, nil }
+
 func (m *mockOffsetStore) Get(table string) (offset.Offset, error) {
 	if v, ok := m.offsets[table]; ok {
 		return offset.Offset{LastLSN: v.LastLSN, NextLSN: v.NextLSN}, nil
 	}
 	return offset.Offset{}, nil
+}
+
+func (m *mockOffsetStore) Set(table, lastLSN, nextLSN string) error {
+	m.offsets[table] = storedOffset{LastLSN: lastLSN, NextLSN: nextLSN}
+	return nil
 }
 
 // TestGetFromLSN_ColdStart_NoStoredOffset verifies cold start returns MinLSN
@@ -84,10 +94,11 @@ func TestGetFromLSN_ColdStart_NoStoredOffset(t *testing.T) {
 		minLSN: []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xD8, 0x00, 0x64},
 	}
 	store := newMockOffsetStore()
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	fromLSN, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{}, []byte{0x00})
@@ -109,10 +120,11 @@ func TestGetFromLSN_ColdStart_InvalidStoredOffset(t *testing.T) {
 	}
 	store := newMockOffsetStore()
 	store.offsets["dbo.test"] = storedOffset{LastLSN: "invalid-hex", NextLSN: ""}
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	fromLSN, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{LastLSN: "invalid-hex"}, []byte{0x00})
@@ -130,10 +142,11 @@ func TestGetFromLSN_NoNewData_WhenAtMaxLSN(t *testing.T) {
 	querier := &mockQuerier{}
 	store := newMockOffsetStore()
 	store.offsets["dbo.test"] = storedOffset{LastLSN: lastLSN, NextLSN: ""}
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN == stored.LastLSN → no new data
@@ -155,10 +168,11 @@ func TestGetFromLSN_NewData_UsesStoredNextLSN(t *testing.T) {
 	querier := &mockQuerier{}
 	store := newMockOffsetStore()
 	store.offsets["dbo.test"] = storedOffset{LastLSN: lastLSN, NextLSN: nextLSN}
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN > stored.LastLSN → new data, should use next_lsn
@@ -186,10 +200,11 @@ func TestGetFromLSN_NewData_IncrementWhenNoNextLSN(t *testing.T) {
 	}
 	store := newMockOffsetStore()
 	store.offsets["dbo.test"] = storedOffset{LastLSN: lastLSN, NextLSN: ""} // No next_lsn stored
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN > stored.LastLSN, but no next_lsn → increment
@@ -214,10 +229,11 @@ func TestGetFromLSN_GetMinLSN_Error(t *testing.T) {
 		getMinLSNErr: errors.New("CDC not enabled for table"),
 	}
 	store := newMockOffsetStore()
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	_, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{}, []byte{0x00})
@@ -234,10 +250,11 @@ func TestGetFromLSN_IncrementLSN_Error(t *testing.T) {
 	}
 	store := newMockOffsetStore()
 	store.offsets["dbo.test"] = storedOffset{LastLSN: lastLSN, NextLSN: ""}
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier: querier,
-		offsets: store,
+		querier:   querier,
+		offsetMgr: offsetMgr,
 	}
 
 	globalMaxLSN, _ := hex.DecodeString("0000002B000001D90000")
@@ -357,13 +374,14 @@ func TestChangeCapturer_Fetch_Integration(t *testing.T) {
 		},
 	}
 	store := newMockOffsetStore()
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:  querier,
-		tables:   []string{"dbo.orders"},
-		offsets:  store,
-		interval: 100 * time.Millisecond,
-		stopCh:   make(chan struct{}),
+		querier:   querier,
+		tables:    []string{"dbo.orders"},
+		offsetMgr: offsetMgr,
+		interval:  100 * time.Millisecond,
+		stopCh:    make(chan struct{}),
 	}
 
 	result := capturer.Fetch(context.TODO())
@@ -393,13 +411,14 @@ func TestChangeCapturer_Fetch_EmptyResult(t *testing.T) {
 		LastLSN: "0000002B000001D80064", // Same as maxLSN
 		NextLSN: "",
 	}
+	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:  querier,
-		tables:   []string{"dbo.orders"},
-		offsets:  store,
-		interval: 100 * time.Millisecond,
-		stopCh:   make(chan struct{}),
+		querier:   querier,
+		tables:    []string{"dbo.orders"},
+		offsetMgr: offsetMgr,
+		interval:  100 * time.Millisecond,
+		stopCh:    make(chan struct{}),
 	}
 
 	result := capturer.Fetch(context.TODO())

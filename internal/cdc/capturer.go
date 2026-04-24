@@ -9,22 +9,19 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/store"
 )
 
 // ChangeCapturer fetches CDC changes via incremental polling.
 // It wraps CDCQuerier to perform timer-triggered poll cycles.
 type ChangeCapturer struct {
-	querier  CDCQuerier
-	tables   []string
-	offsets  OffsetGetter
-	interval time.Duration
-	stopCh   chan struct{}
-	stopped  bool
-}
-
-// OffsetGetter interface for reading LSN offsets
-type OffsetGetter interface {
-	Get(table string) (offset.Offset, error)
+	querier   CDCQuerier
+	tables    []string
+	offsetMgr *OffsetManager
+	store     store.Store
+	interval  time.Duration
+	stopCh    chan struct{}
+	stopped   bool
 }
 
 // CDCQuerier interface for CDC database operations (allows mocking in tests)
@@ -36,13 +33,14 @@ type CDCQuerier interface {
 }
 
 // NewChangeCapturer creates a new ChangeCapturer.
-func NewChangeCapturer(querier CDCQuerier, tables []string, offsets OffsetGetter, interval time.Duration) *ChangeCapturer {
+func NewChangeCapturer(querier CDCQuerier, tables []string, offsetMgr *OffsetManager, store store.Store, interval time.Duration) *ChangeCapturer {
 	return &ChangeCapturer{
-		querier:  querier,
-		tables:   tables,
-		offsets:  offsets,
-		interval: interval,
-		stopCh:   make(chan struct{}),
+		querier:   querier,
+		tables:    tables,
+		offsetMgr: offsetMgr,
+		store:     store,
+		interval:  interval,
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -62,6 +60,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	}
 
 	var allChanges []core.CaptureChange
+	maxLSNByTable := make(map[string][]byte) // table -> max LSN of changes
 
 	// Poll each table
 	for _, table := range c.tables {
@@ -69,7 +68,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		captureInstance := CaptureInstanceName(schema, tableName)
 
 		// Get stored offset
-		stored, err := c.offsets.Get(table)
+		stored, err := c.offsetMgr.Get(table)
 		if err != nil {
 			slog.Warn("ChangeCapturer: failed to get offset", "table", table, "error", err)
 			continue
@@ -94,7 +93,8 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 			continue
 		}
 
-		// Convert to core.CaptureChange (map)
+		// Convert to core.CaptureChange (map) and track max LSN per table
+		var tableMaxLSN []byte
 		for _, cc := range cdcChanges {
 			hashID := ComputeChangeID(cc.TransactionID, cc.Table, cc.Data, cc.LSN, cc.Operation)
 			change := core.CaptureChange{
@@ -107,6 +107,33 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 				"id":             hashID,
 			}
 			allChanges = append(allChanges, change)
+
+			// Track max LSN for this table
+			if len(cc.LSN) > 0 && (len(tableMaxLSN) == 0 || LSN(cc.LSN).Compare(tableMaxLSN) > 0) {
+				tableMaxLSN = cc.LSN
+			}
+		}
+		if len(tableMaxLSN) > 0 {
+			maxLSNByTable[table] = tableMaxLSN
+		}
+	}
+
+	// Save offsets for tables that had changes
+	for table, maxLSN := range maxLSNByTable {
+		if err := c.offsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
+			slog.Warn("ChangeCapturer: failed to save offset", "table", table, "error", err)
+		}
+	}
+
+	// Write changes to cdc.db store
+	if c.store != nil && len(allChanges) > 0 {
+		coreChanges := c.convertToCoreChanges(allChanges)
+		if _, err := c.store.Write(coreChanges); err != nil {
+			slog.Warn("ChangeCapturer: failed to write to store", "error", err)
+		} else {
+			if err := c.store.Flush(); err != nil {
+				slog.Warn("ChangeCapturer: failed to flush store", "error", err)
+			}
 		}
 	}
 
@@ -180,6 +207,31 @@ func (c *ChangeCapturer) Stop() {
 	}
 	c.stopped = true
 	close(c.stopCh)
+}
+
+// convertToCoreChanges converts []CaptureChange to []core.Change.
+func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChange) []core.Change {
+	changes := make([]core.Change, 0, len(captureChanges))
+	for _, cc := range captureChanges {
+		table, _ := cc["table"].(string)
+		txID, _ := cc["transaction_id"].(string)
+		lsn, _ := cc["lsn"].([]byte)
+		opVal, _ := cc["operation"].(int)
+		data, _ := cc["data"].(map[string]interface{})
+		commitTime, _ := cc["commit_time"].(time.Time)
+		id, _ := cc["id"].(string)
+
+		changes = append(changes, core.Change{
+			Table:         table,
+			TransactionID: txID,
+			LSN:           lsn,
+			Operation:     core.Operation(opVal),
+			Data:          data,
+			CommitTime:    commitTime,
+			ID:            id,
+		})
+	}
+	return changes
 }
 
 // LSN is a type alias for LSN comparison

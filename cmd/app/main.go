@@ -225,12 +225,13 @@ func main() {
 	stateManager := core.NewStateManager()
 
 	// Create Runtime for unified pipeline orchestration
-	runtime := core.NewRuntime(pluginManager, stateManager, offsetStore, appStore, dlqStore, monitorDB)
+	runtime := core.NewRuntime(pluginManager, stateManager, dlqStore, monitorDB)
 
 	// Create ChangeCapturer for CDC incremental polling
 	cdcQuerier := cdc.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone))
+	offsetManager := cdc.NewOffsetManager(offsetStore, cdcQuerier)
 	interval, _ := cfg.Interval()
-	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetStore, interval)
+	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetManager, appStore, interval)
 
 	// Start config watcher
 	go configWatcher.Start()
