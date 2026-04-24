@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/capture"
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
@@ -19,7 +18,7 @@ type SnapshotCapturer struct {
 
 	mu        sync.Mutex
 	offset    int              // Current offset in changes slice
-	changes   []capture.Change // All captured changes
+	changes   []core.CaptureChange // All captured changes
 	started   bool
 	completed bool
 	stopped   bool
@@ -39,24 +38,24 @@ func NewSnapshotCapturer(querier *Querier, tables []CDCTable) *SnapshotCapturer 
 // The first call to Fetch starts the snapshot and returns all rows.
 // Subsequent calls return EOS=true immediately.
 // This is a blocking call that runs the full snapshot.
-func (c *SnapshotCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
+func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	c.mu.Lock()
 	if c.stopped {
 		c.mu.Unlock()
-		return &capture.CaptureResult{EOS: true}
+		return &core.CaptureResult{EOS: true}
 	}
 	if c.completed {
 		c.mu.Unlock()
-		return &capture.CaptureResult{EOS: true}
+		return &core.CaptureResult{EOS: true}
 	}
 	if c.started {
 		c.mu.Unlock()
-		return &capture.CaptureResult{EOS: true}
+		return &core.CaptureResult{EOS: true}
 	}
 	c.started = true
 	c.mu.Unlock()
 
-	batchCtx := capture.NewBatchContext()
+	batchCtx := core.NewBatchContext()
 	fetchTime := time.Now()
 
 	// Run snapshot for each table
@@ -87,7 +86,7 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 	c.completed = true
 	c.mu.Unlock()
 
-	return &capture.CaptureResult{
+	return &core.CaptureResult{
 		Changes: c.changes,
 		BatchID: batchCtx.BatchID,
 		EOS:     false,
@@ -105,24 +104,24 @@ func (c *SnapshotCapturer) Stop() {
 // collectingHandler implements TableHandler to collect changes.
 type collectingHandler struct {
 	TableName string
-	Changes   []capture.Change
+	Changes   []core.CaptureChange
 }
 
 func newCollectingHandler(tableName string) *collectingHandler {
 	return &collectingHandler{
 		TableName: tableName,
-		Changes:   make([]capture.Change, 0),
+		Changes:   make([]core.CaptureChange, 0),
 	}
 }
 
-// HandleTable converts core.Change batch to capture.Change and appends to buffer.
+// HandleTable converts core.Change batch to CaptureChange and appends to buffer.
 func (h *collectingHandler) HandleTable(ctx context.Context, changes []core.Change) error {
 	for _, c := range changes {
-		// Convert core.Change to capture.Change (map)
-		change := capture.Change{
-			"table":      c.Table,
-			"data":       c.Data,
-			"operation":  int(c.Operation),
+		// Convert core.Change to CaptureChange (map)
+		change := core.CaptureChange{
+			"table":       c.Table,
+			"data":        c.Data,
+			"operation":    int(c.Operation),
 			"commit_time": c.CommitTime,
 		}
 		h.Changes = append(h.Changes, change)
@@ -131,4 +130,4 @@ func (h *collectingHandler) HandleTable(ctx context.Context, changes []core.Chan
 }
 
 // Ensure we implement Capturer interface
-var _ capture.Capturer = (*SnapshotCapturer)(nil)
+var _ core.Capturer = (*SnapshotCapturer)(nil)

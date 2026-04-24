@@ -232,12 +232,6 @@ func main() {
 	interval, _ := cfg.Interval()
 	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetStore, interval)
 
-	// Create poller with dynamic plugin support (kept for shutdown and CDC admin)
-	poller := core.NewPoller(cfg, mssqlDB, pluginManager, appStore, offsetStore, dlqStore, monitorDB, stateManager)
-
-	// Set config reload channel for hot reload
-	poller.SetReloadChan(configWatcher.ReloadChan())
-
 	// Start config watcher
 	go configWatcher.Start()
 
@@ -276,7 +270,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, poller, offsetStore, mssqlDB)
+	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, nil, offsetStore, mssqlDB)
 	go func() {
 			fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
 		if err := apiServer.Start(); err != nil {
@@ -299,7 +293,7 @@ func main() {
 		<-sigCh
 		fmt.Fprintf(os.Stdout, "shutting down...\n")
 		cancel()
-		poller.Stop()
+		changeCapturer.Stop()
 		if err := apiServer.Stop(); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard stop error: %v\n", err)
 		}

@@ -11,10 +11,21 @@ MSSQL CDC Tables
     │
     ▼
 ┌─────────────────────────────────────────┐
-│           dbkrab Core                   │
-│  • Minimum LSN Synchronization          │
-│  • Transaction Grouping                 │
-│  • CDC Gap Detection                     │
+│         Capturer Interface              │
+│  (core.Capturer)                       │
+│  • ChangeCapturer  - 增量轮询           │
+│  • SnapshotCapturer - 全量同步          │
+│  • ReplayCapturer  - 历史重放           │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│           dbkrab Runtime                │
+│  (core.Runtime)                         │
+│  • Transformer 处理                    │
+│  • Store 写入                         │
+│  • DLQ 错误处理                       │
+│  • Offset 管理                        │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -38,66 +49,73 @@ MSSQL CDC Tables
 
 ## Core Components
 
-### 1. CDC Poller (`internal/core/`)
+### 1. Runtime (`internal/core/runtime.go`)
 
-Reads changes from MSSQL CDC tables using LSN-based incremental polling.
+`Runtime` 是统一的数据管道编排器，负责所有捕获后的处理逻辑：
 
-- **LSN Tracking**: Persists last consumed LSN to SQLite
-- **Transaction Grouping**: Groups changes by `__$transaction_id`
-- **Gap Detection**: Monitors CDC cleanup window
-- **Net Changes Mode**: When MSSQL CDC is enabled with `supports_net_changes = 1`, the poller uses `fn_cdc_get_net_changes_*` functions which return only the final row state, eliminating `UPDATE_BEFORE` rows from the stream.
+- **Transformer 处理**：调用 ETL 插件处理 CDC 变更
+- **Store 写入**：将变更持久化到 cdc.db
+- **DLQ 处理**：失败数据写入死信队列
+- **Offset 管理**：维护 LSN 偏移量
+- **状态管理**：协调 Capturer 之间的切换
 
-#### CDC Capture Modes
-
-MSSQL CDC supports two capture modes:
-
-| Mode | Function | Returns | UPDATE_BEFORE Rows |
-|------|----------|---------|-------------------|
-| `all_changes` | `fn_cdc_get_all_changes_*` | All row versions | Yes (before image) |
-| `net_changes` | `fn_cdc_get_net_changes_*` | Final row state only | No |
-
-**Why Net Changes?**
-
-The `net_changes` mode eliminates `UPDATE_BEFORE` rows, which:
-- Prevents "unknown operation type: UPDATE_BEFORE" errors
-- Reduces the number of CDC rows to process
-- Simplifies transaction handling (no intermediate states)
-
-**Migration for Existing Capture Instances**
-
-If CDC was previously enabled without net_changes (`supports_net_changes = 0`), existing capture instances must be rebuilt to use net_changes:
-
-```sql
--- Disable old capture instance
-EXEC sys.sp_cdc_disable_table
-    @source_schema = 'dbo',
-    @source_name = 'YourTable',
-    @capture_instance = 'dbo_YourTable';
-
--- Re-enable with net_changes support
-EXEC sys.sp_cdc_enable_table
-    @source_schema = 'dbo',
-    @source_name = 'YourTable',
-    @role_name = NULL,
-    @supports_net_changes = 1;
+```go
+// Runtime orchestrates data capture and ETL processing.
+type Runtime struct {
+    transformer Transformer
+    stateMgr    *StateManager
+    offsetStore offset.StoreInterface
+    store       Store
+    dlq         *dlq.DLQ
+    monitorDB   *monitor.DB
+    currentCapturer Capturer
+}
 ```
 
-> **Note**: Rebuilding a capture instance clears all CDC history for that table. Plan accordingly for production systems.
+### 2. Capturer 接口 (`internal/core/capturer.go`)
 
-### 2. SQL Plugin Engine (`plugin/sql/`)
+`Capturer` 是数据摄取接口，每种实现对应一种 CDC 模式：
 
-Processes CDC changes using SQL as the domain-specific language.
+```go
+type Capturer interface {
+    Fetch(ctx context.Context) *CaptureResult
+    Stop()
+}
+```
 
-- **Loader**: Reads skill YAML files from `./skills/`
-- **Mapper**: Converts CDC data to SQL parameters
-- **Executor**: Runs jobs and sinks in parallel
-- **Writer**: Writes results to SQLite with upsert logic
+#### 实现类型
 
-### 3. Dashboard (`api/dashboard/`)
+| 实现 | 位置 | 说明 |
+|------|------|------|
+| `ChangeCapturer` | `internal/cdc/capturer.go` | 增量轮询，从 MSSQL CDC 表读取变更 |
+| `SnapshotCapturer` | `internal/snapshot/capturer.go` | 全量同步，从 MSSQL 表读取快照 |
+| `ReplayCapturer` | `internal/replay/capturer.go` | 历史重放，从 cdc.db 读取历史 |
 
-Go + HTMX dashboard for operations.
+### 3. CDC Query (`internal/cdc/`)
 
-- Skills management, DLQ monitoring, CDC status, Gap detection
+直接从 MSSQL CDC 表读取变更数据：
+
+- **Querier**：执行 CDC 查询 (`fn_cdc_get_net_changes_*`)
+- **GapDetector**：CDC 间隙检测，防止数据丢失
+- **LSN 管理**：递增 LSN，维护偏移量
+
+### 4. SQL Plugin Engine (`plugin/sql/`)
+
+使用 SQL 作为领域特定语言处理 CDC 变更：
+
+- **Loader**：从 `./skills/` 读取 skill YAML 文件
+- **Mapper**：将 CDC 数据转换为 SQL 参数
+- **Executor**：并行执行 job 和 sink
+- **Writer**：写入 SQLite（upsert 逻辑）
+
+### 5. Dashboard (`api/dashboard/`)
+
+Go + HTMX 仪表板用于运维：
+
+- Skills 管理
+- DLQ 监控
+- CDC 状态
+- Gap 检测
 
 ---
 
@@ -106,10 +124,26 @@ Go + HTMX dashboard for operations.
 ```
 CDC Change (single row)
     │
-    └──► Sink SQL (by operation type) ──► SQLite
+    └──► Capturer.Fetch() → CaptureChange[]
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    ▼                   ▼                   ▼
+           ChangeCapturer      SnapshotCapturer      ReplayCapturer
+                    │                   │                   │
+                    └───────────────────┴───────────────────┘
+                                        │
+                                        ▼
+                            Runtime.Run(ctx, capturer)
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    ▼                   ▼                   ▼
+              Transformer         Store.Write          DLQ.Write
+                    │                   │
+                    ▼                   ▼
+              Sink SQL ──────► SQLite (upsert)
 ```
 
-**Per-Change Processing**: Each CDC row triggers sink execution. Parameters are isolated per change.
+**Per-Change Processing**：每行 CDC 变更触发一次 sink 执行，参数按变更隔离。
 
 ---
 
@@ -117,28 +151,78 @@ CDC Change (single row)
 
 ```
 dbkrab/
-├── cmd/app/           # CLI entry point
+├── cmd/app/              # CLI entry point
 ├── internal/
-│   ├── core/             # CDC poller, LSN handling
-│   ├── cdc/              # CDC query functions
-│   ├── config/           # YAML config loader + hot-reload
+│   ├── core/             # Runtime, Capturer interface
+│   │   ├── runtime.go    # Main orchestrator
+│   │   ├── capturer.go  # Capturer interface + CaptureChange
+│   │   ├── transaction.go # Change struct, Operation
+│   │   ├── state.go     # State management
+│   │   └── ...
+│   ├── cdc/              # CDC query & ChangeCapturer
+│   │   ├── capturer.go  # ChangeCapturer (implements Capturer)
+│   │   ├── query.go     # CDC query functions
+│   │   ├── gap_detector.go # Gap detection
+│   │   └── ...
+│   ├── snapshot/         # SnapshotCapturer
+│   │   └── capturer.go  # SnapshotCapturer
+│   ├── replay/           # ReplayCapturer
+│   │   ├── capturer.go  # ReplayCapturer
+│   │   └── replay.go    # Replay logic
+│   ├── config/          # YAML config loader + hot-reload
 │   ├── offset/           # LSN persistence (SQLite)
-│   ├── dlq/              # Dead letter queue
+│   ├── dlq/             # Dead letter queue
 │   └── ...
 ├── plugin/sql/           # SQL plugin engine
-│   ├── engine.go         # Main executor
-│   ├── loader.go         # Skill YAML loader
-│   ├── executor.go       # Sink executor
-│   ├── writer.go         # SQLite writer (upsert)
-│   └── pool.go          # SQLite connection pool
+│   ├── engine.go        # Main executor
+│   ├── loader.go        # Skill YAML loader
+│   ├── executor.go      # Sink executor
+│   └── writer.go        # SQLite writer (upsert)
 ├── api/
-│   ├── dashboard/        # HTMX dashboard
-│   └── skills.go         # Skills CRUD API
-├── skills/               # Skill definitions (YAML)
-└── data/                 # Data directory
-    ├── system/           # System DB (offset, DLQ)
-    └── sinks/            # Per-skill SQLite databases
+│   └── dashboard/       # HTMX dashboard
+├── skills/              # Skill definitions (YAML)
+└── data/                # Data directory
+    └── app/             # System DB (offset, DLQ, transactions)
 ```
+
+---
+
+## CDC Capture Modes
+
+MSSQL CDC 支持两种捕获模式：
+
+| Mode | Function | Returns | UPDATE_BEFORE Rows |
+|------|----------|---------|-------------------|
+| `all_changes` | `fn_cdc_get_all_changes_*` | All row versions | Yes (before image) |
+| `net_changes` | `fn_cdc_get_net_changes_*` | Final row state only | No |
+
+**为什么使用 Net Changes？**
+
+`net_changes` 模式消除 `UPDATE_BEFORE` 行，这：
+- 防止 "unknown operation type: UPDATE_BEFORE" 错误
+- 减少处理的 CDC 行数
+- 简化事务处理（无中间状态）
+
+**迁移现有捕获实例**
+
+如果 CDC 之前未启用 net_changes（`supports_net_changes = 0`），必须重建捕获实例才能使用 net_changes：
+
+```sql
+-- 禁用旧捕获实例
+EXEC sys.sp_cdc_disable_table
+    @source_schema = 'dbo',
+    @source_name = 'YourTable',
+    @capture_instance = 'dbo_YourTable';
+
+-- 使用 net_changes 支持重新启用
+EXEC sys.sp_cdc_enable_table
+    @source_schema = 'dbo',
+    @source_name = 'YourTable',
+    @role_name = NULL,
+    @supports_net_changes = 1;
+```
+
+> **注意**：重建捕获实例会清除该表的所有 CDC 历史。生产系统请谨慎规划。
 
 ---
 
@@ -152,80 +236,6 @@ All SQLite databases in dbkrab use **`github.com/cnlangzi/sqlite`** — a Go wra
 - **Buffered writes**: writer batches changes and flushes asynchronously (100ms interval, 100-item buffer) for better TPS
 - **WAL journal mode**: enabled automatically via DSN pragmas on the writer
 - **Automatic PRAGMAs**: busy_timeout, synchronous, cache_size, temp_store, mmap_size all configured via DSN parameters
-
-```go
-import "github.com/cnlangzi/sqlite"
-
-// All reads go through Reader (concurrent, connection-pooled)
-rows, err := db.Reader.Query("SELECT ...")
-
-// All writes go through Writer (buffered, auto-batched)
-_, err := db.Writer.Exec("INSERT INTO ...")
-
-// Flush ensures buffered writes are committed before reads
-db.Flush()
-```
-
-**Reader DSN pragmas**: `mode=ro`, `cache=private`, `query_only`, `mmap_size`, `threads` (scales with CPU count)
-
-**Writer DSN pragmas**: `mode=rwc`, `_journal_mode=WAL`, `_synchronous=NORMAL`, `_busy_timeout=5000`, `temp_store=MEMORY`, `cache_size`
-
-> **Do not** use `PRAGMA journal_mode=WAL` or other PRAGMA statements manually. The wrapper handles all SQLite tuning automatically.
-
-### Schema Migration: yaitoo/sqle/migrate
-
-Database schemas are managed by **`github.com/yaitoo/sqle/migrate`** with semver migration directories.
-
-**Migration directory structure:**
-
-```
-internal/store/migrations/
-└── 1.0.0/
-    └── 001_initial.sql
-```
-
-**SQL file format:**
-
-```sql
--- Migration: 001_initial
--- Module: dbkrab-store
--- Description: Create initial schema
--- Versioning Rules:
---   - Major changes (breaking schema, new tables): increment major, require Devin confirmation
---   - Schema table-structure changes: increment minor version (e.g., 1.1.0, 1.2.0)
---   - Field-only changes (defaults, constraints without structural change): increment patch (e.g., 1.0.1)
---   - All migrations live under the initial semver folder (1.0.0) per current policy decision
-
-CREATE TABLE IF NOT EXISTS transactions (...);
-CREATE INDEX IF NOT EXISTS idx_xxx ON transactions(...);
-```
-
-**Initialization (raw *sql.DB required for sqle/migrate):**
-
-```go
-import (
-    "embed"
-    "github.com/cnlangzi/sqlite"
-    "github.com/yaitoo/sqle"
-    "github.com/yaitoo/sqle/migrate"
-)
-
-//go:embed migrations
-var migrationsFS embed.FS
-
-// sqle/migrate needs the raw *sql.DB from the buffered writer
-sqleDB := sqle.Open(db.Writer.DB)
-
-migrator := migrate.New(sqleDB)
-if err := migrator.Discover(migrationsFS, migrate.WithModule("dbkrab-store")); err != nil {
-    return err
-}
-if err := migrator.Migrate(ctx); err != nil {
-    return err
-}
-```
-
-> **Important**: Only use `sqle.Open(db.Writer.DB)` for migrations. After migration, use `sqlite.DB` for all application reads and writes (Writer for writes, Reader for reads).
 
 ### Unified App DB
 
@@ -243,9 +253,9 @@ The DLQ uses its own separate database (`./data/app/dlq.db`):
 |-------|---------|
 | `dlq_entries` | Dead letter queue |
 
-### Key Concepts
+---
 
-### CDC Parameters
+## CDC Parameters
 
 CDC data is injected as SQL parameters:
 
@@ -272,27 +282,19 @@ The `transactions` table stores captured CDC changes:
 | `changed_at` | TIMESTAMP | Transaction commit time from MSSQL |
 | `pulled_at` | TIMESTAMP | When the change was pulled |
 
-**Content-Based ID**: The `id` column uses SHA256(transaction_id + table_name + data + lsn + operation), truncated to the first 16 bytes (32 hex characters). This is deterministic and unique per change content. Using a content-based primary key instead of an auto-increment integer prevents record loss when LSN advancement skips remaining rows in the same LSN group during CDC pulls. Insert operations use `INSERT OR IGNORE` to silently skip duplicates.
-
-**LSN Semantics**: LSN (Log Sequence Number) is a transaction-level identifier from MSSQL CDC. Multiple row changes in the same transaction share the same LSN. Stored as a `0x`-prefixed hex string for readability and deterministic sorting.
-
-### Sinks
-
-| | Sinks |
-|---|---|
-| **Execution** | Per-change, filtered by operation |
-| **Output** | Target table |
-| **Use case** | Final sync output |
-
-### Transaction Boundary
-
-All writes (jobs + sinks) for a single CDC change are committed in one transaction. Failed changes go to DLQ.
+**Content-Based ID**: The `id` column uses SHA256(transaction_id + table_name + data + lsn + operation), truncated to the first 16 bytes (32 hex characters). This is deterministic and unique per change content.
 
 ---
 
 ## Transformer Pipeline
 
 The `core.Transformer` interface (`Transform(ctx, changes, batchCtx)`) is the ETL processing entry point:
+
+```go
+type Transformer interface {
+    Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
+}
+```
 
 ```
 []core.Change
@@ -309,16 +311,6 @@ The `core.Transformer` interface (`Transform(ctx, changes, batchCtx)`) is the ET
 
     │
     └──► If failed → write to DLQ
-```
-
-**Per-Change Processing**: Each CDC row triggers sink execution. Parameters are isolated per change.
-
-**Transformer Interface** (`internal/core/poller.go`):
-
-```go
-type Transformer interface {
-    Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
-}
 ```
 
 ---

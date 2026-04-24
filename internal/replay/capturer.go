@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/cnlangzi/dbkrab/internal/capture"
+	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
 // ReplayCapturer fetches CDC changes from the store for replay.
@@ -20,7 +20,7 @@ type ReplayCapturer struct {
 	stopCh      chan struct{}
 	lsnIndex    int
 	lsns        []string
-	changes     []capture.Change
+	changes     []core.CaptureChange
 	changeIndex int
 }
 
@@ -34,12 +34,12 @@ func NewReplayCapturer(store Store) *ReplayCapturer {
 
 // Fetch returns the next batch of changes grouped by LSN.
 // Returns CaptureResult with EOS=true when all changes have been replayed.
-func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
+func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.stopped {
-		return &capture.CaptureResult{EOS: true}
+		return &core.CaptureResult{EOS: true}
 	}
 
 	// Initialize LSNs on first call
@@ -48,7 +48,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		lsns, err := c.store.GetLSNs()
 		if err != nil {
 			slog.Error("ReplayCapturer: failed to get LSNs", "error", err)
-			return &capture.CaptureResult{EOS: true}
+			return &core.CaptureResult{EOS: true}
 		}
 		c.lsns = lsns
 		c.lsnIndex = 0
@@ -56,7 +56,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		if len(lsns) == 0 {
 			slog.Info("ReplayCapturer: no changes to replay")
 			c.completed = true
-			return &capture.CaptureResult{EOS: true}
+			return &core.CaptureResult{EOS: true}
 		}
 
 		slog.Info("ReplayCapturer: starting", "lsn_count", len(lsns))
@@ -70,8 +70,8 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		if endIndex > len(c.changes) {
 			endIndex = len(c.changes)
 		}
-		batchCtx := capture.NewBatchContext()
-		result := &capture.CaptureResult{
+		batchCtx := core.NewBatchContext()
+		result := &core.CaptureResult{
 			Changes: c.changes[c.changeIndex:endIndex],
 			BatchID: batchCtx.BatchID,
 			EOS:     false,
@@ -96,13 +96,13 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		}
 
 		// Filter UPDATE_BEFORE operations (only process final state)
-		filteredChanges := make([]capture.Change, 0, len(changes))
+		filteredChanges := make([]core.CaptureChange, 0, len(changes))
 		for _, change := range changes {
 			if change.Operation == OpUpdateBefore {
 				continue
 			}
-			// Convert core.Change to capture.Change
-			filteredChanges = append(filteredChanges, capture.Change{
+			// Convert core.Change to core.CaptureChange
+			filteredChanges = append(filteredChanges, core.CaptureChange{
 				"table":          change.Table,
 				"transaction_id": change.TransactionID,
 				"lsn":            change.LSN,
@@ -121,7 +121,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		c.changes = filteredChanges
 		c.changeIndex = 0
 
-		batchCtx := capture.NewBatchContext()
+		batchCtx := core.NewBatchContext()
 		batchSize := 1000
 		endIndex := batchSize
 		if endIndex > len(c.changes) {
@@ -130,7 +130,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 
 		slog.Debug("ReplayCapturer: replaying LSN", "lsn", lsn, "changes", len(c.changes))
 
-		return &capture.CaptureResult{
+		return &core.CaptureResult{
 			Changes: c.changes[c.changeIndex:endIndex],
 			BatchID: batchCtx.BatchID,
 			EOS:     false,
@@ -140,7 +140,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 	// All LSNs processed
 	c.completed = true
 	slog.Info("ReplayCapturer: replay completed", "total_lsns", len(c.lsns))
-	return &capture.CaptureResult{EOS: true}
+	return &core.CaptureResult{EOS: true}
 }
 
 // Stop signals the capturer to stop.
@@ -155,4 +155,4 @@ func (c *ReplayCapturer) Stop() {
 const OpUpdateBefore = 3
 
 // Ensure we implement Capturer interface
-var _ capture.Capturer = (*ReplayCapturer)(nil)
+var _ core.Capturer = (*ReplayCapturer)(nil)

@@ -8,12 +8,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/capture"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
+
+// Transformer interface for ETL processing of CDC changes
+type Transformer interface {
+	Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
+}
+
+// Store interface for persisting CDC changes
+type Store interface {
+	Write(changes []Change) (int, error)
+	Flush() error
+	Close() error
+}
 
 // Runtime orchestrates data capture and ETL processing.
 // It holds a Capturer for data ingestion and handles all post-fetch logic
@@ -26,7 +37,7 @@ type Runtime struct {
 	dlq         *dlq.DLQ
 	monitorDB   *monitor.DB
 
-	currentCapturer capture.Capturer
+	currentCapturer Capturer
 	mu              sync.Mutex
 }
 
@@ -50,7 +61,7 @@ func NewRuntime(
 }
 
 // Run starts the runtime with the given Capturer and runs until EOS or error.
-func (r *Runtime) Run(ctx context.Context, capturer capture.Capturer) error {
+func (r *Runtime) Run(ctx context.Context, capturer Capturer) error {
 	r.mu.Lock()
 	if r.currentCapturer != nil {
 		r.currentCapturer.Stop()
@@ -152,12 +163,12 @@ func (r *Runtime) Run(ctx context.Context, capturer capture.Capturer) error {
 }
 
 // SwitchCapturer stops the current Capturer and starts a new one.
-func (r *Runtime) SwitchCapturer(ctx context.Context, capturer capture.Capturer) error {
+func (r *Runtime) SwitchCapturer(ctx context.Context, capturer Capturer) error {
 	return r.Run(ctx, capturer)
 }
 
-// convertChanges converts capture.Change (map) to core.Change.
-func (r *Runtime) convertChanges(captureChanges []capture.Change) []Change {
+// convertChanges converts CaptureChange (map) to core.Change.
+func (r *Runtime) convertChanges(captureChanges []CaptureChange) []Change {
 	changes := make([]Change, 0, len(captureChanges))
 	for _, cc := range captureChanges {
 		// Extract required fields from map

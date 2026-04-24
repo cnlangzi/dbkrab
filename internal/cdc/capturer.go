@@ -7,14 +7,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/capture"
+	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 )
 
 // ChangeCapturer fetches CDC changes via incremental polling.
-// It wraps cdc.Querier to perform timer-triggered poll cycles.
+// It wraps CDCQuerier to perform timer-triggered poll cycles.
 type ChangeCapturer struct {
-	querier  *Querier
+	querier  CDCQuerier
 	tables   []string
 	offsets  OffsetGetter
 	interval time.Duration
@@ -27,8 +27,16 @@ type OffsetGetter interface {
 	Get(table string) (offset.Offset, error)
 }
 
+// CDCQuerier interface for CDC database operations (allows mocking in tests)
+type CDCQuerier interface {
+	GetMinLSN(ctx context.Context, captureInstance string) ([]byte, error)
+	GetMaxLSN(ctx context.Context) ([]byte, error)
+	IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error)
+	GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]Change, error)
+}
+
 // NewChangeCapturer creates a new ChangeCapturer.
-func NewChangeCapturer(querier *Querier, tables []string, offsets OffsetGetter, interval time.Duration) *ChangeCapturer {
+func NewChangeCapturer(querier CDCQuerier, tables []string, offsets OffsetGetter, interval time.Duration) *ChangeCapturer {
 	return &ChangeCapturer{
 		querier:  querier,
 		tables:   tables,
@@ -42,18 +50,18 @@ func NewChangeCapturer(querier *Querier, tables []string, offsets OffsetGetter, 
 // Returns CaptureResult with EOS=false when changes are available.
 // Returns CaptureResult with EOS=true when no changes are available (idle cycle).
 // The caller should call Fetch in a loop with appropriate timing.
-func (c *ChangeCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
-	batchCtx := capture.NewBatchContext()
+func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
+	batchCtx := core.NewBatchContext()
 	fetchTime := time.Now()
 
 	// Get global max LSN for consistent snapshot across tables
 	globalMaxLSN, err := c.querier.GetMaxLSN(ctx)
 	if err != nil {
 		slog.Error("ChangeCapturer: failed to get max LSN", "error", err)
-		return &capture.CaptureResult{BatchID: batchCtx.BatchID, EOS: false}
+		return &core.CaptureResult{BatchID: batchCtx.BatchID, EOS: false}
 	}
 
-	var allChanges []capture.Change
+	var allChanges []core.CaptureChange
 
 	// Poll each table
 	for _, table := range c.tables {
@@ -86,10 +94,10 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 			continue
 		}
 
-		// Convert to capture.Change (map)
+		// Convert to core.CaptureChange (map)
 		for _, cc := range cdcChanges {
 			hashID := ComputeChangeID(cc.TransactionID, cc.Table, cc.Data, cc.LSN, cc.Operation)
-			change := capture.Change{
+			change := core.CaptureChange{
 				"table":          cc.Table,
 				"transaction_id": cc.TransactionID,
 				"lsn":            cc.LSN,
@@ -113,10 +121,10 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *capture.CaptureResult {
 		)
 	}
 
-	return &capture.CaptureResult{
+	return &core.CaptureResult{
 		Changes: allChanges,
 		BatchID: batchCtx.BatchID,
-		EOS:      false,
+		EOS:     false,
 	}
 }
 
@@ -167,6 +175,9 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 
 // Stop signals the capturer to stop.
 func (c *ChangeCapturer) Stop() {
+	if c.stopped {
+		return // Already stopped, ignore
+	}
 	c.stopped = true
 	close(c.stopCh)
 }
@@ -194,17 +205,55 @@ func (l LSN) Compare(other []byte) int {
 }
 
 // ComputeChangeID computes a content-based hash ID for a change.
+// Uses FNV-1a hash which has better distribution than simple polynomial hash.
 func ComputeChangeID(txID, table string, data map[string]interface{}, lsn []byte, op int) string {
-	// Simple hash using txID + table + lsn hex + operation
-	h := txID + table + hex.EncodeToString(lsn) + string(rune(op))
-	// Use FNV hash for simplicity
-	var hash uint64
-	for i := range h {
-		hash = hash*31 + uint64(h[i])
+	// Initialize FNV-1a hash
+	const (
+		fnvOffset uint64 = 14695981039346656037
+		fnvPrime  uint64 = 1099511628211
+	)
+
+	hash := fnvOffset
+
+	// Mix in txID
+	for _, c := range txID {
+		hash ^= uint64(c)
+		hash *= fnvPrime
 	}
-	result := fmt.Sprintf("%x", hash)
-	if len(result) < 16 {
-		return result
+
+	// Mix in table
+	for _, c := range table {
+		hash ^= uint64(c)
+		hash *= fnvPrime
 	}
-	return result[:16]
+
+	// Mix in LSN bytes
+	for _, b := range lsn {
+		hash ^= uint64(b)
+		hash *= fnvPrime
+	}
+
+	// Mix in operation
+	hash ^= uint64(op)
+	hash *= fnvPrime
+
+	// Mix in data keys and values for differentiation
+	for k, v := range data {
+		for _, c := range k {
+			hash ^= uint64(c)
+			hash *= fnvPrime
+		}
+		switch val := v.(type) {
+		case int:
+			hash ^= uint64(val)
+			hash *= fnvPrime
+		case string:
+			for _, c := range val {
+				hash ^= uint64(c)
+				hash *= fnvPrime
+			}
+		}
+	}
+
+	return fmt.Sprintf("%016x", hash)
 }

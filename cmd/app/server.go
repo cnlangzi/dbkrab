@@ -66,7 +66,7 @@ type Server struct {
 	skillsPath      string              // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	replayService   *replay.ReplayService // Replay service (in separate package)
-	poller          *core.Poller        // CDC poller reference
+	poller          interface{}        // CDC poller (deprecated, use Runtime/Capturer)
 	snapshotService *snapshot.SnapshotService   // Snapshot service
 }
 
@@ -83,7 +83,7 @@ func NewServer(
 	cfg *config.Config,
 	watcher *config.Watcher,
 	stateManager *core.StateManager,
-	poller *core.Poller,
+	poller interface{},
 	offsetStore offset.StoreInterface,
 	db *sql.DB,
 ) *Server {

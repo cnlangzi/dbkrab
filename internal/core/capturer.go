@@ -1,36 +1,18 @@
-package capture
+package core
 
 import (
 	"context"
-	"fmt"
-	"time"
 )
 
-// Change represents a single row change (captured from CDC).
-// It uses plain types to avoid import cycles.
-type Change map[string]interface{}
+// CaptureChange represents a single row change captured from CDC.
+// This is the intermediate type used between Capturer and Runtime to avoid import cycles.
+type CaptureChange map[string]interface{}
 
 // CaptureResult carries data and metadata from a Capturer fetch operation.
 type CaptureResult struct {
-	Changes []Change
+	Changes []CaptureChange
 	BatchID string // Unique identifier for this fetch batch
 	EOS     bool   // true = end of stream, no more data
-}
-
-// BatchContext carries observability context through the pipeline.
-type BatchContext struct {
-	BatchID   string
-	StartTime time.Time
-	SkillName string
-}
-
-// NewBatchContext creates a new BatchContext with a unique BatchID.
-func NewBatchContext() *BatchContext {
-	now := time.Now()
-	return &BatchContext{
-		BatchID:   fmt.Sprintf("%d", now.UnixMilli()),
-		StartTime: now,
-	}
 }
 
 // Capturer is the interface for data ingestion sources.
