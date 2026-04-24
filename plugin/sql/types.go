@@ -84,6 +84,10 @@ type Skill struct {
 	Raw          string    `yaml:"-"` // Auto-assigned: raw YAML content
 	Error        string    `yaml:"-"` // last load/parsing error message (if any)
 	LastLoadedAt time.Time `yaml:"-"` // last successful load time
+
+	// sinkOpCache caches filtered sinks by operation type
+	// This is per-skill to avoid cross-skill contamination
+	sinkOpCache map[Operation][]SinkConfig
 }
 
 // Sink represents a single sink configuration with operation filter
@@ -143,7 +147,18 @@ func OperationToSinkType(op Operation) string {
 
 // FilterByOperation returns sinks that handle the given operation type.
 // The 'when' field must contain the operation string ("insert", "update", or "delete").
+// Results are cached per skill for performance.
 func (s *Skill) FilterByOperation(opType Operation) []SinkConfig {
+	// Initialize cache if needed
+	if s.sinkOpCache == nil {
+		s.sinkOpCache = make(map[Operation][]SinkConfig)
+	}
+
+	// Return cached result if available
+	if cached, ok := s.sinkOpCache[opType]; ok {
+		return cached
+	}
+
 	var opStr string
 	switch opType {
 	case Insert:
@@ -165,6 +180,9 @@ func (s *Skill) FilterByOperation(opType Operation) []SinkConfig {
 			}
 		}
 	}
+
+	// Cache the result
+	s.sinkOpCache[opType] = result
 	return result
 }
 

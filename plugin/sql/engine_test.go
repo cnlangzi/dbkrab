@@ -136,3 +136,123 @@ func TestEngine_ShortTableName(t *testing.T) {
 		})
 	}
 }
+
+// TestEngine_MultipleSkills_SinkIsolation verifies that switching between skills
+// correctly isolates sink configurations. This is a regression test for the bug
+// where sinkOpCache was shared across skills, causing incorrect sink selection.
+func TestEngine_MultipleSkills_SinkIsolation(t *testing.T) {
+	// Create two skills with different sink configurations
+	skillA := &Skill{
+		Name:     "skill_a",
+		On:       []string{"table_a"},
+		Database: "db_a",
+		Sinks: []Sink{
+			{
+				SinkConfig: SinkConfig{
+					Name:       "sink_a1",
+					Output:     "output_a1",
+					PrimaryKey: "id",
+					OnConflict: "overwrite",
+				},
+				When: []string{"insert", "update"},
+			},
+			{
+				SinkConfig: SinkConfig{
+					Name:       "sink_a2",
+					Output:     "output_a2",
+					PrimaryKey: "id",
+					OnConflict: "skip",
+				},
+				When: []string{"delete"},
+			},
+		},
+	}
+
+	skillB := &Skill{
+		Name:     "skill_b",
+		On:       []string{"table_b"},
+		Database: "db_b",
+		Sinks: []Sink{
+			{
+				SinkConfig: SinkConfig{
+					Name:       "sink_b1",
+					Output:     "output_b1",
+					PrimaryKey: "pk",
+					OnConflict: "error",
+				},
+				When: []string{"insert"},
+			},
+		},
+	}
+
+	// Create engine with skillA (engine is not needed for this test,
+	// as sink cache is now per-skill)
+	_ = skillA
+	engine := &Engine{skill: skillA}
+	_ = engine
+
+	// Test 1: skillA should have 2 insert/update sinks
+	inSinksA := skillA.FilterByOperation(Insert)
+	if len(inSinksA) != 1 {
+		t.Errorf("skillA insert sinks: expected 1, got %d", len(inSinksA))
+	}
+	if len(inSinksA) > 0 && inSinksA[0].Name != "sink_a1" {
+		t.Errorf("skillA insert sink: expected sink_a1, got %s", inSinksA[0].Name)
+	}
+
+	// Test 2: skillB should have 1 insert sink
+	inSinksB := skillB.FilterByOperation(Insert)
+	if len(inSinksB) != 1 {
+		t.Errorf("skillB insert sinks: expected 1, got %d", len(inSinksB))
+	}
+	if len(inSinksB) > 0 && inSinksB[0].Name != "sink_b1" {
+		t.Errorf("skillB insert sink: expected sink_b1, got %s", inSinksB[0].Name)
+	}
+
+	// Test 3: After filtering skillA, cache should be populated
+	_ = skillA.FilterByOperation(Insert)
+	if skillA.sinkOpCache == nil {
+		t.Error("skillA sinkOpCache should be initialized after FilterByOperation")
+	}
+
+	// Test 4: skillB should have its own separate cache
+	_ = skillB.FilterByOperation(Insert)
+	if skillB.sinkOpCache == nil {
+		t.Error("skillB sinkOpCache should be initialized after FilterByOperation")
+	}
+
+	// Test 5: Cache should be independent - skillA cache doesn't affect skillB
+	inSinksA2 := skillA.FilterByOperation(Insert)
+	inSinksB2 := skillB.FilterByOperation(Insert)
+
+	if len(inSinksA2) != 1 || inSinksA2[0].Name != "sink_a1" {
+		t.Errorf("skillA cached result incorrect: got %v", inSinksA2)
+	}
+	if len(inSinksB2) != 1 || inSinksB2[0].Name != "sink_b1" {
+		t.Errorf("skillB cached result incorrect: got %v", inSinksB2)
+	}
+
+	// Test 6: Delete sinks
+	delSinksA := skillA.FilterByOperation(Delete)
+	delSinksB := skillB.FilterByOperation(Delete)
+
+	if len(delSinksA) != 1 || delSinksA[0].Name != "sink_a2" {
+		t.Errorf("skillA delete sink: expected sink_a2, got %v", delSinksA)
+	}
+	if len(delSinksB) != 0 {
+		t.Errorf("skillB delete sink: expected 0, got %d", len(delSinksB))
+	}
+
+	// Test 7: Verify cache isolation with repeated filtering
+	for i := 0; i < 3; i++ {
+		resultA := skillA.FilterByOperation(Insert)
+		resultB := skillB.FilterByOperation(Insert)
+
+		if len(resultA) != 1 || resultA[0].Name != "sink_a1" {
+			t.Errorf("Iteration %d: skillA result incorrect: %v", i, resultA)
+		}
+		if len(resultB) != 1 || resultB[0].Name != "sink_b1" {
+			t.Errorf("Iteration %d: skillB result incorrect: %v", i, resultB)
+		}
+	}
+}

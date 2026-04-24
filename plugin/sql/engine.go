@@ -23,10 +23,9 @@ type Engine struct {
 	executor *Executor // MSSQL executor for SQL execution
 
 	// caches for performance optimization
-	shortTableCache  map[string]string                       // "dbo.Cost" → "cost"
-	fieldNameCache   map[string]map[string]string            // table → (field → "cost_field")
-	sinkOpCache      map[Operation][]SinkConfig              // operation → sinks
-	tableLowerCache  map[string]string                       // "dbo.Cost" → "dbo.cost" for comparison
+	shortTableCache  map[string]string            // "dbo.Cost" → "cost"
+	fieldNameCache   map[string]map[string]string // table → (field → "cost_field")
+	tableLowerCache  map[string]string            // "dbo.Cost" → "dbo.cost" for comparison
 }
 
 // NewEngine creates a new SQL Plugin engine
@@ -36,7 +35,6 @@ func NewEngine(skill *Skill, mssqlDB *sql.DB) *Engine {
 		executor:         NewExecutorWithDriver(mssqlDB, DriverMSSQL),
 		shortTableCache:  make(map[string]string),
 		fieldNameCache:   make(map[string]map[string]string),
-		sinkOpCache:      make(map[Operation][]SinkConfig),
 		tableLowerCache:  make(map[string]string),
 	}
 	return e
@@ -91,13 +89,9 @@ func (e *Engine) getFieldName(table, field string) string {
 }
 
 // getSinksForOperation returns cached sink list for operation type
+// Caching is now handled internally by Skill.FilterByOperation
 func (e *Engine) getSinksForOperation(op Operation) []SinkConfig {
-	if cached, ok := e.sinkOpCache[op]; ok {
-		return cached
-	}
-	result := e.skill.FilterByOperation(op)
-	e.sinkOpCache[op] = result
-	return result
+	return e.skill.FilterByOperation(op)
 }
 
 // HandleWithSkill executes the engine with a specific skill, then restores the original skill.
