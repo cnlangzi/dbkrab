@@ -14,6 +14,7 @@ type ReplayCapturer struct {
 	store Store
 
 	mu          sync.Mutex
+	pending     bool // set by Restart, cleared on first Fetch; reports as Started so status shows "replay"
 	started     bool
 	completed   bool
 	stopped     bool
@@ -44,6 +45,7 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 	// Initialize LSNs on first call
 	if !c.started {
+		c.pending = false
 		c.started = true
 		lsns, err := c.store.GetLSNs()
 		if err != nil {
@@ -130,11 +132,13 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 		slog.Debug("ReplayCapturer: replaying LSN", "lsn", lsn, "changes", len(c.changes))
 
-		return &core.CaptureResult{
-			Changes:      c.changes[c.changeIndex:endIndex],
+		result := &core.CaptureResult{
+			Changes:      c.changes[0:endIndex],
 			BatchID:      batchCtx.BatchID,
 			NextCapturer: core.CapturerReplay, // Stay with replay until done
 		}
+		c.changeIndex = endIndex // advance so next Fetch continues from correct position
+		return result
 	}
 
 	// All LSNs processed
@@ -147,8 +151,27 @@ func (c *ReplayCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 func (c *ReplayCapturer) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.stopped {
+		return
+	}
 	c.stopped = true
 	close(c.stopCh)
+}
+
+// Restart resets all state so the capturer can be used for a fresh replay run.
+// It is safe to call even if the previous run completed or was stopped.
+func (c *ReplayCapturer) Restart() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pending = true // marks "triggered but Fetch not yet called"
+	c.started = false
+	c.completed = false
+	c.stopped = false
+	c.lsns = nil
+	c.lsnIndex = 0
+	c.changes = nil
+	c.changeIndex = 0
+	c.stopCh = make(chan struct{})
 }
 
 // Progress returns the current replay progress.
@@ -158,7 +181,7 @@ func (c *ReplayCapturer) Progress() Progress {
 	return Progress{
 		TotalLSNs:     len(c.lsns),
 		ProcessedLSNs: c.lsnIndex,
-		Started:       c.started,
+		Started:       c.started || c.pending, // pending counts as started for status reporting
 		Completed:     c.completed,
 		Stopped:       c.stopped,
 	}

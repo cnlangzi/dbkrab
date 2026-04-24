@@ -2,11 +2,13 @@ package cdc
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/offset"
 	"github.com/cnlangzi/dbkrab/internal/store"
@@ -32,16 +34,25 @@ type CDCQuerier interface {
 	GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]Change, error)
 }
 
-// NewChangeCapturer creates a new ChangeCapturer.
-func NewChangeCapturer(querier CDCQuerier, tables []string, offsetMgr *OffsetManager, store store.Store, interval time.Duration) *ChangeCapturer {
+// NewChangeCapturer creates a new ChangeCapturer from high-level dependencies.
+// It internally builds the Querier and OffsetManager from the provided config and db.
+func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreInterface, appStore store.Store) (*ChangeCapturer, error) {
+	interval, err := cfg.Interval()
+	if err != nil {
+		return nil, fmt.Errorf("parse cdc interval: %w", err)
+	}
+
+	querier := NewQuerier(db, config.ParseTimezone(cfg.MSSQL.Timezone))
+	offsetMgr := NewOffsetManager(offsetStore, querier)
+
 	return &ChangeCapturer{
 		querier:   querier,
-		tables:    tables,
+		tables:    cfg.Tables,
 		offsetMgr: offsetMgr,
-		store:     store,
+		store:     appStore,
 		interval:  interval,
 		stopCh:    make(chan struct{}),
-	}
+	}, nil
 }
 
 // Fetch performs one poll cycle and returns the changes.
@@ -118,13 +129,6 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		}
 	}
 
-	// Save offsets for tables that had changes
-	for table, maxLSN := range maxLSNByTable {
-		if err := c.offsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
-			slog.Warn("ChangeCapturer: failed to save offset", "table", table, "error", err)
-		}
-	}
-
 	// Write changes to cdc.db store
 	if c.store != nil && len(allChanges) > 0 {
 		coreChanges := c.convertToCoreChanges(allChanges)
@@ -134,6 +138,13 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 			if err := c.store.Flush(); err != nil {
 				slog.Warn("ChangeCapturer: failed to flush store", "error", err)
 			}
+		}
+	}
+
+	// Save offsets for tables that had changes
+	for table, maxLSN := range maxLSNByTable {
+		if err := c.offsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
+			slog.Warn("ChangeCapturer: failed to save offset", "table", table, "error", err)
 		}
 	}
 

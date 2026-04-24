@@ -1,0 +1,253 @@
+<!--layout:dashboard-->
+{{ define "content" }}
+<div class="space-y-4 sm:space-y-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+            <h2 class="text-2xl sm:text-3xl font-bold text-text">Snapshot</h2>
+            <p class="text-sm text-textMuted mt-1">Full table snapshot sync to sinks</p>
+        </div>
+        <div class="flex gap-2">
+            <button id="snapshot-btn" onclick="startSnapshot()"
+                class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                Start Snapshot
+            </button>
+        </div>
+    </div>
+
+    <!-- Progress Panel (hidden until snapshot starts) -->
+    <div id="snapshot-progress" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-primary/30">
+        <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
+            <svg id="progress-spinner" class="w-5 h-5 text-primary animate-spin hidden" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Snapshot Progress
+        </h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
+            <div class="p-3 sm:p-4 rounded-xl bg-primary/10 border border-primary/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Tables</p>
+                <p class="text-base sm:text-lg font-bold text-primary">
+                    <span id="snapshot-processed">0</span><span class="text-textMuted font-normal"> / </span><span id="snapshot-total">0</span>
+                </p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Current Table</p>
+                <p id="snapshot-current-table" class="text-sm font-medium text-text truncate">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Status</p>
+                <p id="snapshot-status-text" class="text-base sm:text-lg font-bold text-primary">Idle</p>
+            </div>
+        </div>
+        <!-- Progress Bar -->
+        <div class="w-full bg-surfaceHover rounded-full h-2.5">
+            <div id="snapshot-progress-bar" class="bg-primary h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <!-- Error message -->
+        <p id="snapshot-error" class="hidden mt-3 text-sm text-error"></p>
+    </div>
+
+    <!-- Tables List -->
+    <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-base sm:text-lg font-semibold text-text">CDC Tables</h3>
+            <button onclick="loadTables()"
+                class="text-sm text-primary hover:underline">Refresh</button>
+        </div>
+        <div id="tables-list" class="space-y-2">
+            <p class="text-textMuted text-sm">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+let snapshotPollingInterval = null;
+let snapshotStatusFailureCount = 0;
+let snapshotIdleGraceCount = 0;
+const SNAPSHOT_STATUS_MAX_FAILURES = 5;
+const SNAPSHOT_IDLE_GRACE_POLLS = 5; // allow up to 5 idle polls before giving up (startup race)
+
+// Load CDC tables on page load
+loadTables();
+
+function loadTables() {
+    fetch('/api/snapshot/tables')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('tables-list');
+            if (!data.success) {
+                container.innerHTML = `<p class="text-error text-sm">${data.error || 'Failed to load tables'}</p>`;
+                return;
+            }
+            if (!data.tables || data.tables.length === 0) {
+                container.innerHTML = '<p class="text-textMuted text-sm">No CDC tables configured.</p>';
+                return;
+            }
+            container.innerHTML = data.tables.map(t => `
+                <div class="flex items-center gap-3 p-3 rounded-lg bg-surfaceHover border border-border">
+                    <svg class="w-4 h-4 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M3 10h18M3 14h18M10 6h4M10 18h4M4 6h1M4 18h1M19 6h1M19 18h1"/>
+                    </svg>
+                    <span class="text-sm font-medium text-text">${t.full}</span>
+                </div>
+            `).join('');
+        })
+        .catch(() => {
+            document.getElementById('tables-list').innerHTML =
+                '<p class="text-error text-sm">Failed to load tables.</p>';
+        });
+}
+
+function startSnapshot() {
+    const btn = document.getElementById('snapshot-btn');
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Starting...
+    `;
+
+    fetch('/api/snapshot/start', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                snapshotStatusFailureCount = 0;
+                showProgress();
+                startPolling();
+            } else {
+                resetButton();
+                alert('Failed to start snapshot: ' + (data.error || 'unknown error'));
+            }
+        })
+        .catch(err => {
+            resetButton();
+            alert('Failed to start snapshot: ' + err);
+        });
+}
+
+function showProgress() {
+    document.getElementById('snapshot-progress').classList.remove('hidden');
+    document.getElementById('progress-spinner').classList.remove('hidden');
+}
+
+function hideSpinner() {
+    document.getElementById('progress-spinner').classList.add('hidden');
+}
+
+function startPolling() {
+    if (snapshotPollingInterval) clearInterval(snapshotPollingInterval);
+    snapshotIdleGraceCount = 0;
+    snapshotPollingInterval = setInterval(checkStatus, 2000);
+    checkStatus();
+}
+
+function stopPolling() {
+    if (snapshotPollingInterval) {
+        clearInterval(snapshotPollingInterval);
+        snapshotPollingInterval = null;
+    }
+}
+
+function checkStatus() {
+    fetch('/api/snapshot/status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                snapshotStatusFailureCount = 0;
+                updateUI(data);
+
+                if (data.state === 'running') {
+                    // Active — keep polling, reset grace counter
+                    snapshotIdleGraceCount = 0;
+                } else if (data.state === 'completed' || data.state === 'stopped') {
+                    // Finished — stop polling, reset button, hide progress after delay
+                    stopPolling();
+                    hideSpinner();
+                    resetButton();
+                    setTimeout(() => {
+                        document.getElementById('snapshot-progress').classList.add('hidden');
+                    }, 3000);
+                } else {
+                    // state === 'idle': not yet started — wait a few polls before giving up
+                    snapshotIdleGraceCount++;
+                    if (snapshotIdleGraceCount >= SNAPSHOT_IDLE_GRACE_POLLS) {
+                        stopPolling();
+                        hideSpinner();
+                        resetButton();
+                    }
+                }
+            } else {
+                snapshotStatusFailureCount++;
+                if (snapshotStatusFailureCount >= SNAPSHOT_STATUS_MAX_FAILURES) {
+                    stopPolling();
+                    resetButton();
+                }
+            }
+        })
+        .catch(err => {
+            snapshotStatusFailureCount++;
+            console.error('Failed to check snapshot status:', err);
+            if (snapshotStatusFailureCount >= SNAPSHOT_STATUS_MAX_FAILURES) {
+                stopPolling();
+                resetButton();
+            }
+        });
+}
+
+function updateUI(data) {
+    document.getElementById('snapshot-processed').textContent = data.processed || 0;
+    document.getElementById('snapshot-total').textContent = data.total || 0;
+    document.getElementById('snapshot-current-table').textContent = data.current_table || '—';
+    document.getElementById('snapshot-status-text').textContent =
+        { running: 'Running', completed: 'Completed', stopped: 'Stopped', idle: 'Starting...' }[data.state] || data.state || 'Unknown';
+
+    const total = data.total || 0;
+    const processed = data.processed || 0;
+    const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+    document.getElementById('snapshot-progress-bar').style.width = pct + '%';
+
+    // Color: completed → green, stopped/error → orange, running → primary
+    const statusText = document.getElementById('snapshot-status-text');
+    const bar = document.getElementById('snapshot-progress-bar');
+    if (data.state === 'completed') {
+        statusText.className = 'text-base sm:text-lg font-bold text-success';
+        bar.className = 'bg-success h-2.5 rounded-full transition-all duration-300';
+    } else if (data.state === 'stopped') {
+        statusText.className = 'text-base sm:text-lg font-bold text-warning';
+        bar.className = 'bg-warning h-2.5 rounded-full transition-all duration-300';
+    } else {
+        statusText.className = 'text-base sm:text-lg font-bold text-primary';
+        bar.className = 'bg-primary h-2.5 rounded-full transition-all duration-300';
+    }
+
+    // Error message
+    const errEl = document.getElementById('snapshot-error');
+    if (data.error) {
+        errEl.textContent = 'Error: ' + data.error;
+        errEl.classList.remove('hidden');
+    } else {
+        errEl.classList.add('hidden');
+    }
+}
+
+function resetButton() {
+    const btn = document.getElementById('snapshot-btn');
+    btn.disabled = false;
+    btn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+        </svg>
+        Start Snapshot
+    `;
+}
+</script>
+{{ end }}

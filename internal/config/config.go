@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/alert"
 	"github.com/cnlangzi/dbkrab/internal/logging"
 	"gopkg.in/yaml.v3"
 )
@@ -145,7 +144,6 @@ type CDCProtectionConfig struct {
 	WarningLagDuration  string            `yaml:"warning_lag_duration"`
 	CriticalLagDuration string            `yaml:"critical_lag_duration"`
 	Recovery            RecoveryConfig    `yaml:"recovery"`
-	Alert               alert.AlertConfig `yaml:"alert"`
 }
 
 // TransactionBufferConfig contains transaction buffer settings (DEPRECATED - not used)

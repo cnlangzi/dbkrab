@@ -53,7 +53,7 @@ type Server struct {
 	dlq             *dlq.DLQ
 	cdcAdmin        *cdcadmin.Admin
 	store           store.Store
-	stateManager    *core.StateManager   // Global state coordinator for Poller/Replay/Snapshot
+	stateManager    *core.StateManager // Global state coordinator for Poller/Replay/Snapshot
 	sinkerManager   *sinker.Manager
 	monitorDB       *monitor.DB
 	port            int
@@ -66,9 +66,7 @@ type Server struct {
 	skillsPath      string              // Path to SQL skills directory from config
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	runtime         *core.Runtime       // Runtime for capturer management
-	replayService   *replay.ReplayService // Replay service (legacy, to be removed)
-	poller          interface{}        // CDC poller (deprecated, use Runtime/Capturer)
-	snapshotService *snapshot.SnapshotService   // Snapshot service
+	poller          interface{}         // CDC poller (deprecated, use Runtime/Capturer)
 }
 
 // NewServer creates a new API server with all features
@@ -95,26 +93,21 @@ func NewServer(
 		skillsPath = "./skills/sql"
 	}
 
-	// Create ReplayService with StateManager (legacy, to be removed)
-	replaySvc := replay.NewReplayService(store, manager, dlqStore, monitorDB, stateManager)
-
 	return &Server{
-		manager:         manager,
-		dlq:             dlqStore,
-		cdcAdmin:        cdcAdmin,
-		stateManager:    stateManager,
-		store:           store,
-		sinkerManager:   sinkerMgr,
-		monitorDB:       monitorDB,
-		port:            port,
-		configPath:      configPath,
-		config:          cfg,
-		configWatcher:   watcher,
-		skillsPath:      skillsPath,
-		replayService:   replaySvc,
-		poller:          poller,
-		snapshotService: snapshot.NewSnapshotService(stateManager, db, time.Local, offsetStore, manager),
-		runtime:         runtime,
+		manager:       manager,
+		dlq:           dlqStore,
+		cdcAdmin:      cdcAdmin,
+		stateManager:  stateManager,
+		store:         store,
+		sinkerManager: sinkerMgr,
+		monitorDB:     monitorDB,
+		port:          port,
+		configPath:    configPath,
+		config:        cfg,
+		configWatcher: watcher,
+		skillsPath:    skillsPath,
+		poller:        poller,
+		runtime:       runtime,
 	}
 }
 
@@ -223,13 +216,11 @@ func (s *Server) registerAPIRoutes() {
 	}
 
 	// Snapshot routes
-	if s.snapshotService != nil {
+	if s.runtime != nil {
 		api.Post("/snapshot/start", s.handleSnapshotStart, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/snapshot/status", s.handleSnapshotStatus, xun.WithViewer(&xun.JsonViewer{}))
 		api.Get("/snapshot/tables", s.handleSnapshotTables, xun.WithViewer(&xun.JsonViewer{}))
 		slog.Info("Snapshot routes registered")
-	} else {
-		slog.Warn("Snapshot routes skipped - snapshot service is nil")
 	}
 
 	// CDC gap monitoring routes
@@ -607,7 +598,9 @@ func (s *Server) handleReplay(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "runtime not initialized"})
 	}
 
-	// Switch to replay capturer
+	// Reset capturer state so a fresh replay can start (handles repeated invocations)
+	s.runtime.Replay().(*replay.ReplayCapturer).Restart()
+
 	s.runtime.SwitchTo(core.CapturerReplay)
 
 	return c.View(map[string]any{"success": true, "message": "replay started", "state": "replay"})
@@ -622,13 +615,28 @@ func (s *Server) handleReplayStatus(c *xun.Context) error {
 	replayCapturer := s.runtime.Replay().(*replay.ReplayCapturer)
 	progress := replayCapturer.Progress()
 
+	// Derive a state string that the frontend can use directly.
+	// "replay"     — in progress
+	// "completed"  — finished successfully
+	// "stopped"    — manually stopped
+	// "idle"       — not yet started
+	state := "idle"
+	if progress.Stopped {
+		state = "stopped"
+	} else if progress.Started && !progress.Completed {
+		state = "replay"
+	} else if progress.Started && progress.Completed {
+		state = "completed"
+	}
+
 	return c.View(map[string]any{
-		"success":    true,
+		"success":   true,
 		"total":     progress.TotalLSNs,
-		"processed":  progress.ProcessedLSNs,
-		"started":    progress.Started,
-		"completed":  progress.Completed,
-		"stopped":    progress.Stopped,
+		"processed": progress.ProcessedLSNs,
+		"started":   progress.Started,
+		"completed": progress.Completed,
+		"stopped":   progress.Stopped,
+		"state":     state,
 	})
 }
 
@@ -1499,59 +1507,70 @@ func (s *Server) handleMonitorSinks(c *xun.Context) error {
 	return c.View(map[string]any{"success": true, "logs": logs})
 }
 
-// handleSnapshotStart handles POST /api/snapshot/start - starts a snapshot operation
+// handleSnapshotStart handles POST /api/snapshot/start - starts a full table snapshot
 func (s *Server) handleSnapshotStart(c *xun.Context) error {
-	if s.snapshotService == nil {
-		return c.View(map[string]any{"success": false, "error": "snapshot service not initialized"})
+	if s.runtime == nil {
+		return c.View(map[string]any{"success": false, "error": "runtime not initialized"})
 	}
 
-	// Get CDC tables from config
-	var tables []snapshot.CDCTable
-	if s.configWatcher != nil {
-		cfg := s.configWatcher.Get()
-		for _, t := range cfg.Tables {
-			parts := strings.SplitN(t, ".", 2)
-			if len(parts) == 2 {
-				tables = append(tables, snapshot.CDCTable{
-					Schema: parts[0],
-					Name:   parts[1],
-				})
+	if s.configWatcher == nil {
+		return c.View(map[string]any{"success": false, "error": "config not available"})
+	}
+
+	cfg := s.configWatcher.Get()
+	if len(cfg.Tables) == 0 {
+		return c.View(map[string]any{"success": false, "error": "no CDC tables configured"})
+	}
+
+	// Clear all sink tables before snapshot so data is written fresh
+	if s.manager != nil {
+		ctx := c.Request.Context()
+		for _, sinkName := range s.manager.ListDatabases() {
+			sink, err := s.manager.GetSinker(sinkName)
+			if err != nil {
+				slog.Warn("snapshot: failed to get sinker, skipping", "sink", sinkName, "error", err)
+				continue
+			}
+			if err := sink.Reset(ctx); err != nil {
+				slog.Warn("snapshot: failed to reset sink, continuing", "sink", sinkName, "error", err)
 			}
 		}
 	}
 
-	// Guard against empty table list
-	if len(tables) == 0 {
-		return c.View(map[string]any{"success": false, "error": "no CDC tables configured"})
-	}
+	// Reset the capturer for a fresh run and switch Runtime to it
+	s.runtime.Snapshot().(*snapshot.SnapshotCapturer).Restart()
+	s.runtime.SwitchTo(core.CapturerSnapshot)
 
-	// Start snapshot
-	err := s.snapshotService.Start(context.Background(), tables)
-	if err != nil {
-		return c.View(map[string]any{"success": false, "error": err.Error()})
-	}
-
-	return c.View(map[string]any{"success": true, "message": "snapshot started"})
+	return c.View(map[string]any{"success": true, "message": "snapshot started", "state": "running"})
 }
 
 // handleSnapshotStatus handles GET /api/snapshot/status - returns current snapshot progress
 func (s *Server) handleSnapshotStatus(c *xun.Context) error {
-	if s.snapshotService == nil {
-		return c.View(map[string]any{"success": false, "error": "snapshot service not initialized"})
+	if s.runtime == nil {
+		return c.View(map[string]any{"success": false, "error": "runtime not initialized"})
 	}
 
-	progress := s.snapshotService.GetProgress()
+	progress := s.runtime.Snapshot().(*snapshot.SnapshotCapturer).Progress()
+
+	state := "idle"
+	if progress.Stopped {
+		state = "stopped"
+	} else if progress.Started && !progress.Completed {
+		state = "running"
+	} else if progress.Completed {
+		state = "completed"
+	}
+
 	return c.View(map[string]any{
-		"success": true,
-		"state":   progress.State,
-		"tables":  progress.Tables,
-		"processed": progress.Processed,
+		"success":       true,
+		"state":         state,
+		"total":         progress.TotalTables,
+		"processed":     progress.ProcessedTables,
 		"current_table": progress.CurrentTable,
-		"current_rows": progress.CurrentRows,
-		"current_total": progress.CurrentTotal,
-		"error": progress.Error,
-		"started_at": progress.StartedAt,
-		"completed_at": progress.CompletedAt,
+		"started":       progress.Started,
+		"completed":     progress.Completed,
+		"stopped":       progress.Stopped,
+		"error":         progress.Error,
 	})
 }
 
@@ -1568,8 +1587,8 @@ func (s *Server) handleSnapshotTables(c *xun.Context) error {
 		if len(parts) == 2 {
 			tables = append(tables, map[string]string{
 				"schema": parts[0],
-				"name":  parts[1],
-				"full":  t,
+				"name":   parts[1],
+				"full":   t,
 			})
 		}
 	}

@@ -18,7 +18,9 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/logging"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/offset"
+	"github.com/cnlangzi/dbkrab/internal/replay"
 	"github.com/cnlangzi/dbkrab/internal/sinker"
+	"github.com/cnlangzi/dbkrab/internal/snapshot"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
 	"github.com/cnlangzi/dbkrab/plugin"
@@ -225,16 +227,25 @@ func main() {
 	stateManager := core.NewStateManager()
 
 	// Create ChangeCapturer for CDC incremental polling
-	cdcQuerier := cdc.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone))
-	offsetManager := cdc.NewOffsetManager(offsetStore, cdcQuerier)
-	interval, _ := cfg.Interval()
-	changeCapturer := cdc.NewChangeCapturer(cdcQuerier, cfg.Tables, offsetManager, appStore, interval)
+	changeCapturer, err := cdc.NewChangeCapturer(mssqlDB, cfg, offsetStore, appStore)
+	if err != nil {
+		slog.Error("failed to create ChangeCapturer", "error", err)
+		os.Exit(1)
+	}
+
+	// Create snapshot Querier and capturer
+	snapshotQuerier := snapshot.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone), nil)
+	snapshotTables := snapshot.GetCDCTables(cfg)
+	snapshotCapturer := snapshot.NewSnapshotCapturer(snapshotQuerier, snapshotTables, offsetStore)
+
+	// Create replay capturer (reuses appStore which implements Store interface)
+	replayCapturer := replay.NewReplayCapturer(appStore)
 
 	// Create capturers map for Runtime
 	capturers := map[core.CapturerName]core.Capturer{
-		core.CapturerCDC:    changeCapturer,
-		core.CapturerSnapshot: nil, // TODO: initialize when needed
-		core.CapturerReplay:    nil, // TODO: initialize when needed
+		core.CapturerCDC:      changeCapturer,
+		core.CapturerSnapshot: snapshotCapturer,
+		core.CapturerReplay:   replayCapturer,
 	}
 
 	// Create Runtime for unified pipeline orchestration

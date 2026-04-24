@@ -1,8 +1,8 @@
 # Build output
-dbkrab
-bin/dbkrab
-dbkrab_test
-dist/
+/dbkrab
+/bin/dbkrab
+/dbkrab_test
+/app
 dist/
 
 # Dependencies
@@ -20,7 +20,12 @@ logs/
 .DS_Store
 Thumbs.db
 config.yaml
+config.yml
 
 # Data
-data/
-app
+/data/
+/cmd/app/data
+/cmd/app/logs
+/cmd/app/skills
+/cmd/app/app
+

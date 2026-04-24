@@ -56,6 +56,8 @@ func (r *Runtime) CDC() Capturer {
 
 // Snapshot returns the Snapshot capturer instance.
 func (r *Runtime) Snapshot() Capturer {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.capturers[CapturerSnapshot]
 }
 
@@ -84,11 +86,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			capturer := r.capturers[r.current]
+			r.mu.RLock()
+			current := r.current
+			capturer := r.capturers[current]
+			r.mu.RUnlock()
+
 			result := capturer.Fetch(ctx)
 
 			// Switch capturer if needed
-			if result.NextCapturer != r.current {
+			if result.NextCapturer != current {
 				r.mu.Lock()
 				r.current = result.NextCapturer
 				r.mu.Unlock()
