@@ -35,7 +35,8 @@ build:
 ## test: Run all tests
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race $(TEST_PARALLEL) ./...
+	$(GO) test -v -race $(TEST_PARALLEL) ./... 2>&1 | \
+		grep -vE '(^=== RUN\s|^\s+--- PASS|^\s+--- FAIL\t|^--- PASS\t|^--- PASS:|^\?\s|INFO\s|DEBUG\s)' || true
 
 ## test-short: Run short tests
 test-short:

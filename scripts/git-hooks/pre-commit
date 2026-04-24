@@ -27,7 +27,7 @@ if ! make vet; then
     exit 1
 fi
 
-# Run tests (full test suite, includes regression tests)
+# Run tests (quiet — only shows failures)
 echo "🧪 Running tests..."
 if ! make test; then
     echo "❌ Tests failed. Please fix the issues before committing."

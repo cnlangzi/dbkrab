@@ -46,6 +46,9 @@ func Init(cfg LoggingConfig) error {
 }
 
 func parseLevel(level string) slog.Level {
+	if envLevel := os.Getenv("LOG_LEVEL"); envLevel != "" {
+		level = envLevel
+	}
 	switch level {
 	case "debug":
 		return slog.LevelDebug
