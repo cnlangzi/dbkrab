@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,19 +25,17 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"
 )
 
-var (
-	configPath = flag.String("config", "config.yml", "Path to config file")
+const configFile = "config.yml"
 
-	// Version and BuildTime are set via ldflags during build
+// Version and BuildTime are set via ldflags during build
+var (
 	Version   = "dev"
 	BuildTime = "unknown"
 )
 
 func main() {
-	flag.Parse()
-
 	// Load config
-	cfg, warnings, err := config.Load(*configPath)
+	cfg, warnings, err := config.Load(configFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
@@ -212,7 +209,7 @@ func main() {
 	pluginManager := plugin.NewManager(monitorDB)
 
 	// Create config watcher for hot reload
-	configWatcher, err := config.NewWatcher(*configPath, cfg)
+	configWatcher, err := config.NewWatcher(configFile, cfg)
 	if err != nil {
 		slog.Error("failed to create config watcher", "error", err)
 		os.Exit(1)
@@ -222,7 +219,7 @@ func main() {
 			slog.Warn("error stopping config watcher", "error", err)
 		}
 	}()
-		fmt.Fprintf(os.Stdout, "Config: %s\n", *configPath)
+		fmt.Fprintf(os.Stdout, "Config: %s\n", configFile)
 
 	// Create StateManager for process-level coordination
 	stateManager := core.NewStateManager()
@@ -279,7 +276,7 @@ func main() {
 	if apiPort == 0 {
 		apiPort = 9020 // fallback
 	}
-	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, *configPath, cfg, configWatcher, stateManager, poller, offsetStore, mssqlDB)
+	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, poller, offsetStore, mssqlDB)
 	go func() {
 			fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
 		if err := apiServer.Start(); err != nil {
