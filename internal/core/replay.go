@@ -20,10 +20,10 @@ type ReplayStore interface {
 
 // ReplayService replays CDC changes from the store
 type ReplayService struct {
-	store     ReplayStore
-	handler   Handler
-	dlq       *dlq.DLQ      // DLQ for recording failures
-	monitorDB *monitor.DB  // For writing batch logs
+	store       ReplayStore
+	transformer Transformer
+	dlq         *dlq.DLQ      // DLQ for recording failures
+	monitorDB   *monitor.DB  // For writing batch logs
 }
 
 // ReplayResult contains the replay statistics
@@ -35,12 +35,12 @@ type ReplayResult struct {
 }
 
 // NewReplayService creates a new ReplayService with DLQ support
-func NewReplayService(store ReplayStore, handler Handler, dlq *dlq.DLQ, monitorDB *monitor.DB) *ReplayService {
+func NewReplayService(store ReplayStore, transformer Transformer, dlq *dlq.DLQ, monitorDB *monitor.DB) *ReplayService {
 	return &ReplayService{
-		store:     store,
-		handler:   handler,
-		dlq:       dlq,
-		monitorDB: monitorDB,
+		store:       store,
+		transformer: transformer,
+		dlq:         dlq,
+		monitorDB:   monitorDB,
 	}
 }
 
@@ -178,12 +178,12 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	dlqCount := 0
 
 	// Handle the transaction using the shared batchCtx
-	// Use tx.Changes to pass []Change (not *Transaction, matching Handler interface)
-	if err := r.handler.Handle(ctx, tx.Changes, batchCtx); err != nil {
+	// Use tx.Changes to pass []Change (not *Transaction, matching Transformer interface)
+	if err := r.transformer.Transform(ctx, tx.Changes, batchCtx); err != nil {
 		// Write to DLQ on failure (same logic as Poller)
-		r.writeToDLQ(tx, err, lsn, "replay_handler")
+		r.writeToDLQ(tx, err, lsn, "transformer")
 		dlqCount++
-		return &LSNReplayResult{FetchedRows: len(changes), TxCount: 1, DLQCount: dlqCount}, fmt.Errorf("handle transaction %s: %w", tx.ID, err)
+		return &LSNReplayResult{FetchedRows: len(changes), TxCount: 1, DLQCount: dlqCount}, fmt.Errorf("transform transaction %s: %w", tx.ID, err)
 	}
 
 	return &LSNReplayResult{

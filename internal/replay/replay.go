@@ -22,7 +22,7 @@ type Store interface {
 // ReplayService replays CDC changes from the store.
 type ReplayService struct {
 	store        Store
-	handler      core.Handler
+	transformer  core.Transformer
 	dlq          *dlq.DLQ
 	monitorDB    *monitor.DB
 	stateManager *core.StateManager // State coordination with Poller/Snapshot
@@ -33,10 +33,10 @@ type ReplayService struct {
 }
 
 // NewReplayService creates a new ReplayService.
-func NewReplayService(store Store, handler core.Handler, dlq *dlq.DLQ, monitorDB *monitor.DB, stateManager *core.StateManager) *ReplayService {
+func NewReplayService(store Store, transformer core.Transformer, dlq *dlq.DLQ, monitorDB *monitor.DB, stateManager *core.StateManager) *ReplayService {
 	return &ReplayService{
 		store:        store,
-		handler:      handler,
+		transformer:  transformer,
 		dlq:          dlq,
 		monitorDB:    monitorDB,
 		stateManager: stateManager,
@@ -183,10 +183,10 @@ func (r *ReplayService) replayLSN(ctx context.Context, lsn string, result *Repla
 	}
 
 	dlqCount := 0
-	if err := r.handler.Handle(ctx, tx.Changes, batchCtx); err != nil {
-		r.writeToDLQ(tx, err, lsn, "replay_handler")
+	if err := r.transformer.Transform(ctx, tx.Changes, batchCtx); err != nil {
+		r.writeToDLQ(tx, err, lsn, "transformer")
 		dlqCount++
-		return &LSNReplayResult{FetchedRows: len(changes), TxCount: 1, DLQCount: dlqCount}, fmt.Errorf("handle transaction %s: %w", tx.ID, err)
+		return &LSNReplayResult{FetchedRows: len(changes), TxCount: 1, DLQCount: dlqCount}, fmt.Errorf("transform transaction %s: %w", tx.ID, err)
 	}
 
 	return &LSNReplayResult{

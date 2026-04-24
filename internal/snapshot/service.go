@@ -261,9 +261,9 @@ func NewSnapshotHandler(pluginMgr *plugin.Manager, tableName string) *SnapshotHa
 	}
 }
 
-// HandleBatch processes a batch of changes from snapshot through the plugin pipeline.
+// HandleTable processes a batch of changes from snapshot through the plugin pipeline.
 // This routes changes through skills so that sink metadata (e.g., PrimaryKey) is properly set.
-func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
+func (h *SnapshotHandler) HandleTable(ctx context.Context, changes []core.Change) error {
 	if len(changes) == 0 {
 		return nil
 	}
@@ -275,10 +275,10 @@ func (h *SnapshotHandler) HandleBatch(ctx context.Context, changes []core.Change
 	// Create batch context for observability
 	batchCtx := core.NewBatchContext()
 
-	// Route changes through plugin.Manager.Handle which processes them through skills
+	// Route changes through plugin.Manager.Transform which processes them through skills
 	// and then writes to sinks with proper SinkConfig (including PrimaryKey)
-	if err := h.pluginMgr.Handle(ctx, changes, batchCtx); err != nil {
-		return fmt.Errorf("plugin handle: %w", err)
+	if err := h.pluginMgr.Transform(ctx, changes, batchCtx); err != nil {
+		return fmt.Errorf("plugin transform: %w", err)
 	}
 
 	return nil

@@ -201,7 +201,7 @@ type Batch struct {
 // Run runs a full-table snapshot for the given table
 // It reads the table in batches and processes each batch through the handler
 // Returns the startLSN checkpoint that should be stored for subsequent CDC sync
-func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler) ([]byte, error) {
+func (q *Querier) Run(ctx context.Context, schema, table string, handler TableHandler) ([]byte, error) {
 	// Step 0: Check and enable snapshot isolation on the database (must be done before starting transaction)
 	if err := q.CheckSnapshotIsolation(ctx); err != nil {
 		return nil, fmt.Errorf("snapshot isolation check: %w", err)
@@ -313,7 +313,7 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler
 			}
 
 			// Process batch through handler (skill pipeline + sink)
-			if err := handler.HandleBatch(ctx, changes); err != nil {
+			if err := handler.HandleTable(ctx, changes); err != nil {
 				return nil, fmt.Errorf("handle batch at offset %d: %w", offset, err)
 			}
 
@@ -350,18 +350,18 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler Handler
 	return startLSN, nil
 }
 
-// Handler processes snapshot batches through skill pipeline and sink.
-// Implementations should handle each batch of core.Change records.
-type Handler interface {
-	HandleBatch(ctx context.Context, changes []core.Change) error
+// TableHandler processes snapshot batches through skill pipeline and sink.
+// Implementations should handle each batch of core.Change records per table.
+type TableHandler interface {
+	HandleTable(ctx context.Context, changes []core.Change) error
 }
 
-// HandlerFunc is a function type adapter that allows using ordinary
-// functions as Handler implementations.
-type HandlerFunc func(ctx context.Context, changes []core.Change) error
+// TableHandlerFunc is a function type adapter that allows using ordinary
+// functions as TableHandler implementations.
+type TableHandlerFunc func(ctx context.Context, changes []core.Change) error
 
-// HandleBatch implements the Handler interface by calling the function itself.
-func (f HandlerFunc) HandleBatch(ctx context.Context, changes []core.Change) error {
+// HandleTable implements the TableHandler interface by calling the function itself.
+func (f TableHandlerFunc) HandleTable(ctx context.Context, changes []core.Change) error {
 	return f(ctx, changes)
 }
 
@@ -390,7 +390,7 @@ func NewRunner(querier *Querier, offsetStore OffsetUpdater) *Runner {
 // RunFull runs snapshot for a table and updates offset store on success.
 // The schema parameter should be like "dbo", and table is the table name without schema.
 // After snapshot completes, the LSN checkpoint is stored so CDC can resume.
-func (r *Runner) RunFull(ctx context.Context, schema, table string, handler Handler) error {
+func (r *Runner) RunFull(ctx context.Context, schema, table string, handler TableHandler) error {
 	fullTableName := schema + "." + table
 
 	// Run snapshot and get start LSN checkpoint

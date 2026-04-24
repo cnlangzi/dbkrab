@@ -97,7 +97,7 @@ type Poller struct {
 	alertManager *alert.AlertManager
 	offsets      offset.StoreInterface
 	store        Store
-	handler      Handler
+	transformer  Transformer
 	dlq          *dlq.DLQ    // DLQ store
 	monitorDB    *monitor.DB // Observability logs database
 	stopCh       chan struct{}
@@ -135,12 +135,12 @@ type Store interface {
 	Close() error
 }
 
-// Handler interface for custom processing.
+// Transformer interface for ETL processing.
 // BatchCtx provides observability context (batch_id) for logging correlation.
-// Handler receives the full LSN batch of changes (one LSN = one target-side transaction).
-// Handler may reconstruct transactions internally if needed for business logic.
-type Handler interface {
-	Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error
+// Transformer receives []Change, processes them through plugin pipeline (Skill + Sink),
+// and outputs []Sink for downstream writing.
+type Transformer interface {
+	Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 }
 
 // CDCQuerier interface for CDC database operations
@@ -151,12 +151,12 @@ type CDCQuerier interface {
 	GetChanges(ctx context.Context, captureInstance string, tableName string, fromLSN []byte, toLSN []byte) ([]cdc.Change, error)
 }
 
-// PluginHandler is a function type for plugin-based handling
-// Handler receives the full LSN batch of changes (not individual transactions).
-type PluginHandler func(ctx context.Context, changes []Change, batchCtx *BatchContext) error
+// PluginTransformer is a function type adapter for Transformer interface.
+// Transform receives []Change and returns error after plugin ETL processing.
+type PluginTransformer func(ctx context.Context, changes []Change, batchCtx *BatchContext) error
 
-// Handle implements Handler interface
-func (h PluginHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
+// Transform implements Transformer interface
+func (h PluginTransformer) Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
 	return h(ctx, changes, batchCtx)
 }
 
@@ -227,13 +227,13 @@ func (p *Poller) GetFromLSN(ctx context.Context, table string, stored offset.Off
 
 // NewPoller creates a new poller.
 // stateManager is required for process-level coordination with Replay/Snapshot.
-func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB, stateManager *StateManager) *Poller {
+func NewPoller(cfg *config.Config, db *sql.DB, transformer Transformer, store Store, offsetStore offset.StoreInterface, dlqStore *dlq.DLQ, monitorDB *monitor.DB, stateManager *StateManager) *Poller {
 	// Parse SQL Server timezone from config
 	mssqlTimezone := config.ParseTimezone(cfg.MSSQL.Timezone)
 
 	poller := &Poller{
 		stateManager:  stateManager,
-		handler:       handler,
+		transformer:    transformer,
 		cfg:           cfg,
 		db:            db,
 		querier:       cdc.NewQuerier(db, mssqlTimezone),
@@ -262,9 +262,9 @@ func NewPoller(cfg *config.Config, db *sql.DB, handler Handler, store Store, off
 	return poller
 }
 
-// SetHandler sets a custom handler
-func (p *Poller) SetHandler(h Handler) {
-	p.handler = h
+// SetTransformer sets a custom transformer
+func (p *Poller) SetTransformer(t Transformer) {
+	p.transformer = t
 }
 
 // SetReloadChan sets the config reload channel for hot reload
@@ -557,20 +557,20 @@ func (p *Poller) processDirect(ctx context.Context, allChanges []Change, results
 	var handlerErrors []error
 	var processErrors []error
 
-	// Handler processing with retry (non-blocking: continue even if handler fails)
+	// Transformer processing with retry (non-blocking: continue even if transformer fails)
 	// Plugin receives the full LSN batch and may reconstruct transactions internally if needed
-	if p.handler != nil {
-		var handlerErr error
+	if p.transformer != nil {
+		var transformerErr error
 		err := retry.DoWithName(ctx, func() error {
-			handlerErr = p.handler.Handle(ctx, allChanges, batchCtx)
-			return handlerErr
-		}, retry.DefaultRetryConfig(), fmt.Sprintf("handler_batch_%s", batchCtx.BatchID))
+			transformerErr = p.transformer.Transform(ctx, allChanges, batchCtx)
+			return transformerErr
+		}, retry.DefaultRetryConfig(), fmt.Sprintf("transform_batch_%s", batchCtx.BatchID))
 		if err != nil {
-			slog.Error("handler error",
+			slog.Error("transformer error",
 				"batch_id", batchCtx.BatchID,
 				"error", err)
 			// Write each failed change to DLQ (change-scoped)
-			p.writeChangesToDLQ(allChanges, err, "handler")
+			p.writeChangesToDLQ(allChanges, err, "transformer")
 			dlqCount += len(allChanges)
 			handlerErrors = append(handlerErrors, err)
 		}

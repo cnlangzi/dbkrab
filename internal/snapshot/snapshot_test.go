@@ -143,7 +143,7 @@ type testHandler struct {
 	err     error
 }
 
-func (h *testHandler) HandleBatch(ctx context.Context, changes []core.Change) error {
+func (h *testHandler) HandleTable(ctx context.Context, changes []core.Change) error {
 	if h.err != nil {
 		return h.err
 	}
@@ -202,7 +202,7 @@ func TestHandlerFunc(t *testing.T) {
 	var called bool
 	var captured []core.Change
 
-	handler := HandlerFunc(func(ctx context.Context, changes []core.Change) error {
+	handler := TableHandlerFunc(func(ctx context.Context, changes []core.Change) error {
 		called = true
 		captured = changes
 		return nil
@@ -213,9 +213,9 @@ func TestHandlerFunc(t *testing.T) {
 		{Table: "test", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
 	}
 
-	err := handler.HandleBatch(ctx, testChanges)
+	err := handler.HandleTable(ctx, testChanges)
 	if err != nil {
-		t.Errorf("HandleBatch error = %v", err)
+		t.Errorf("HandleTable error = %v", err)
 	}
 	if !called {
 		t.Error("handler was not called")

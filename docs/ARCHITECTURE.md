@@ -290,16 +290,35 @@ All writes (jobs + sinks) for a single CDC change are committed in one transacti
 
 ---
 
-## Skill Processing Flow
+## Transformer Pipeline
+
+The `core.Transformer` interface (`Transform(ctx, changes, batchCtx)`) is the ETL processing entry point:
 
 ```
-For each CDC change (row):
-    1. Build params for this change
-    2. Execute matching sinks → DataSets
-    3. Begin transaction
-    4. Write all DataSets to SQLite (upsert)
-    5. Commit transaction
-    6. If failed → write to DLQ
+[]core.Change
+    │
+    └──► plugin.Manager.Transform()
+            │
+            ├── SQL Plugin Engine (Skill Pipeline)
+            │       │
+            │       └── Execute Skill SQL with CDC parameters
+            │
+            └── Sinker Manager
+                    │
+                    └── Write to SQLite (upsert)
+
+    │
+    └──► If failed → write to DLQ
+```
+
+**Per-Change Processing**: Each CDC row triggers sink execution. Parameters are isolated per change.
+
+**Transformer Interface** (`internal/core/poller.go`):
+
+```go
+type Transformer interface {
+    Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
+}
 ```
 
 ---

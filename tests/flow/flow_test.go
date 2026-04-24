@@ -89,12 +89,12 @@ func (s *memStore) Flush() error { return nil }
 
 func (s *memStore) Close() error { return s.closeErr }
 
-// simpleHandler implements core.Handler with a simple function
-type simpleHandler struct {
+// simpleTransformer implements core.Transformer with a simple function
+type simpleTransformer struct {
 	fn func(changes []core.Change) error
 }
 
-func (h *simpleHandler) Handle(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+func (h *simpleTransformer) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
 	return h.fn(changes)
 }
 
@@ -243,12 +243,12 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	var handlerErr error
 	var err error
 
-	// Create handler that tracks calls
-	handler := &simpleHandler{
+	// Create transformer that tracks calls
+	transformer := &simpleTransformer{
 		fn: func(changes []core.Change) error {
 			handlerCalled = true
 			// Call plugin manager to process
-			handlerErr = pluginMgr.Handle(context.Background(), changes, nil)
+			handlerErr = pluginMgr.Transform(context.Background(), changes, nil)
 			return handlerErr
 		},
 	}
@@ -278,8 +278,8 @@ func TestFlow_SingleTable_SingleTransaction(t *testing.T) {
 	require.Len(t, tx.Changes, 1, "transaction should have one change")
 
 	// Call handler
-	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
-	// Note: pluginMgr.Handle may fail without real MSSQL, but that's OK for this test
+	transformer.Transform(context.Background(), tx.Changes, nil) //nolint:errcheck
+	// Note: pluginMgr.Transform may fail without real MSSQL, but that's OK for this test
 
 	assert.True(t, handlerCalled, "handler should be called")
 
@@ -319,9 +319,9 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	}()
 
 	var err error
-	handler := &simpleHandler{
+	transformer := &simpleTransformer{
 		fn: func(changes []core.Change) error {
-			return pluginMgr.Handle(context.Background(), changes, nil)
+			return pluginMgr.Transform(context.Background(), changes, nil)
 		},
 	}
 
@@ -383,7 +383,7 @@ func TestFlow_SingleTable_MultipleOperations(t *testing.T) {
 	assert.Equal(t, core.OpDelete, tx.Changes[2].Operation)
 
 	// Call handler
-	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
+	transformer.Transform(context.Background(), tx.Changes, nil) //nolint:errcheck
 	// May fail without MSSQL, but ordering is preserved
 
 	// Store
@@ -426,9 +426,9 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 		pluginMgr.Stop()
 	}()
 
-	handler := &simpleHandler{
+	transformer := &simpleTransformer{
 		fn: func(changes []core.Change) error {
-			return pluginMgr.Handle(context.Background(), changes, nil)
+			return pluginMgr.Transform(context.Background(), changes, nil)
 		},
 	}
 
@@ -490,7 +490,7 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	assert.Len(t, tables, 3, "should have changes from 3 tables")
 
 	// Process through handler
-	handler.Handle(context.Background(), tx.Changes, nil) //nolint:errcheck
+	transformer.Transform(context.Background(), tx.Changes, nil) //nolint:errcheck
 	// May fail without MSSQL, but transaction grouping is validated
 
 	// Store
@@ -511,7 +511,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	// Track sink failure
 	var sinkFailed bool
 
-	handler := &simpleHandler{
+	transformer := &simpleTransformer{
 		fn: func(changes []core.Change) error {
 			if !sinkFailed {
 				sinkFailed = true
@@ -541,7 +541,7 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	h.offsetStore.Set("dbo.orders", "0000000001000000", "") //nolint:errcheck
 
 	// Call handler - should fail
-	err := handler.Handle(context.Background(), tx.Changes, nil)
+	err := transformer.Transform(context.Background(), tx.Changes, nil)
 	assert.Error(t, err, "handler should return error on sink failure")
 
 	// Store should NOT be called because handler failed
@@ -568,13 +568,13 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	// First call fails, subsequent calls succeed
 	var callCount int
 
-	handler := &simpleHandler{
+	transformer := &simpleTransformer{
 		fn: func(changes []core.Change) error {
 			callCount++
 			if callCount == 1 {
 				return fmt.Errorf("transient handler error")
 			}
-			return pluginMgr.Handle(context.Background(), changes, nil)
+			return pluginMgr.Transform(context.Background(), changes, nil)
 		},
 	}
 
@@ -595,7 +595,7 @@ func TestFlow_HandlerFailure_NonBlocking(t *testing.T) {
 	tx := txs[0]
 
 	// Call handler - first call fails
-	err := handler.Handle(context.Background(), tx.Changes, nil)
+	err := transformer.Transform(context.Background(), tx.Changes, nil)
 	assert.Error(t, err, "first handler call should fail")
 
 	// In real pipeline: retry would happen, then store/offset would advance

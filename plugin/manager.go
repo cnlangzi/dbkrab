@@ -102,12 +102,12 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Handle processes a batch of changes through all SQL plugins with pull context.
+// Transform processes a batch of changes through all SQL plugins with pull context.
 // BatchCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
 // Sink logs are written by the sinker for each sink write (per sink × table × operation).
 // Returns error if no SQL plugin is loaded (no skill pipeline available).
-func (m *Manager) Handle(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+func (m *Manager) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -130,7 +130,7 @@ func (m *Manager) Handle(ctx context.Context, changes []core.Change, batchCtx *c
 	// Skill logs are written internally by engine.HandleWithPull
 	sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
 	if err != nil {
-		return fmt.Errorf("SQL plugin %s handle: %w", m.sqlPlugin.Name(), err)
+		return fmt.Errorf("SQL plugin %s transform: %w", m.sqlPlugin.Name(), err)
 	}
 	allSinks = append(allSinks, sinks...)
 

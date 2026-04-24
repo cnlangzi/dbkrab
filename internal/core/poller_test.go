@@ -60,10 +60,10 @@ func TestExactlyOnceSinkFailure(t *testing.T) {
 	}
 }
 
-// TestExactlyOnceHandlerFailure verifies that handler failures don't block offset advancement
-func TestExactlyOnceHandlerFailure(t *testing.T) {
-	// Create mock handler that fails
-	failHandler := &mockHandler{
+// TestExactlyOnceTransformerFailure verifies that transformer failures don't block offset advancement
+func TestExactlyOnceTransformerFailure(t *testing.T) {
+	// Create mock transformer that fails
+	failTransformer := &mockTransformer{
 		fail: true,
 	}
 
@@ -81,7 +81,7 @@ func TestExactlyOnceHandlerFailure(t *testing.T) {
 	poller := &Poller{
 		store:         successSink,
 		offsets:       offsetStore,
-		handler:       failHandler,
+		transformer:   failTransformer,
 		metricsWindow: newPollMetricsWindow(60),
 		querier:       &mockQuerier{},
 	}
@@ -328,16 +328,16 @@ func (s *mockOffsetStore) GetAll() (map[string]offset.Offset, error) {
 	return result, nil
 }
 
-type mockHandler struct {
+type mockTransformer struct {
 	fail bool
 	mu   sync.Mutex
 }
 
-func (h *mockHandler) Handle(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
+func (h *mockTransformer) Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.fail {
-		return errors.New("simulated handler failure")
+		return errors.New("simulated transformer failure")
 	}
 	return nil
 }
