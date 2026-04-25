@@ -17,13 +17,14 @@ import (
 // ChangeCapturer fetches CDC changes via incremental polling.
 // It wraps CDCQuerier to perform timer-triggered poll cycles.
 type ChangeCapturer struct {
-	querier   CDCQuerier
-	tables    []string
-	offsetMgr *OffsetManager
-	store     store.Store
-	interval  time.Duration
-	stopCh    chan struct{}
-	stopped   bool
+	Querier      CDCQuerier     // Exported for testing
+	Tables       []string       // Exported for testing
+	OffsetMgr    *OffsetManager // Exported for testing
+	Store        store.Store    // Exported for testing
+	Interval     time.Duration  // Exported for testing
+	stopCh       chan struct{}
+	stopped      bool
+	lastPollTime time.Time // Last time Fetch() was called
 }
 
 // CDCQuerier interface for CDC database operations (allows mocking in tests)
@@ -46,11 +47,11 @@ func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreI
 	offsetMgr := NewOffsetManager(offsetStore, querier)
 
 	return &ChangeCapturer{
-		querier:   querier,
-		tables:    cfg.Tables,
-		offsetMgr: offsetMgr,
-		store:     appStore,
-		interval:  interval,
+		Querier:   querier,
+		Tables:    cfg.Tables,
+		OffsetMgr: offsetMgr,
+		Store:     appStore,
+		Interval:  interval,
 		stopCh:    make(chan struct{}),
 	}, nil
 }
@@ -62,9 +63,10 @@ func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreI
 func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	batchCtx := core.NewBatchContext()
 	fetchTime := time.Now()
+	c.lastPollTime = fetchTime
 
 	// Get global max LSN for consistent snapshot across tables
-	globalMaxLSN, err := c.querier.GetMaxLSN(ctx)
+	globalMaxLSN, err := c.Querier.GetMaxLSN(ctx)
 	if err != nil {
 		slog.Error("ChangeCapturer: failed to get max LSN", "error", err)
 		return &core.CaptureResult{BatchID: batchCtx.BatchID, NextCapturer: core.CapturerCDC}
@@ -74,12 +76,12 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	maxLSNByTable := make(map[string][]byte) // table -> max LSN of changes
 
 	// Poll each table
-	for _, table := range c.tables {
+	for _, table := range c.Tables {
 		schema, tableName := ParseTableName(table)
 		captureInstance := CaptureInstanceName(schema, tableName)
 
 		// Get stored offset
-		stored, err := c.offsetMgr.Get(table)
+		stored, err := c.OffsetMgr.Get(table)
 		if err != nil {
 			slog.Warn("ChangeCapturer: failed to get offset", "table", table, "error", err)
 			continue
@@ -98,7 +100,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		}
 
 		// Get changes
-		cdcChanges, err := c.querier.GetChanges(ctx, captureInstance, tableName, fromLSN, nil)
+		cdcChanges, err := c.Querier.GetChanges(ctx, captureInstance, tableName, fromLSN, nil)
 		if err != nil {
 			slog.Error("ChangeCapturer: GetChanges failed", "table", table, "error", err)
 			continue
@@ -130,12 +132,15 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	}
 
 	// Write changes to cdc.db store
-	if c.store != nil && len(allChanges) > 0 {
+	var insertedCount int
+	if c.Store != nil && len(allChanges) > 0 {
 		coreChanges := c.convertToCoreChanges(allChanges)
-		if _, err := c.store.Write(coreChanges); err != nil {
+		n, err := c.Store.Write(coreChanges)
+		if err != nil {
 			slog.Warn("ChangeCapturer: failed to write to store", "error", err)
 		} else {
-			if err := c.store.Flush(); err != nil {
+			insertedCount = n
+			if err := c.Store.Flush(); err != nil {
 				slog.Warn("ChangeCapturer: failed to flush store", "error", err)
 			}
 		}
@@ -143,8 +148,23 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 	// Save offsets for tables that had changes
 	for table, maxLSN := range maxLSNByTable {
-		if err := c.offsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
+		if err := c.OffsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
 			slog.Warn("ChangeCapturer: failed to save offset", "table", table, "error", err)
+		}
+	}
+
+	// Compute global max LSN across all tables for poller state
+	var globalMaxLSNBytes []byte
+	for _, lsn := range maxLSNByTable {
+		if globalMaxLSNBytes == nil || LSN(lsn).Compare(globalMaxLSNBytes) > 0 {
+			globalMaxLSNBytes = lsn
+		}
+	}
+
+	// Update poller state on every poll cycle to keep last_poll_time current
+	if c.Store != nil {
+		if err := c.Store.UpdatePollerState(hex.EncodeToString(globalMaxLSNBytes), len(allChanges), insertedCount); err != nil {
+			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
 		}
 	}
 
@@ -155,6 +175,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	if len(allChanges) > 0 {
 		slog.Info("[ChangeCapturer poll cycle]",
 			"cdc_fetched", len(allChanges),
+			"cdc_inserted", insertedCount,
 			"batch_ms", pullDuration.Milliseconds(),
 		)
 	}
@@ -172,7 +193,7 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 	if stored.LastLSN == "" {
 		schema, tableName := ParseTableName(table)
 		captureInstance := CaptureInstanceName(schema, tableName)
-		minLSN, err := c.querier.GetMinLSN(ctx, captureInstance)
+		minLSN, err := c.Querier.GetMinLSN(ctx, captureInstance)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +205,7 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 	if err != nil || len(lastLSNBytes) == 0 {
 		schema, tableName := ParseTableName(table)
 		captureInstance := CaptureInstanceName(schema, tableName)
-		minLSN, err := c.querier.GetMinLSN(ctx, captureInstance)
+		minLSN, err := c.Querier.GetMinLSN(ctx, captureInstance)
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +221,7 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 				return nextLSNBytes, nil
 			}
 		}
-		nextLSN, err := c.querier.IncrementLSN(ctx, lastLSNBytes)
+		nextLSN, err := c.Querier.IncrementLSN(ctx, lastLSNBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -218,6 +239,56 @@ func (c *ChangeCapturer) Stop() {
 	}
 	c.stopped = true
 	close(c.stopCh)
+}
+
+// Status returns the current poller status from the CDC capturer.
+func (c *ChangeCapturer) Status() map[string]interface{} {
+	state := map[string]interface{}{
+		"total_changes":  0,
+		"total_inserted": 0,
+	}
+
+	// Get totals from store if available
+	if c.Store != nil {
+		if storeState, err := c.Store.GetPollerState(); err == nil {
+			if v, ok := storeState["total_changes"].(int); ok {
+				state["total_changes"] = v
+			}
+			if v, ok := storeState["total_inserted"].(int); ok {
+				state["total_inserted"] = v
+			}
+			if v, ok := storeState["last_lsn"].(string); ok && v != "" {
+				state["last_lsn"] = v
+			}
+		}
+	}
+
+	// Get last poll time from capturer
+	if !c.lastPollTime.IsZero() {
+		state["last_poll_time"] = c.lastPollTime.Format("2006-01-02 15:04:05.999999999")
+	}
+
+	// Get global last LSN from offset manager (most advanced offset across all tables)
+	if c.OffsetMgr != nil {
+		offsets, err := c.OffsetMgr.GetAll()
+		if err == nil && len(offsets) > 0 {
+			var globalLastLSN []byte
+			for _, off := range offsets {
+				lsnBytes, err := hex.DecodeString(off.LastLSN)
+				if err != nil || len(lsnBytes) == 0 {
+					continue
+				}
+				if globalLastLSN == nil || LSN(lsnBytes).Compare(globalLastLSN) > 0 {
+					globalLastLSN = lsnBytes
+				}
+			}
+			if len(globalLastLSN) > 0 {
+				state["last_lsn"] = hex.EncodeToString(globalLastLSN)
+			}
+		}
+	}
+
+	return state
 }
 
 // convertToCoreChanges converts []CaptureChange to []core.Change.

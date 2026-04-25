@@ -98,8 +98,8 @@ func TestGetFromLSN_ColdStart_NoStoredOffset(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	fromLSN, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{}, []byte{0x00})
@@ -124,8 +124,8 @@ func TestGetFromLSN_ColdStart_InvalidStoredOffset(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	fromLSN, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{LastLSN: "invalid-hex"}, []byte{0x00})
@@ -146,8 +146,8 @@ func TestGetFromLSN_NoNewData_WhenAtMaxLSN(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN == stored.LastLSN → no new data
@@ -172,8 +172,8 @@ func TestGetFromLSN_NewData_UsesStoredNextLSN(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN > stored.LastLSN → new data, should use next_lsn
@@ -204,8 +204,8 @@ func TestGetFromLSN_NewData_IncrementWhenNoNextLSN(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	// globalMaxLSN > stored.LastLSN, but no next_lsn → increment
@@ -233,8 +233,8 @@ func TestGetFromLSN_GetMinLSN_Error(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	_, err := capturer.getFromLSN(context.TODO(), "dbo.test", offset.Offset{}, []byte{0x00})
@@ -254,8 +254,8 @@ func TestGetFromLSN_IncrementLSN_Error(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		offsetMgr: offsetMgr,
+		Querier:   querier,
+		OffsetMgr: offsetMgr,
 	}
 
 	globalMaxLSN, _ := hex.DecodeString("0000002B000001D90000")
@@ -378,11 +378,10 @@ func TestChangeCapturer_Fetch_Integration(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		tables:    []string{"dbo.orders"},
-		offsetMgr: offsetMgr,
-		interval:  100 * time.Millisecond,
-		stopCh:    make(chan struct{}),
+		Querier:   querier,
+		Tables:    []string{"dbo.orders"},
+		OffsetMgr: offsetMgr,
+		Interval:  100 * time.Millisecond,
 	}
 
 	result := capturer.Fetch(context.TODO())
@@ -415,11 +414,10 @@ func TestChangeCapturer_Fetch_EmptyResult(t *testing.T) {
 	offsetMgr := NewOffsetManager(store, querier)
 
 	capturer := &ChangeCapturer{
-		querier:   querier,
-		tables:    []string{"dbo.orders"},
-		offsetMgr: offsetMgr,
-		interval:  100 * time.Millisecond,
-		stopCh:    make(chan struct{}),
+		Querier:   querier,
+		Tables:    []string{"dbo.orders"},
+		OffsetMgr: offsetMgr,
+		Interval:  100 * time.Millisecond,
 	}
 
 	result := capturer.Fetch(context.TODO())
