@@ -153,17 +153,14 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		}
 	}
 
-	// Compute global max LSN across all tables for poller state
-	var globalMaxLSNBytes []byte
-	for _, lsn := range maxLSNByTable {
-		if globalMaxLSNBytes == nil || LSN(lsn).Compare(globalMaxLSNBytes) > 0 {
-			globalMaxLSNBytes = lsn
-		}
-	}
-
 	// Update poller state on every poll cycle to keep last_poll_time current
+	// Use globalMaxLSN as last_lsn only when we fetched changes; otherwise preserve existing last_lsn
 	if c.Store != nil {
-		if err := c.Store.UpdatePollerState(hex.EncodeToString(globalMaxLSNBytes), len(allChanges), insertedCount); err != nil {
+		var lastLSN string
+		if len(allChanges) > 0 && len(globalMaxLSN) > 0 {
+			lastLSN = hex.EncodeToString(globalMaxLSN)
+		}
+		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
 			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
 		}
 	}
