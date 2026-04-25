@@ -62,3 +62,8 @@ func (m *OffsetManager) SaveOffset(ctx context.Context, table string, lsn []byte
 func (m *OffsetManager) Flush() error {
 	return m.store.Flush()
 }
+
+// GetAll returns all stored offsets.
+func (m *OffsetManager) GetAll() (map[string]offset.Offset, error) {
+	return m.store.GetAll()
+}

@@ -332,3 +332,144 @@ func TestSQLiteStoreWrites(t *testing.T) {
 	assert.Equal(t, 1, count, "Should write 1 change")
 	t.Logf("Successfully wrote %d changes to SQLite", count)
 }
+
+// memOffsetStore implements offset.StoreInterface for testing
+type memOffsetStore struct {
+	offsets map[string]offset.Offset
+}
+
+func newMemOffsetStore() *memOffsetStore {
+	return &memOffsetStore{
+		offsets: make(map[string]offset.Offset),
+	}
+}
+
+func (s *memOffsetStore) Load() error                         { return nil }
+func (s *memOffsetStore) Save() error                         { return nil }
+func (s *memOffsetStore) Flush() error                        { return nil }
+func (s *memOffsetStore) Get(table string) (offset.Offset, error) {
+	if o, ok := s.offsets[table]; ok {
+		return o, nil
+	}
+	return offset.Offset{}, nil
+}
+func (s *memOffsetStore) Set(table string, lastLSN string, nextLSN string) error {
+	s.offsets[table] = offset.Offset{
+		LastLSN:   lastLSN,
+		NextLSN:   nextLSN,
+		UpdatedAt: time.Now(),
+	}
+	return nil
+}
+func (s *memOffsetStore) GetAll() (map[string]offset.Offset, error) {
+	// Return a copy to avoid mutation issues
+	result := make(map[string]offset.Offset)
+	for k, v := range s.offsets {
+		result[k] = v
+	}
+	return result, nil
+}
+
+// memStore implements store.Store for testing
+type memStore struct {
+	writes       [][]core.Change
+	writeErr     error
+	pollerState  map[string]interface{}
+	closeErr     error
+}
+
+func newMemStore() *memStore {
+	return &memStore{
+		writes:      make([][]core.Change, 0),
+		pollerState: make(map[string]interface{}),
+	}
+}
+
+func (s *memStore) Write(changes []core.Change) (int, error) {
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
+	s.writes = append(s.writes, changes)
+	return len(changes), nil
+}
+
+func (s *memStore) Flush() error                        { return nil }
+func (s *memStore) Close() error                        { return s.closeErr }
+func (s *memStore) WriteOps(ops []core.Sink) error      { return nil }
+func (s *memStore) GetChanges(limit int) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+func (s *memStore) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+func (s *memStore) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {
+	s.pollerState["last_lsn"] = lastLSN
+	s.pollerState["total_changes"] = fetchedCount
+	s.pollerState["total_inserted"] = insertedCount
+	return nil
+}
+func (s *memStore) GetPollerState() (map[string]interface{}, error) {
+	return s.pollerState, nil
+}
+func (s *memStore) GetLSNs() ([]string, error)                    { return nil, nil }
+func (s *memStore) GetChangesWithLSN(lsn string) ([]core.Change, error) {
+	return nil, nil
+}
+
+// TestCDCStatus tests the Status() method of ChangeCapturer
+func TestCDCStatus(t *testing.T) {
+	// Setup mock MSSQL
+	mockDB := setupMockDB(t)
+	defer func() { _ = mockDB.Close() }()
+
+	// Setup stores
+	memOffsetStore := newMemOffsetStore()
+	memStore := newMemStore()
+
+	// Create mock CDCQuerier
+	handler := mockmssql.HandlerForTest()
+	mockQuerier := mockmssql.NewCDCQuerier(handler)
+
+	// Manually create a ChangeCapturer with mock dependencies
+	// We can't use NewChangeCapturer because it requires a real db connection,
+	// but we can construct the struct directly
+	capturer := &cdc.ChangeCapturer{
+		Querier:   mockQuerier,
+		Tables:    []string{"dbo.TestProducts"},
+		OffsetMgr: cdc.NewOffsetManager(memOffsetStore, mockQuerier),
+		Store:     memStore,
+		Interval:  time.Second,
+	}
+
+	// Initial status should have zero values
+	status := capturer.Status()
+	assert.NotNil(t, status, "Status should not be nil")
+	assert.Equal(t, 0, status["total_changes"], "Initial total_changes should be 0")
+	assert.Equal(t, 0, status["total_inserted"], "Initial total_inserted should be 0")
+
+	// Call Fetch to trigger a poll cycle
+	ctx := context.Background()
+	result := capturer.Fetch(ctx)
+
+	// Verify Fetch completed without error
+	assert.NotNil(t, result, "Fetch result should not be nil")
+	assert.Equal(t, core.CapturerCDC, result.NextCapturer, "Next capturer should be CDC")
+
+	// Status should now reflect the poll time
+	status = capturer.Status()
+	assert.NotNil(t, status, "Status should not be nil after Fetch")
+	assert.NotNil(t, status["last_poll_time"], "last_poll_time should be set after Fetch")
+	assert.NotEmpty(t, status["last_poll_time"], "last_poll_time should not be empty")
+
+	// Pre-populate the offset store to test Status() with stored offsets
+	// (Fetch may not produce changes in mock environment, but Status should still work)
+	memOffsetStore.Set("dbo.TestProducts", "000000000100000001", "000000000100000002")
+
+	// Status should now include last_lsn from offset
+	status = capturer.Status()
+	assert.NotNil(t, status["last_lsn"], "last_lsn should be available from offset")
+	assert.Equal(t, "000000000100000001", status["last_lsn"], "last_lsn should match the stored offset")
+
+	t.Logf("CDC Status after Fetch: last_poll_time=%v, last_lsn=%v, total_changes=%v",
+		status["last_poll_time"], status["last_lsn"], status["total_changes"])
+}

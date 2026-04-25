@@ -51,14 +51,10 @@ coverage:
 	@echo "Coverage report: coverage.html"
 
 ## dev: Run from project directory (code/dbkrab)
-dev: build
-	@echo "Running $(BINARY_NAME) from project directory..."
-	./$(BUILD_DIR)/$(BINARY_NAME) -config config.yml
+dev: 
+	@echo "Running dev..."
+	cd ./cmd/app && go run .
 
-## run-example: Run with example config
-run-example: build
-	@echo "Running with example config..."
-	./$(BUILD_DIR)/$(BINARY_NAME) -config config.example.yml
 
 ## clean: Clean build artifacts
 clean:
