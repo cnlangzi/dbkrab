@@ -234,7 +234,8 @@ func main() {
 	}
 
 	// Create snapshot Querier and capturer
-	snapshotQuerier := snapshot.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone), nil)
+	snapshotConfig := &snapshot.Config{BatchSize: cfg.Snapshot.BatchSize}
+	snapshotQuerier := snapshot.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone), snapshotConfig)
 	snapshotTables := snapshot.GetCDCTables(cfg)
 	snapshotCapturer := snapshot.NewSnapshotCapturer(snapshotQuerier, snapshotTables, offsetStore)
 
