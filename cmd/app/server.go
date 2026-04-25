@@ -1522,7 +1522,15 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "no CDC tables configured"})
 	}
 
-	// Clear all sink tables before snapshot so data is written fresh
+	snap := s.runtime.Snapshot().(*snapshot.SnapshotCapturer)
+
+	// Guard: reject concurrent starts — snapshot must run to completion.
+	progress := snap.Progress()
+	if progress.Started && !progress.Completed && !progress.Stopped {
+		return c.View(map[string]any{"success": false, "error": "snapshot is already running"})
+	}
+
+	// Clear all sink tables before snapshot so data is written fresh.
 	if s.manager != nil {
 		ctx := c.Request.Context()
 		for _, sinkName := range s.manager.ListDatabases() {
@@ -1537,8 +1545,11 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 		}
 	}
 
-	// Reset the capturer for a fresh run and switch Runtime to it
-	s.runtime.Snapshot().(*snapshot.SnapshotCapturer).Restart()
+	// Initialise snapshot: capture MaxLSN, open tx, discover PKs, count rows.
+	ctx := c.Request.Context()
+	if err := snap.Restart(ctx); err != nil {
+		return c.View(map[string]any{"success": false, "error": err.Error()})
+	}
 	s.runtime.SwitchTo(core.CapturerSnapshot)
 
 	return c.View(map[string]any{"success": true, "message": "snapshot started", "state": "running"})
@@ -1561,16 +1572,39 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 		state = "completed"
 	}
 
+	// Build per-table progress array for the dashboard.
+	tables := make([]map[string]interface{}, len(progress.Tables))
+	for i, tp := range progress.Tables {
+		tables[i] = map[string]interface{}{
+			"table":      tp.Table,
+			"total_rows": tp.TotalRows,
+			"read_rows":  tp.ReadRows,
+			"done":       tp.Done,
+		}
+	}
+
+	var startTimeStr, endTimeStr string
+	if !progress.StartTime.IsZero() {
+		startTimeStr = progress.StartTime.Format(time.RFC3339)
+	}
+	if !progress.EndTime.IsZero() {
+		endTimeStr = progress.EndTime.Format(time.RFC3339)
+	}
+
 	return c.View(map[string]any{
 		"success":       true,
 		"state":         state,
 		"total":         progress.TotalTables,
 		"processed":     progress.ProcessedTables,
+		"total_rows":    progress.TotalRows,
+		"read_rows":     progress.ReadRows,
 		"current_table": progress.CurrentTable,
+		"tables":        tables,
 		"started":       progress.Started,
 		"completed":     progress.Completed,
-		"stopped":       progress.Stopped,
 		"error":         progress.Error,
+		"start_time":    startTimeStr,
+		"end_time":      endTimeStr,
 	})
 }
 

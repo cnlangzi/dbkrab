@@ -1,253 +1,341 @@
 <!--layout:dashboard-->
 {{ define "content" }}
 <div class="space-y-4 sm:space-y-6">
+
     <!-- Page Header -->
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
             <h2 class="text-2xl sm:text-3xl font-bold text-text">Snapshot</h2>
-            <p class="text-sm text-textMuted mt-1">Full table snapshot sync to sinks</p>
+            <p class="text-sm text-textMuted mt-1">Full table snapshot sync — reads all rows table-by-table then hands off to CDC.</p>
         </div>
-        <div class="flex gap-2">
-            <button id="snapshot-btn" onclick="startSnapshot()"
-                class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-                </svg>
-                Start Snapshot
-            </button>
+        <div id="header-actions" class="flex gap-2">
+            <!-- Rendered by JS -->
         </div>
     </div>
 
-    <!-- Progress Panel (hidden until snapshot starts) -->
-    <div id="snapshot-progress" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-primary/30">
+    <!-- Running Progress Panel -->
+    <div id="panel-running" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-primary/30">
         <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
-            <svg id="progress-spinner" class="w-5 h-5 text-primary animate-spin hidden" fill="none" viewBox="0 0 24 24">
+            <svg class="w-5 h-5 text-primary animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             Snapshot Progress
         </h3>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
             <div class="p-3 sm:p-4 rounded-xl bg-primary/10 border border-primary/20">
                 <p class="text-textMuted text-xs sm:text-sm mb-1">Tables</p>
                 <p class="text-base sm:text-lg font-bold text-primary">
-                    <span id="snapshot-processed">0</span><span class="text-textMuted font-normal"> / </span><span id="snapshot-total">0</span>
+                    <span id="run-processed">0</span><span class="text-textMuted font-normal"> / </span><span id="run-total">0</span>
+                </p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-primary/10 border border-primary/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Rows Read</p>
+                <p class="text-sm font-bold text-primary">
+                    <span id="run-read-rows">0</span><span class="text-textMuted text-xs font-normal"> / </span><span id="run-total-rows" class="text-textMuted text-xs font-normal">0</span>
                 </p>
             </div>
             <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
                 <p class="text-textMuted text-xs sm:text-sm mb-1">Current Table</p>
-                <p id="snapshot-current-table" class="text-sm font-medium text-text truncate">—</p>
+                <p id="run-current-table" class="text-sm font-medium text-text truncate">—</p>
             </div>
             <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
-                <p class="text-textMuted text-xs sm:text-sm mb-1">Status</p>
-                <p id="snapshot-status-text" class="text-base sm:text-lg font-bold text-primary">Idle</p>
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Elapsed</p>
+                <p id="run-elapsed" class="text-sm font-medium text-text font-mono">—</p>
             </div>
         </div>
-        <!-- Progress Bar -->
-        <div class="w-full bg-surfaceHover rounded-full h-2.5">
-            <div id="snapshot-progress-bar" class="bg-primary h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+        <div class="w-full bg-surfaceHover rounded-full h-2.5 mb-1">
+            <div id="run-progress-bar" class="bg-primary h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
         </div>
-        <!-- Error message -->
-        <p id="snapshot-error" class="hidden mt-3 text-sm text-error"></p>
+        <div class="flex justify-between items-center mb-2">
+            <p class="text-xs text-textMuted">Based on rows read from source</p>
+            <p id="run-pct" class="text-xs text-textMuted">0%</p>
+        </div>
+        <p id="run-error" class="hidden mt-1 text-sm text-error"></p>
     </div>
 
-    <!-- Tables List -->
+    <!-- Completion Summary Panel -->
+    <div id="panel-summary" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-success/30">
+        <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
+            <svg class="w-5 h-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            Snapshot Completed
+        </h3>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div class="p-3 sm:p-4 rounded-xl bg-success/10 border border-success/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Tables Synced</p>
+                <p id="sum-tables" class="text-base sm:text-lg font-bold text-success">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-success/10 border border-success/20">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Rows Read</p>
+                <p id="sum-rows" class="text-base sm:text-lg font-bold text-success">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Started At</p>
+                <p id="sum-start" class="text-xs font-medium text-text">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Duration</p>
+                <p id="sum-duration" class="text-sm font-medium text-text font-mono">—</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tables section -->
     <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-base sm:text-lg font-semibold text-text">CDC Tables</h3>
-            <button onclick="loadTables()"
-                class="text-sm text-primary hover:underline">Refresh</button>
+            <button id="refresh-btn" onclick="loadTables()" class="text-sm text-primary hover:underline">Refresh</button>
         </div>
         <div id="tables-list" class="space-y-2">
             <p class="text-textMuted text-sm">Loading...</p>
         </div>
     </div>
+
 </div>
 
 <script>
-let snapshotPollingInterval = null;
-let snapshotStatusFailureCount = 0;
-let snapshotIdleGraceCount = 0;
-const SNAPSHOT_STATUS_MAX_FAILURES = 5;
-const SNAPSHOT_IDLE_GRACE_POLLS = 5; // allow up to 5 idle polls before giving up (startup race)
+// State
+var pollingInterval = null;
+var elapsedInterval = null;
+var statusFailures = 0;
+var MAX_FAILURES = 5;
+var staticTables = [];
+var snapshotStartTime = null;
 
-// Load CDC tables on page load
+// Init
 loadTables();
+checkInitialStatus();
 
 function loadTables() {
     fetch('/api/snapshot/tables')
-        .then(r => r.json())
-        .then(data => {
-            const container = document.getElementById('tables-list');
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             if (!data.success) {
-                container.innerHTML = `<p class="text-error text-sm">${data.error || 'Failed to load tables'}</p>`;
+                document.getElementById('tables-list').innerHTML =
+                    '<p class="text-error text-sm">' + (data.error || 'Failed to load tables') + '</p>';
                 return;
             }
             if (!data.tables || data.tables.length === 0) {
-                container.innerHTML = '<p class="text-textMuted text-sm">No CDC tables configured.</p>';
+                document.getElementById('tables-list').innerHTML =
+                    '<p class="text-textMuted text-sm">No CDC tables configured.</p>';
                 return;
             }
-            container.innerHTML = data.tables.map(t => `
-                <div class="flex items-center gap-3 p-3 rounded-lg bg-surfaceHover border border-border">
-                    <svg class="w-4 h-4 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M3 10h18M3 14h18M10 6h4M10 18h4M4 6h1M4 18h1M19 6h1M19 18h1"/>
-                    </svg>
-                    <span class="text-sm font-medium text-text">${t.full}</span>
-                </div>
-            `).join('');
+            staticTables = data.tables;
+            renderStaticTables();
         })
-        .catch(() => {
+        .catch(function() {
             document.getElementById('tables-list').innerHTML =
                 '<p class="text-error text-sm">Failed to load tables.</p>';
         });
 }
 
-function startSnapshot() {
-    const btn = document.getElementById('snapshot-btn');
-    btn.disabled = true;
-    btn.innerHTML = `
-        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        Starting...
-    `;
+function renderStaticTables() {
+    var dbIcon = '<svg class="w-4 h-4 text-textMuted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 6h4M10 18h4M4 6h1M4 18h1M19 6h1M19 18h1"/></svg>';
+    document.getElementById('tables-list').innerHTML = staticTables.map(function(t) {
+        return '<div class="flex items-center gap-3 p-3 rounded-lg bg-surfaceHover border border-border">' + dbIcon + '<span class="text-sm font-medium text-text">' + t.full + '</span></div>';
+    }).join('');
+}
 
-    fetch('/api/snapshot/start', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                snapshotStatusFailureCount = 0;
-                showProgress();
+function checkInitialStatus() {
+    fetch('/api/snapshot/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) { renderButton('idle'); return; }
+            if (data.state === 'running') {
+                if (data.start_time) snapshotStartTime = new Date(data.start_time);
+                showRunningPanel();
+                updateRunningUI(data);
                 startPolling();
+                startElapsedTimer();
+                renderButton('running');
+            } else if (data.state === 'completed') {
+                showSummaryPanel(data);
+                updateTableProgress(data.tables, data.state, data.current_table);
+                renderButton('idle');
             } else {
-                resetButton();
+                renderButton('idle');
+            }
+        })
+        .catch(function() { renderButton('idle'); });
+}
+
+function startSnapshot() {
+    renderButton('loading');
+    fetch('/api/snapshot/start', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                statusFailures = 0;
+                snapshotStartTime = new Date();
+                hideSummaryPanel();
+                showRunningPanel();
+                startPolling();
+                startElapsedTimer();
+                renderButton('running');
+            } else {
+                renderButton('idle');
                 alert('Failed to start snapshot: ' + (data.error || 'unknown error'));
             }
         })
-        .catch(err => {
-            resetButton();
-            alert('Failed to start snapshot: ' + err);
-        });
-}
-
-function showProgress() {
-    document.getElementById('snapshot-progress').classList.remove('hidden');
-    document.getElementById('progress-spinner').classList.remove('hidden');
-}
-
-function hideSpinner() {
-    document.getElementById('progress-spinner').classList.add('hidden');
+        .catch(function(err) { renderButton('idle'); alert('Failed to start snapshot: ' + err); });
 }
 
 function startPolling() {
-    if (snapshotPollingInterval) clearInterval(snapshotPollingInterval);
-    snapshotIdleGraceCount = 0;
-    snapshotPollingInterval = setInterval(checkStatus, 2000);
+    stopPolling();
+    pollingInterval = setInterval(checkStatus, 2000);
     checkStatus();
 }
 
 function stopPolling() {
-    if (snapshotPollingInterval) {
-        clearInterval(snapshotPollingInterval);
-        snapshotPollingInterval = null;
-    }
+    if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
 }
 
 function checkStatus() {
     fetch('/api/snapshot/status')
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                snapshotStatusFailureCount = 0;
-                updateUI(data);
-
-                if (data.state === 'running') {
-                    // Active — keep polling, reset grace counter
-                    snapshotIdleGraceCount = 0;
-                } else if (data.state === 'completed' || data.state === 'stopped') {
-                    // Finished — stop polling, reset button, hide progress after delay
-                    stopPolling();
-                    hideSpinner();
-                    resetButton();
-                    setTimeout(() => {
-                        document.getElementById('snapshot-progress').classList.add('hidden');
-                    }, 3000);
-                } else {
-                    // state === 'idle': not yet started — wait a few polls before giving up
-                    snapshotIdleGraceCount++;
-                    if (snapshotIdleGraceCount >= SNAPSHOT_IDLE_GRACE_POLLS) {
-                        stopPolling();
-                        hideSpinner();
-                        resetButton();
-                    }
-                }
-            } else {
-                snapshotStatusFailureCount++;
-                if (snapshotStatusFailureCount >= SNAPSHOT_STATUS_MAX_FAILURES) {
-                    stopPolling();
-                    resetButton();
-                }
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) { if (++statusFailures >= MAX_FAILURES) stopPolling(); return; }
+            statusFailures = 0;
+            if (data.state === 'running') {
+                if (!snapshotStartTime && data.start_time) snapshotStartTime = new Date(data.start_time);
+                updateRunningUI(data);
+                renderButton('running');
+            } else if (data.state === 'completed' || data.state === 'stopped') {
+                updateRunningUI(data);
+                stopPolling();
+                stopElapsedTimer();
+                hideRunningPanel();
+                showSummaryPanel(data);
+                updateTableProgress(data.tables, data.state, data.current_table);
+                renderButton('idle');
             }
         })
-        .catch(err => {
-            snapshotStatusFailureCount++;
-            console.error('Failed to check snapshot status:', err);
-            if (snapshotStatusFailureCount >= SNAPSHOT_STATUS_MAX_FAILURES) {
-                stopPolling();
-                resetButton();
-            }
-        });
+        .catch(function() { if (++statusFailures >= MAX_FAILURES) stopPolling(); });
 }
 
-function updateUI(data) {
-    document.getElementById('snapshot-processed').textContent = data.processed || 0;
-    document.getElementById('snapshot-total').textContent = data.total || 0;
-    document.getElementById('snapshot-current-table').textContent = data.current_table || '—';
-    document.getElementById('snapshot-status-text').textContent =
-        { running: 'Running', completed: 'Completed', stopped: 'Stopped', idle: 'Starting...' }[data.state] || data.state || 'Unknown';
+function startElapsedTimer() {
+    stopElapsedTimer();
+    elapsedInterval = setInterval(updateElapsed, 1000);
+    updateElapsed();
+}
 
-    const total = data.total || 0;
-    const processed = data.processed || 0;
-    const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-    document.getElementById('snapshot-progress-bar').style.width = pct + '%';
+function stopElapsedTimer() {
+    if (elapsedInterval) { clearInterval(elapsedInterval); elapsedInterval = null; }
+}
 
-    // Color: completed → green, stopped/error → orange, running → primary
-    const statusText = document.getElementById('snapshot-status-text');
-    const bar = document.getElementById('snapshot-progress-bar');
-    if (data.state === 'completed') {
-        statusText.className = 'text-base sm:text-lg font-bold text-success';
-        bar.className = 'bg-success h-2.5 rounded-full transition-all duration-300';
-    } else if (data.state === 'stopped') {
-        statusText.className = 'text-base sm:text-lg font-bold text-warning';
-        bar.className = 'bg-warning h-2.5 rounded-full transition-all duration-300';
-    } else {
-        statusText.className = 'text-base sm:text-lg font-bold text-primary';
-        bar.className = 'bg-primary h-2.5 rounded-full transition-all duration-300';
+function updateElapsed() {
+    if (!snapshotStartTime) return;
+    var secs = Math.floor((Date.now() - snapshotStartTime.getTime()) / 1000);
+    document.getElementById('run-elapsed').textContent = fmtDuration(secs);
+}
+
+function showRunningPanel() { document.getElementById('panel-running').classList.remove('hidden'); }
+function hideRunningPanel() { document.getElementById('panel-running').classList.add('hidden'); }
+function hideSummaryPanel() { document.getElementById('panel-summary').classList.add('hidden'); }
+
+function showSummaryPanel(data) {
+    document.getElementById('panel-summary').classList.remove('hidden');
+    document.getElementById('sum-tables').textContent = (data.processed || 0) + ' / ' + (data.total || 0);
+    document.getElementById('sum-rows').textContent = fmtNum(data.read_rows || 0);
+    if (data.start_time) {
+        document.getElementById('sum-start').textContent = new Date(data.start_time).toLocaleString();
     }
-
-    // Error message
-    const errEl = document.getElementById('snapshot-error');
-    if (data.error) {
-        errEl.textContent = 'Error: ' + data.error;
-        errEl.classList.remove('hidden');
-    } else {
-        errEl.classList.add('hidden');
+    if (data.start_time && data.end_time) {
+        var secs = Math.floor((new Date(data.end_time) - new Date(data.start_time)) / 1000);
+        document.getElementById('sum-duration').textContent = fmtDuration(secs);
+    } else if (snapshotStartTime) {
+        var secs = Math.floor((Date.now() - snapshotStartTime.getTime()) / 1000);
+        document.getElementById('sum-duration').textContent = fmtDuration(secs);
     }
 }
 
-function resetButton() {
-    const btn = document.getElementById('snapshot-btn');
-    btn.disabled = false;
-    btn.innerHTML = `
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-        </svg>
-        Start Snapshot
-    `;
+function updateRunningUI(data) {
+    var processed = data.processed || 0;
+    var total = data.total || 0;
+    var readRows = data.read_rows || 0;
+    var totalRows = data.total_rows || 0;
+
+    document.getElementById('run-processed').textContent = processed;
+    document.getElementById('run-total').textContent = total;
+    document.getElementById('run-read-rows').textContent = fmtNum(readRows);
+    document.getElementById('run-total-rows').textContent = fmtNum(totalRows);
+    document.getElementById('run-current-table').textContent = data.current_table || '—';
+
+    var pct = totalRows > 0 ? Math.min(100, Math.round((readRows / totalRows) * 100)) : 0;
+    document.getElementById('run-progress-bar').style.width = pct + '%';
+    document.getElementById('run-pct').textContent = pct + '%';
+
+    var errEl = document.getElementById('run-error');
+    if (data.error) { errEl.textContent = 'Error: ' + data.error; errEl.classList.remove('hidden'); }
+    else { errEl.classList.add('hidden'); }
+
+    if (data.tables && data.tables.length > 0) {
+        updateTableProgress(data.tables, data.state, data.current_table);
+    }
+}
+
+function updateTableProgress(tables, state, currentTable) {
+    if (!tables || tables.length === 0) return;
+    var spinIcon = '<svg class="w-4 h-4 text-primary animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+    var checkIcon = '<svg class="w-4 h-4 text-success flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+    var dbIcon = '<svg class="w-4 h-4 text-textMuted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 6h4M10 18h4M4 6h1M4 18h1M19 6h1M19 18h1"/></svg>';
+
+    document.getElementById('tables-list').innerHTML = tables.map(function(t) {
+        var hasTotal = t.total_rows > 0;
+        var pct = hasTotal ? Math.min(100, Math.round((t.read_rows / t.total_rows) * 100)) : (t.done ? 100 : 0);
+        var rowsText = hasTotal
+            ? fmtNum(t.read_rows) + ' / ' + fmtNum(t.total_rows)
+            : (t.done ? 'Done' : (state === 'running' ? 'Waiting...' : '—'));
+        var isActive = !t.done && t.table === currentTable;
+
+        var rowBg, icon, barColor;
+        if (t.done) {
+            rowBg = 'bg-success/5 border-success/20'; barColor = 'bg-success'; icon = checkIcon;
+        } else if (isActive) {
+            rowBg = 'bg-primary/5 border-primary/20'; barColor = 'bg-primary'; icon = spinIcon;
+        } else {
+            rowBg = 'bg-surfaceHover border-border'; barColor = 'bg-border'; icon = dbIcon;
+        }
+
+        var miniBar = hasTotal
+            ? '<div class="w-24 bg-border rounded-full h-1.5 flex-shrink-0"><div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width:' + pct + '%"></div></div>'
+            : '';
+
+        return '<div class="flex items-center gap-3 p-3 rounded-lg ' + rowBg + ' border transition-colors duration-200">'
+            + icon
+            + '<span class="text-sm font-medium text-text flex-1 truncate">' + t.table + '</span>'
+            + '<span class="text-xs text-textMuted whitespace-nowrap flex-shrink-0">' + rowsText + '</span>'
+            + miniBar
+            + '</div>';
+    }).join('');
+}
+
+function fmtNum(n) { return (n || 0).toLocaleString(); }
+
+function fmtDuration(totalSecs) {
+    var h = Math.floor(totalSecs / 3600);
+    var m = Math.floor((totalSecs % 3600) / 60);
+    var s = totalSecs % 60;
+    if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(s).padStart(2, '0') + 's';
+    if (m > 0) return m + 'm ' + String(s).padStart(2, '0') + 's';
+    return s + 's';
+}
+
+function renderButton(state) {
+    var c = document.getElementById('header-actions');
+    var spinSvg = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+    var uploadSvg = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>';
+    if (state === 'idle') {
+        c.innerHTML = '<button onclick="startSnapshot()" class="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primaryHover text-white font-medium rounded-lg transition-all duration-200">' + uploadSvg + ' Start Snapshot</button>';
+    } else if (state === 'loading') {
+        c.innerHTML = '<button disabled class="flex items-center justify-center gap-2 px-4 py-2 bg-primary/60 text-white font-medium rounded-lg cursor-not-allowed">' + spinSvg + ' Initializing...</button>';
+    } else {
+        c.innerHTML = '<button disabled class="flex items-center justify-center gap-2 px-4 py-2 bg-primary/60 text-white font-medium rounded-lg cursor-not-allowed">' + spinSvg + ' Running...</button>';
+    }
 }
 </script>
+
 {{ end }}
+

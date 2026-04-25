@@ -120,26 +120,15 @@ func (pki *PrimaryKeyInfo) BuildOrderBy() string {
 	return strings.Join(pki.Columns, ", ")
 }
 
-// BuildPagedQuery builds a paginated SELECT query using TOP + ROW_NUMBER()
-// Orders by primary key for stable pagination
+// BuildPagedQuery builds a paginated SELECT query using OFFSET ... FETCH NEXT.
+// This is a single-statement T-SQL pagination that is safe within snapshot-isolation transactions.
+// Note: DiscoverPrimaryKey guarantees pki.Columns is non-empty.
 func (pki *PrimaryKeyInfo) BuildPagedQuery(schema, table string, batchSize int, offset int) string {
-	// Build ORDER BY clause from primary key columns
-	// Note: DiscoverPrimaryKey guarantees pki.Columns is non-empty
 	orderBy := "ORDER BY " + strings.Join(pki.Columns, ", ")
-
-	if offset == 0 {
-		// First batch: simple TOP with ORDER BY
-		return fmt.Sprintf(`SET ROWCOUNT %d; SELECT * FROM %s.%s %s; SET ROWCOUNT 0`, batchSize, schema, table, orderBy)
-	}
-
-	// Subsequent batches: use ROW_NUMBER() with ORDER BY
-	return fmt.Sprintf(`
-		SELECT * FROM (
-			SELECT *, ROW_NUMBER() OVER(%s) AS _rn
-			FROM %s.%s
-		) AS _page
-		WHERE _rn > %d AND _rn <= %d
-	`, orderBy, schema, table, offset, offset+batchSize)
+	return fmt.Sprintf(
+		`SELECT * FROM %s.%s %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY`,
+		schema, table, orderBy, offset, batchSize,
+	)
 }
 
 // GetMaxLSN returns the current max LSN (outside read transaction)
@@ -187,6 +176,78 @@ func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) 
 	var nextLSN []byte
 	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_increment_lsn(@p1)", lsn).Scan(&nextLSN)
 	return nextLSN, err
+}
+
+// GetApproxRowCount returns the approximate row count for a table using sys.partitions.
+// This avoids a full COUNT(*) scan and returns results in milliseconds.
+// The count may be slightly off if rows were inserted/deleted recently and stats not yet updated.
+func (q *Querier) GetApproxRowCount(ctx context.Context, schema, table string) (int64, error) {
+	var count int64
+	err := q.db.QueryRowContext(ctx, `
+		SELECT ISNULL(SUM(p.rows), 0)
+		FROM sys.partitions p
+		JOIN sys.objects o ON p.object_id = o.object_id
+		JOIN sys.schemas s ON o.schema_id = s.schema_id
+		WHERE s.name = @p1
+		  AND o.name = @p2
+		  AND p.index_id IN (0, 1)
+	`, schema, table).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get approx row count for %s.%s: %w", schema, table, err)
+	}
+	return count, nil
+}
+
+// ScanBatch scans all rows from the given *sql.Rows into a slice of maps.
+// Closes rows when done. The dest scanners are recreated per call using column metadata.
+func (q *Querier) ScanBatch(rows *sql.Rows) ([]map[string]interface{}, error) {
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			slog.Warn("snapshot: failed to close rows", "error", closeErr)
+		}
+	}()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("get columns: %w", err)
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("get column types: %w", err)
+	}
+
+	dest := q.factory.CreateDest(columns, colTypes)
+	result := make([]map[string]interface{}, 0)
+
+	for rows.Next() {
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("scan row: %w", err)
+		}
+		data := make(map[string]interface{})
+		for i, col := range columns {
+			if s, ok := dest[i].(scannerpkg.Scanner); ok {
+				if val, scanErr := s.Value(); scanErr == nil {
+					data[strings.ToLower(col)] = val
+				}
+			}
+		}
+		result = append(result, data)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
+
+	return result, nil
+}
+
+// BeginSnapshotTx opens a snapshot-isolation transaction on the querier's db.
+func (q *Querier) BeginSnapshotTx(ctx context.Context) (*sql.Tx, error) {
+	tx, err := q.db.BeginTx(ctx, snapshotTxOptions())
+	if err != nil {
+		return nil, fmt.Errorf("begin snapshot tx: %w", err)
+	}
+	return tx, nil
 }
 
 // Batch represents a batch of rows fetched during snapshot pagination.
