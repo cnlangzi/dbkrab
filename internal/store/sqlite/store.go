@@ -50,7 +50,7 @@ func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount in
 
 // GetPollerState returns the current poller state
 func (s *Store) GetPollerState() (map[string]interface{}, error) {
-	row := s.db.QueryRow(`
+	row := s.db.Reader.QueryRow(`
 		SELECT last_poll_time, last_lsn, total_changes, total_inserted, updated_at
 		FROM poller_state
 		WHERE id = 1
@@ -70,20 +70,12 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 
 	if lastPollTime.Valid {
 		state["last_poll_time"] = lastPollTime.String
-	} else {
-		state["last_poll_time"] = nil
 	}
-
 	if lastLSN.Valid {
 		state["last_lsn"] = lastLSN.String
-	} else {
-		state["last_lsn"] = nil
 	}
-
 	if updatedAt.Valid {
 		state["updated_at"] = updatedAt.String
-	} else {
-		state["updated_at"] = nil
 	}
 
 	return state, nil
@@ -114,9 +106,6 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 
 	rowsInserted := 0
 	for _, change := range changes {
-		// 直接序列化 time.Time，JSON 会将其转为 RFC3339Nano 格式
-		// 注意：JSON 序列化时，time.Time 会被转为 RFC3339Nano 格式的字符串
-		// 读取时需要正确解析这个格式
 		dataJSON, err := json.Marshal(change.Data)
 		if err != nil {
 			dataJSON = []byte("{}")
@@ -255,11 +244,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			slog.Warn("rows.Close error", "error", err)
-		}
-	}()
+	defer closeRows(rows)
 
 	var results []map[string]interface{}
 	for rows.Next() {
@@ -302,11 +287,7 @@ func (s *Store) GetLSNs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			slog.Warn("rows.Close error", "error", err)
-		}
-	}()
+	defer closeRows(rows)
 
 	var lsns []string
 	for rows.Next() {
@@ -331,11 +312,7 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			slog.Warn("rows.Close error", "error", err)
-		}
-	}()
+	defer closeRows(rows)
 
 	var changes []core.Change
 	for rows.Next() {
@@ -407,6 +384,13 @@ func operationStringToInt(op string) int {
 		return 4
 	default:
 		return 2 // Default to INSERT for safety
+	}
+}
+
+// closeRows closes a rows iterator and logs any error.
+func closeRows(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		slog.Warn("rows.Close error", "error", err)
 	}
 }
 
