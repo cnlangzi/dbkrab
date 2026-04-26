@@ -258,10 +258,13 @@ func (c *ChangeCapturer) Status() map[string]interface{} {
 			if v, ok := storeState["last_lsn"].(string); ok && v != "" {
 				state["last_lsn"] = v
 			}
+			if v, ok := storeState["last_poll_time"].(string); ok && v != "" {
+				state["last_poll_time"] = v
+			}
 		}
 	}
 
-	// Get last poll time from capturer
+	// Override with in-memory last poll time if available (more recent during active poll)
 	if !c.lastPollTime.IsZero() {
 		state["last_poll_time"] = c.lastPollTime.Format("2006-01-02 15:04:05.999999999")
 	}
