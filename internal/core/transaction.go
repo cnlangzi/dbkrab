@@ -3,11 +3,11 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/google/uuid"
 )
 

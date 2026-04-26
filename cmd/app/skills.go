@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/dbkrab/plugin/sql"
 	"github.com/yaitoo/xun"
 	"gopkg.in/yaml.v3"

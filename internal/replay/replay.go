@@ -2,7 +2,6 @@ package replay
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 )
 
