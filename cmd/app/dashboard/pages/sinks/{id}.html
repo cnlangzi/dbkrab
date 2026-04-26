@@ -74,6 +74,24 @@
             <span id="results-count" class="text-sm text-textMuted"></span>
         </div>
 
+        <!-- Performance Stats -->
+        <div id="perf-stats" class="hidden px-4 sm:px-6 py-3 bg-surfaceHover/30 border-b border-border text-sm font-mono text-textMuted">
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">DB:</span>
+                <span id="perf-db" class="text-primary font-medium">-</span>
+            </span>
+            <span class="mx-3 text-border">|</span>
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">Network:</span>
+                <span id="perf-network" class="text-primary font-medium">-</span>
+            </span>
+            <span class="mx-3 text-border">|</span>
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">Render:</span>
+                <span id="perf-render" class="text-primary font-medium">-</span>
+            </span>
+        </div>
+
         <!-- Results Container -->
         <div id="results-container" class="p-0">
             <div class="p-8 text-center text-textMuted">
@@ -161,6 +179,9 @@ async function executeQuery() {
     // Clear previous error
     hideError();
     
+    // Record query start time for network timing
+    const queryStartTime = Date.now();
+    
     // Show loading state
     const resultsContainer = document.getElementById('results-container');
     resultsContainer.innerHTML = `
@@ -179,10 +200,12 @@ async function executeQuery() {
             body: JSON.stringify({ query: query }),
         });
         
+        // Record download end time (after headers received, body complete)
+        const downloadEndTime = Date.now();
         const data = await response.json();
         
         if (data.success) {
-            renderResults(data.columns, data.rows, data.count);
+            renderResults(data.columns, data.rows, data.count, data.dbTimeMs, queryStartTime, downloadEndTime);
         } else {
             showError('Query failed: ' + data.error);
             resultsContainer.innerHTML = `
@@ -207,25 +230,19 @@ async function executeQuery() {
     }
 }
 
-function renderResults(columns, rows, count) {
+function renderResults(columns, rows, count, dbTimeMs, queryStartTime, downloadEndTime) {
     const resultsContainer = document.getElementById('results-container');
     const resultsCount = document.getElementById('results-count');
+    const perfStats = document.getElementById('perf-stats');
     
-    resultsCount.textContent = `${count} row${count !== 1 ? 's' : ''}`;
+    // Calculate network time: total elapsed - db time - other overhead
+    // downloadEndTime includes response body reading time
+    const networkTime = downloadEndTime - queryStartTime - dbTimeMs;
     
-    if (rows.length === 0) {
-        resultsContainer.innerHTML = `
-            <div class="p-8 text-center text-textMuted">
-                <svg class="mx-auto h-12 w-12 text-textMuted/50 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
-                <p>No results returned</p>
-            </div>
-        `;
-        return;
-    }
+    // Record render start time
+    const renderStartTime = Date.now();
     
-    // Create responsive table
+    // Render the table
     let html = '<div class="overflow-x-auto">';
     html += '<table class="w-full">';
     html += '<thead class="bg-surfaceHover">';
@@ -252,6 +269,19 @@ function renderResults(columns, rows, count) {
     html += '</div>';
     
     resultsContainer.innerHTML = html;
+    resultsCount.textContent = `${count} row${count !== 1 ? 's' : ''}`;
+    
+    // Use requestAnimationFrame to measure render completion (paint done)
+    requestAnimationFrame(() => {
+        const renderEndTime = Date.now();
+        const renderTime = renderEndTime - renderStartTime;
+        
+        // Show performance stats
+        perfStats.classList.remove('hidden');
+        document.getElementById('perf-db').textContent = dbTimeMs + 'ms';
+        document.getElementById('perf-network').textContent = networkTime + 'ms';
+        document.getElementById('perf-render').textContent = renderTime + 'ms';
+    });
 }
 
 function showError(message) {
