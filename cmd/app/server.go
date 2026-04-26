@@ -564,15 +564,14 @@ func (s *Server) handleCDCChanges(c *xun.Context) error {
 // Returns poller state: last_poll_time, last_lsn, total_changes
 // Also includes metrics block when metrics provider is available
 func (s *Server) handleCDCStatus(c *xun.Context) error {
-	if s.runtime == nil {
-		return c.View(map[string]any{
-			"success": false,
-			"error":   "runtime not initialized",
-		})
-	}
+	state := map[string]any{}
 
-	cdcCapturer := s.runtime.CDC().(*cdc.ChangeCapturer)
-	state := cdcCapturer.Status()
+	// Read poller state directly from store (source of truth)
+	if s.store != nil {
+		if storeState, err := s.store.GetPollerState(); err == nil {
+			state = storeState
+		}
+	}
 
 	response := map[string]any{
 		"success": true,
