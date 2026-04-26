@@ -50,7 +50,7 @@ func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount in
 
 // GetPollerState returns the current poller state
 func (s *Store) GetPollerState() (map[string]interface{}, error) {
-	row := s.db.QueryRow(`
+	row := s.db.Reader.QueryRow(`
 		SELECT last_poll_time, last_lsn, total_changes, total_inserted, updated_at
 		FROM poller_state
 		WHERE id = 1
