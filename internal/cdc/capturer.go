@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -368,8 +369,14 @@ func ComputeChangeID(txID, table string, data map[string]interface{}, lsn []byte
 	hash ^= uint64(op)
 	hash *= fnvPrime
 
-	// Mix in data keys and values for differentiation
-	for k, v := range data {
+	// Mix in data keys and values for differentiation (sorted for deterministic hash)
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := data[k]
 		for _, c := range k {
 			hash ^= uint64(c)
 			hash *= fnvPrime
