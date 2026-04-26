@@ -18,14 +18,16 @@ import (
 // ChangeCapturer fetches CDC changes via incremental polling.
 // It wraps CDCQuerier to perform timer-triggered poll cycles.
 type ChangeCapturer struct {
-	Querier      CDCQuerier     // Exported for testing
-	Tables       []string       // Exported for testing
-	OffsetMgr    *OffsetManager // Exported for testing
-	Store        store.Store    // Exported for testing
-	Interval     time.Duration  // Exported for testing
-	stopCh       chan struct{}
-	stopped      bool
-	lastPollTime time.Time // Last time Fetch() was called
+	Querier       CDCQuerier     // Exported for testing
+	Tables        []string       // Exported for testing
+	OffsetMgr     *OffsetManager // Exported for testing
+	Store         store.Store    // Exported for testing
+	Interval      time.Duration  // Exported for testing
+	stopCh        chan struct{}
+	stopped       bool
+	lastPollTime  time.Time      // Last time Fetch() was called
+	totalChanges  int            // Total CDC rows fetched (persisted to DB)
+	totalInserted int            // Total rows actually written (persisted to DB)
 }
 
 // CDCQuerier interface for CDC database operations (allows mocking in tests)
@@ -47,14 +49,33 @@ func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreI
 	querier := NewQuerier(db, config.ParseTimezone(cfg.MSSQL.Timezone))
 	offsetMgr := NewOffsetManager(offsetStore, querier)
 
-	return &ChangeCapturer{
+	c := &ChangeCapturer{
 		Querier:   querier,
 		Tables:    cfg.Tables,
 		OffsetMgr: offsetMgr,
 		Store:     appStore,
 		Interval:  interval,
 		stopCh:    make(chan struct{}),
-	}, nil
+	}
+
+	// Restore poller state from DB on startup
+	if appStore != nil {
+		if state, err := appStore.GetPollerState(); err == nil {
+			if v, ok := state["total_changes"].(int); ok {
+				c.totalChanges = v
+			}
+			if v, ok := state["total_inserted"].(int); ok {
+				c.totalInserted = v
+			}
+			if v, ok := state["last_poll_time"].(string); ok && v != "" {
+				if t, err := time.Parse("2006-01-02 15:04:05.999999999", v); err == nil {
+					c.lastPollTime = t
+				}
+			}
+		}
+	}
+
+	return c, nil
 }
 
 // Fetch performs one poll cycle and returns the changes.
@@ -161,6 +182,9 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		if len(allChanges) > 0 && len(globalMaxLSN) > 0 {
 			lastLSN = hex.EncodeToString(globalMaxLSN)
 		}
+		// Update in-memory counters
+		c.totalChanges += len(allChanges)
+		c.totalInserted += insertedCount
 		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
 			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
 		}
@@ -242,29 +266,11 @@ func (c *ChangeCapturer) Stop() {
 // Status returns the current poller status from the CDC capturer.
 func (c *ChangeCapturer) Status() map[string]interface{} {
 	state := map[string]interface{}{
-		"total_changes":  0,
-		"total_inserted": 0,
+		"total_changes":  c.totalChanges,
+		"total_inserted": c.totalInserted,
 	}
 
-	// Get totals from store if available
-	if c.Store != nil {
-		if storeState, err := c.Store.GetPollerState(); err == nil {
-			if v, ok := storeState["total_changes"].(int); ok {
-				state["total_changes"] = v
-			}
-			if v, ok := storeState["total_inserted"].(int); ok {
-				state["total_inserted"] = v
-			}
-			if v, ok := storeState["last_lsn"].(string); ok && v != "" {
-				state["last_lsn"] = v
-			}
-			if v, ok := storeState["last_poll_time"].(string); ok && v != "" {
-				state["last_poll_time"] = v
-			}
-		}
-	}
-
-	// Override with in-memory last poll time if available (more recent during active poll)
+	// Get last poll time from in-memory (updated on each Fetch)
 	if !c.lastPollTime.IsZero() {
 		state["last_poll_time"] = c.lastPollTime.Format("2006-01-02 15:04:05.999999999")
 	}
