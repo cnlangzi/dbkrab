@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
-	"time"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/internal/store"
 )

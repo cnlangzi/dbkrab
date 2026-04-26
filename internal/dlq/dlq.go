@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/sqlite"
 	"github.com/yaitoo/sqle"
 	"github.com/yaitoo/sqle/migrate"

@@ -2,13 +2,13 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/dlq"
+	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )

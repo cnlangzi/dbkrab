@@ -2,9 +2,10 @@ package dlq
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/cnlangzi/dbkrab/internal/json"
 )
 
 func setupTestDLQ(t *testing.T) (*DLQ, func()) {
