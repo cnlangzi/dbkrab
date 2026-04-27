@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -28,6 +29,7 @@ type ChangeCapturer struct {
 	lastPollTime  time.Time      // Last time Fetch() was called
 	totalChanges  int            // Total CDC rows fetched (persisted to DB)
 	totalInserted int            // Total rows actually written (persisted to DB)
+	mu            sync.RWMutex   // Protects Tables field for hot reload
 }
 
 // CDCQuerier interface for CDC database operations (allows mocking in tests)
@@ -97,8 +99,12 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	var allChanges []core.CaptureChange
 	maxLSNByTable := make(map[string][]byte) // table -> max LSN of changes
 
-	// Poll each table
-	for _, table := range c.Tables {
+	// Poll each table (read tables under lock to support hot reload)
+	c.mu.RLock()
+	tables := c.Tables
+	c.mu.RUnlock()
+
+	for _, table := range tables {
 		schema, tableName := ParseTableName(table)
 		captureInstance := CaptureInstanceName(schema, tableName)
 
@@ -254,6 +260,27 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 	return nil, nil
 }
 
+// UpdateTables updates the table list for CDC polling.
+// Called by main.go when config reload signal is received.
+func (c *ChangeCapturer) UpdateTables(tables []string) {
+	// Defensive copy to prevent caller from mutating our configuration.
+	newTables := append([]string(nil), tables...)
+
+	c.mu.Lock()
+	c.Tables = newTables
+	c.mu.Unlock()
+
+	// Log count and sample of tables (avoid noisy logs with large table lists)
+	const maxLoggedTables = 5
+	sample := newTables
+	if len(newTables) > maxLoggedTables {
+		sample = newTables[:maxLoggedTables]
+	}
+	slog.Info("ChangeCapturer: tables updated",
+		"count", len(newTables),
+		"tables_sample", sample,
+	)
+}
 // Stop signals the capturer to stop.
 func (c *ChangeCapturer) Stop() {
 	if c.stopped {

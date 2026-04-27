@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/cnlangzi/dbkrab/internal/config"
@@ -97,6 +98,16 @@ func (a *Admin) ListTables(trackedTables []string) ([]TableInfo, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows: %w", err)
 	}
+
+	// Sort: tracked tables first, then by schema.name
+	sort.Slice(tables, func(i, j int) bool {
+		if tables[i].Tracked != tables[j].Tracked {
+			return tables[i].Tracked
+		}
+		a := fmt.Sprintf("%s.%s", tables[i].Schema, tables[i].Name)
+		b := fmt.Sprintf("%s.%s", tables[j].Schema, tables[j].Name)
+		return a < b
+	})
 
 	return tables, nil
 }

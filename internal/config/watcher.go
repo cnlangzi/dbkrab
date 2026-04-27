@@ -164,6 +164,26 @@ func (w *Watcher) Get() *Config {
 	return &cfgCopy
 }
 
+// Update synchronously updates the internal config state.
+// Used when Save() is called externally to avoid waiting for fsnotify reload.
+func (w *Watcher) Update(cfg *Config) {
+	w.mu.Lock()
+	w.cfg = cfg
+	w.mu.Unlock()
+	// Also signal reload to downstream listeners
+	select {
+	case w.reloadCh <- cfg:
+		slog.Info("config updated synchronously")
+	default:
+		// Channel full, drain and send
+		select {
+		case <-w.reloadCh:
+		default:
+		}
+		w.reloadCh <- cfg
+	}
+}
+
 // Stop stops the watcher
 func (w *Watcher) Stop() error {
 	w.stopOnce.Do(func() {

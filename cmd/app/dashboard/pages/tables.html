@@ -146,14 +146,8 @@ function renderTables(tables) {
         return;
     }
 
-    const sortedTables = [...tables].sort((a, b) => {
-        if (a.cdc_enabled !== b.cdc_enabled) {
-            return a.cdc_enabled ? -1 : 1;
-        }
-        const nameA = `${a.schema}.${a.name}`;
-        const nameB = `${b.schema}.${b.name}`;
-        return nameA.localeCompare(nameB);
-    });
+    // Tables already sorted by server: tracked first, then by schema.name
+    const sortedTables = tables;
 
     // Mobile Card View (default) + Desktop Table View
     const wrapper = document.createElement('div');
@@ -280,6 +274,7 @@ function updateSelectedTables() {
 }
 
 async function saveConfiguration() {
+    updateSelectedTables(); // Sync with current DOM state before saving
     const tables = Array.from(selectedTables);
     
     const saveBtn = document.getElementById('save-btn');
