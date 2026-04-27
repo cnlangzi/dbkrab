@@ -496,8 +496,8 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 	}
 
 	// Save tables to config file
-	// The config watcher will detect the file change and reload automatically
-	if s.configPath != "" {
+	// Also synchronously update watcher state to avoid waiting for fsnotify
+	if s.configPath != "" && s.configWatcher != nil {
 		// Get current config from watcher (most up-to-date)
 		currentCfg := s.configWatcher.Get()
 
@@ -508,7 +508,11 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 			slog.Error("failed to save config file", "error", err, "path", s.configPath)
 			// Don't fail the request, just log the error
 		} else {
-			slog.Info("config saved", "path", s.configPath, "tables", req.Tables)
+			// Synchronously update watcher internal state
+			// This ensures Get() returns correct state immediately
+			// without waiting for fsnotify async reload
+			s.configWatcher.Update(currentCfg)
+			slog.Info("config saved and watcher updated", "path", s.configPath, "tables", req.Tables)
 		}
 	}
 
