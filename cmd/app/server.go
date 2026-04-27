@@ -466,10 +466,50 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 
 	var enabled []string
 	var skipped []string
+	var disabled []string
 	var errors []string
+
+	// Get current config tables (old list) to find removed tables
+	oldTables := s.configWatcher.Get().Tables
+	oldSet := make(map[string]bool)
+	for _, t := range oldTables {
+		oldSet[t] = true
+	}
+	newSet := make(map[string]bool)
+	for _, t := range req.Tables {
+		newSet[t] = true
+	}
+
+	// Disable CDC for tables that were removed from selection
+	for _, table := range oldTables {
+		if !newSet[table] {
+			parts := strings.SplitN(table, ".", 2)
+			if len(parts) != 2 {
+				continue // skip malformed entries
+			}
+			schema, name := parts[0], parts[1]
+
+			cdcEnabled, err := s.cdcAdmin.GetCDCStatus(schema, name)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("check CDC status for %s: %v", table, err))
+				continue
+			}
+
+			if cdcEnabled {
+				// Disable CDC in database
+				if err := s.cdcAdmin.DisableCDC(schema, name); err != nil {
+					errors = append(errors, fmt.Sprintf("disable CDC for %s: %v", table, err))
+					continue
+				}
+				disabled = append(disabled, table)
+				slog.Info("CDC disabled", "table", table)
+			}
+		}
+	}
 
 	// Enable CDC for tables that are checked but CDC not yet enabled in database
 	for _, table := range req.Tables {
+
 		parts := strings.SplitN(table, ".", 2)
 		if len(parts) != 2 {
 			errors = append(errors, fmt.Sprintf("invalid table format: %s (expected schema.table)", table))
@@ -519,6 +559,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 			"error":   strings.Join(errors, "; "),
 			"enabled": enabled,
 			"skipped": skipped,
+		"disabled": disabled,
 		})
 	}
 
@@ -527,6 +568,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 		"message": "CDC configuration updated",
 		"enabled": enabled,
 		"skipped": skipped,
+		"disabled": disabled,
 		"tables":  req.Tables,
 	})
 }
