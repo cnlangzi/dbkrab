@@ -1,5 +1,6 @@
 # Build output
 /dbkrab
+/cmd/app/dbkrabs
 /bin/dbkrab
 /dbkrab_test
 /app
@@ -22,10 +23,13 @@ Thumbs.db
 config.yaml
 config.yml
 
+__debug_bin*
+
 # Data
 /data/
 /cmd/app/data
 /cmd/app/logs
 /cmd/app/skills
 /cmd/app/app
+
 

@@ -106,9 +106,9 @@ func main() {
 		os.Exit(1)
 	}
 
-		_, _ = fmt.Fprintf(os.Stdout, "MSSQL: %s@%s:%d/%s pool:%d/%d lifetime:%v idle:%v\n",
-			cfg.MSSQL.User, cfg.MSSQL.Host, cfg.MSSQL.Port, cfg.MSSQL.Database,
-			maxOpenConns, maxIdleConns, connMaxLifetime, connMaxIdleTime)
+	_, _ = fmt.Fprintf(os.Stdout, "MSSQL: %s@%s:%d/%s pool:%d/%d lifetime:%v idle:%v\n",
+		cfg.MSSQL.User, cfg.MSSQL.Host, cfg.MSSQL.Port, cfg.MSSQL.Database,
+		maxOpenConns, maxIdleConns, connMaxLifetime, connMaxIdleTime)
 
 	// Create CDC store DB and Offset DB as separate databases
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func main() {
 				slog.Warn("appStore.Close error", "error", err)
 			}
 		}()
-			_, _ = fmt.Fprintf(os.Stdout, "CDC store: %s\n", cfg.App.DB.CDC)
+		_, _ = fmt.Fprintf(os.Stdout, "CDC store: %s\n", cfg.App.DB.CDC)
 	default:
 		slog.Error("unknown store type", "type", cfg.App.Type)
 		os.Exit(1)
@@ -161,7 +161,7 @@ func main() {
 			slog.Warn("offsetStore.Close error", "error", err)
 		}
 	}()
-		_, _ = fmt.Fprintf(os.Stdout, "Offset store: %s\n", cfg.App.DB.Offset)
+	_, _ = fmt.Fprintf(os.Stdout, "Offset store: %s\n", cfg.App.DB.Offset)
 
 	// Create DLQ with its own separate DB
 	dlqStore, err := dlq.New(ctx, cfg.App.DB.DLQ)
@@ -174,7 +174,7 @@ func main() {
 			slog.Warn("dlqStore.Close error", "error", err)
 		}
 	}()
-		_, _ = fmt.Fprintf(os.Stdout, "DLQ: %s\n", cfg.App.DB.DLQ)
+	_, _ = fmt.Fprintf(os.Stdout, "DLQ: %s\n", cfg.App.DB.DLQ)
 
 	// Create monitor DB
 	monitorDB, err := monitor.New(ctx, cfg.App.DB.Monitor)
@@ -187,7 +187,7 @@ func main() {
 			slog.Warn("monitorDB.Close error", "error", err)
 		}
 	}()
-		_, _ = fmt.Fprintf(os.Stdout, "Monitor: %s\n", cfg.App.DB.Monitor)
+	_, _ = fmt.Fprintf(os.Stdout, "Monitor: %s\n", cfg.App.DB.Monitor)
 
 	// Create sinker manager
 	sinkerMgr := sinker.NewManager()
@@ -205,7 +205,7 @@ func main() {
 			slog.Warn("sinkerMgr.Close error", "error", err)
 		}
 	}()
-		_, _ = fmt.Fprintf(os.Stdout, "Sinker: %d databases\n", len(cfg.Sinks.ToMap()))
+	_, _ = fmt.Fprintf(os.Stdout, "Sinker: %d databases\n", len(cfg.Sinks.ToMap()))
 
 	// Create plugin manager
 	pluginManager := plugin.NewManager(monitorDB)
@@ -221,7 +221,7 @@ func main() {
 			slog.Warn("error stopping config watcher", "error", err)
 		}
 	}()
-		_, _ = fmt.Fprintf(os.Stdout, "Config: %s\n", configFile)
+	_, _ = fmt.Fprintf(os.Stdout, "Config: %s\n", configFile)
 
 	// Create StateManager for process-level coordination
 	stateManager := core.NewStateManager()
@@ -282,7 +282,7 @@ func main() {
 
 	// Create CDC admin
 	cdcAdmin := cdcadmin.NewAdmin(&cfg.MSSQL)
-		_, _ = fmt.Fprintf(os.Stdout, "CDC admin: ok\n")
+	_, _ = fmt.Fprintf(os.Stdout, "CDC admin: ok\n")
 
 	// Check and set CDC retention to 7 days
 	retention, err := cdcAdmin.CheckAndSetCDCRetention()
@@ -300,9 +300,10 @@ func main() {
 	}
 	apiServer := NewServer(pluginManager, dlqStore, cdcAdmin, appStore, sinkerMgr, monitorDB, apiPort, configFile, cfg, configWatcher, stateManager, nil, offsetStore, mssqlDB, runtime)
 	go func() {
-			_, _ = fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
+		_, _ = fmt.Fprintf(os.Stdout, "Dashboard: http://localhost:%d\n", apiPort)
 		if err := apiServer.Start(); err != nil {
 			slog.Warn("Dashboard stopped", "error", err)
+			panic(err)
 		}
 	}()
 
@@ -328,7 +329,7 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stdout, "shutdown complete\n")
 	}()
 
-// Start polling via Runtime
+	// Start polling via Runtime
 	_, _ = fmt.Fprintf(os.Stdout, "dbkrab %s (built %s)\n", Version, BuildTime)
 	_, _ = fmt.Fprintf(os.Stdout, "CDC polling: %d tables\n", len(cfg.Tables))
 	if err := runtime.Run(ctx); err != nil && err != context.Canceled {

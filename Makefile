@@ -21,7 +21,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build test dev clean lint coverage install help
+.PHONY: all build test clean lint coverage install help
 
 all: build
 
@@ -50,11 +50,23 @@ coverage:
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
-## dev: Run from project directory (code/dbkrab)
-dev: 
-	@echo "Running dev..."
-	cd ./cmd/app && go run .
 
+.PHONY: start-dev stop-dev reset-dev
+## dev: Run from project directory (code/dbkrab)
+start-dev: 
+	@echo "Running dev..."
+	cd ./cmd/app && go build -o dbkrab . && ./dbkrab
+
+stop-dev:
+	@echo "Stopping dev..."
+	pkill -f "./dbkrab" 2>/dev/null || true
+
+reset-dev: stop-dev
+	@echo "Resetting dev state..."
+	@rm -rf ./cmd/app/data/app/*
+	@rm -rf ./cmd/app/data/sinks/*/*.db ./cmd/app/data/sinks/*/*.db-shm ./cmd/app/data/sinks/*/*.db-wal
+	@rm -rf ./cmd/app/logs/*
+	@mkdir -p ./cmd/app/logs
 
 ## clean: Clean build artifacts
 clean:
