@@ -30,6 +30,10 @@ type Sinker interface {
 	// This is used by snapshot startup to prepare sinks before loading data.
 	Reset(ctx context.Context) error
 
+	// Truncate deletes all data from the specified tables.
+	// It disables foreign key checks during the operation.
+	Truncate(ctx context.Context, tables []string) error
+
 	// Close closes the sinker and releases resources
 	Close() error
 }

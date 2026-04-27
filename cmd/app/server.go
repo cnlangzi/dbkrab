@@ -247,6 +247,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/sinks/{id}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/sinks/{id}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/sinks/{id}/migrate", s.handleSinkMigrate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/sinks/{id}/truncate", s.handleSinkTruncate, xun.WithViewer(&xun.JsonViewer{}))
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
@@ -1420,6 +1421,70 @@ func (s *Server) handleSinkMigrate(c *xun.Context) error {
 	return c.View(map[string]any{
 		"success": true,
 		"message": "migration completed successfully",
+	})
+}
+
+// handleSinkTruncate handles POST /api/sinks/{id}/truncate
+func (s *Server) handleSinkTruncate(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink id is required",
+		})
+	}
+
+	// Find sink by ID
+	sinkCfg, err := s.getSinkById(id)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Tables []string `json:"tables"`
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "failed to read request body",
+		})
+	}
+	defer func() { _ = c.Request.Body.Close() }()
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid request body",
+		})
+	}
+
+	if len(req.Tables) == 0 {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "no tables specified",
+		})
+	}
+
+	slog.Info("handleSinkTruncate: truncating tables",
+		"sink", sinkCfg.Name,
+		"tables", req.Tables)
+
+	if err := s.sinkerManager.Truncate(c.Request.Context(), sinkCfg.Name, req.Tables); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("truncated %d table(s)", len(req.Tables)),
 	})
 }
 
