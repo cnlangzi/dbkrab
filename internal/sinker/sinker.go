@@ -40,6 +40,8 @@ type Sinker interface {
 	// QueryTables returns the list of user tables in the sink database
 	QueryTables() ([]string, error)
 
-	// Query executes a read-only query and returns results
-	Query(query string, limit int) ([]map[string]any, error)
+	// Query executes a read-only query and returns columns and results.
+	// Uses the existing Reader connection instead of creating a temporary one.
+	// Returns columns in SQLite table order (not alphabetically sorted).
+	Query(query string, limit int) ([]string, []map[string]any, error)
 }

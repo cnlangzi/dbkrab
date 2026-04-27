@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -322,20 +321,11 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 	}
 
 	// Execute query via sinker (limit 1000 for safety)
-	results, err := skr.Query(query, 1000)
+	// Returns columns in SQLite table order
+	columns, results, err := skr.Query(query, 1000)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}
-
-	// Get columns from first result and sort for stable ordering
-	if len(results) == 0 {
-		return []string{}, []map[string]any{}, nil
-	}
-	columns := make([]string, 0, len(results[0]))
-	for col := range results[0] {
-		columns = append(columns, col)
-	}
-	sort.Strings(columns)  // Stable column order for UI display
 
 	// Handle datetime conversion for API response
 	for _, row := range results {

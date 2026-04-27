@@ -379,11 +379,12 @@ func (s *Sinker) QueryTables() ([]string, error) {
 	return tables, rows.Err()
 }
 
-// Query executes a read-only query and returns results.
+// Query executes a read-only query and returns columns and results.
 // Uses the existing Reader connection instead of creating a temporary one.
-func (s *Sinker) Query(query string, limit int) ([]map[string]any, error) {
+// Returns columns in SQLite table order (not alphabetically sorted).
+func (s *Sinker) Query(query string, limit int) ([]string, []map[string]any, error) {
 	if s.closed {
-		return nil, errors.New("sinker is closed")
+		return nil, nil, errors.New("sinker is closed")
 	}
 
 	// Add LIMIT if not present
@@ -394,16 +395,16 @@ func (s *Sinker) Query(query string, limit int) ([]map[string]any, error) {
 
 	rows, err := s.db.Reader.Query(limitQuery)
 	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return nil, nil, fmt.Errorf("query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {
-		return nil, fmt.Errorf("columns: %w", err)
+		return nil, nil, fmt.Errorf("columns: %w", err)
 	}
 
-	var results []map[string]any
+	var res []map[string]any
 	for rows.Next() {
 		vals := make([]any, len(cols))
 		valPtrs := make([]any, len(cols))
@@ -419,8 +420,9 @@ func (s *Sinker) Query(query string, limit int) ([]map[string]any, error) {
 		for i, col := range cols {
 			row[col] = vals[i]
 		}
-		results = append(results, row)
+		res = append(res, row)
 	}
 
-	return results, rows.Err()
+	// Return columns in SQLite order, not alphabetically sorted
+	return cols, res, rows.Err()
 }
