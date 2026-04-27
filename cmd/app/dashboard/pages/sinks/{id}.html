@@ -207,6 +207,7 @@ async function executeQuery() {
         if (data.success) {
             renderResults(data.columns, data.rows, data.count, data.dbTimeMs, queryStartTime, downloadEndTime);
         } else {
+            hidePerfStats();
             showError('Query failed: ' + data.error);
             resultsContainer.innerHTML = `
                 <div class="p-8 text-center text-textMuted">
@@ -218,6 +219,7 @@ async function executeQuery() {
             `;
         }
     } catch (err) {
+        hidePerfStats();
         showError('Error executing query: ' + err.message);
         resultsContainer.innerHTML = `
             <div class="p-8 text-center text-textMuted">
@@ -236,11 +238,25 @@ function renderResults(columns, rows, count, dbTimeMs, queryStartTime, downloadE
     const perfStats = document.getElementById('perf-stats');
     
     // Calculate network time: total elapsed - db time - other overhead
-    // downloadEndTime includes response body reading time
-    const networkTime = downloadEndTime - queryStartTime - dbTimeMs;
+    // Clamp to 0 in case of clock skew or large queries
+    const networkTime = Math.max(0, downloadEndTime - queryStartTime - dbTimeMs);
     
     // Record render start time
     const renderStartTime = Date.now();
+    
+    // Handle empty results
+    if (rows.length === 0) {
+        resultsContainer.innerHTML = `
+            <div class="p-8 text-center text-textMuted">
+                <svg class="mx-auto h-12 w-12 text-textMuted/50 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <p>No results returned</p>
+            </div>
+        `;
+        resultsCount.textContent = '0 rows';
+        return;
+    }
     
     // Render the table
     let html = '<div class="overflow-x-auto">';
@@ -284,6 +300,13 @@ function renderResults(columns, rows, count, dbTimeMs, queryStartTime, downloadE
     });
 }
 
+function hidePerfStats() {
+    const perfStats = document.getElementById('perf-stats');
+    if (perfStats) {
+        perfStats.classList.add('hidden');
+    }
+}
+
 function showError(message) {
     const errorEl = document.getElementById('error-message');
     errorEl.innerHTML = `
@@ -300,6 +323,7 @@ function showError(message) {
 function hideError() {
     const errorEl = document.getElementById('error-message');
     errorEl.classList.add('hidden');
+    hidePerfStats();
 }
 
 async function runMigration() {
