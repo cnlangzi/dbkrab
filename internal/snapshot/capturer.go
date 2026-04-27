@@ -218,6 +218,15 @@ func (c *SnapshotCapturer) markError(msg string) {
 	c.mu.Unlock()
 }
 
+// UpdateTables updates the table list for snapshot.
+// Called by main.go when config reload signal is received.
+func (c *SnapshotCapturer) UpdateTables(tables []CDCTable) {
+	c.mu.Lock()
+	c.tables = tables
+	c.mu.Unlock()
+	slog.Info("SnapshotCapturer: tables updated", "count", len(tables))
+}
+
 // Stop signals the capturer to stop. Idempotent.
 // The open snapshot transaction (if any) is rolled back.
 func (c *SnapshotCapturer) Stop() {
