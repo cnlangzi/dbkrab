@@ -414,6 +414,7 @@ func TestStore_Write_DuplicateIgnored(t *testing.T) {
 					"id":   1,
 					"name": "alice",
 				},
+				ID: "dup-test-fixed-id", // Set ID to avoid fallback hash with unordered map
 			},
 		},
 	}
