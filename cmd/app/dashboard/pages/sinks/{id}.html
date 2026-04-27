@@ -201,9 +201,10 @@ async function executeQuery() {
             body: JSON.stringify({ query: query }),
         });
         
-        // Record download end time (after headers received, body complete)
-        const downloadEndTime = Date.now();
         const data = await response.json();
+        
+        // Record download end time (after full response body received and parsed)
+        const downloadEndTime = Date.now();
         
         if (data.success) {
             renderResults(data.columns, data.rows, data.count, data.dbTimeMs, queryStartTime, downloadEndTime);
