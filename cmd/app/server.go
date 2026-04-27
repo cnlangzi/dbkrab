@@ -1344,8 +1344,12 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 		})
 	}
 
-	// Use sinker manager to execute query
-	columns, queryResults, err := s.sinkerManager.Query(sinkCfg.Name, query)
+	// Execute query with timing
+	var columns []string
+	var queryResults []map[string]any
+	dbStart := time.Now()
+	columns, queryResults, err = s.sinkerManager.Query(sinkCfg.Name, query)
+	dbTimeMs := time.Since(dbStart).Milliseconds()
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
@@ -1354,10 +1358,11 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{
-		"success": true,
-		"columns": columns,
-		"rows":    queryResults,
-		"count":   len(queryResults),
+		"success":   true,
+		"columns":   columns,
+		"rows":      queryResults,
+		"count":     len(queryResults),
+		"dbTimeMs":  dbTimeMs,
 	})
 }
 
