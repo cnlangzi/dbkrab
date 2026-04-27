@@ -220,13 +220,21 @@ func (c *SnapshotCapturer) markError(msg string) {
 
 // UpdateTables updates the table list for snapshot.
 // Called by main.go when config reload signal is received.
+// NOTE: If snapshot is currently running, this update will NOT affect the ongoing
+// snapshot - it will only be used when Restart() is called for the next snapshot.
 func (c *SnapshotCapturer) UpdateTables(tables []CDCTable) {
 	c.mu.Lock()
 	c.tables = tables
+	isRunning := c.started && !c.completed && !c.stopped
 	c.mu.Unlock()
-	slog.Info("SnapshotCapturer: tables updated", "count", len(tables))
-}
 
+	if isRunning {
+		slog.Warn("SnapshotCapturer: tables updated but snapshot is running",
+			"count", len(tables), "note", "new tables will apply on next snapshot")
+	} else {
+		slog.Info("SnapshotCapturer: tables updated", "count", len(tables))
+	}
+}
 // Stop signals the capturer to stop. Idempotent.
 // The open snapshot transaction (if any) is rolled back.
 func (c *SnapshotCapturer) Stop() {
