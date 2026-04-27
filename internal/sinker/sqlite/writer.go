@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -258,6 +259,131 @@ func (s *Sinker) Reset(ctx context.Context) error {
 	slog.Info("SQLiteSinker.Reset: completed",
 		"database", s.name,
 		"tables_cleared", len(tables))
+
+	return nil
+}
+
+// Truncate deletes all data from the specified tables.
+// It disables foreign key checks during the operation.
+// Only tables that exist in the database and don't start with sqle_ will be truncated.
+func (s *Sinker) Truncate(ctx context.Context, tables []string) error {
+	if len(tables) == 0 {
+		return errors.New("no tables specified")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	slog.Info("SQLiteSinker.Truncate: starting truncate",
+		"database", s.name,
+		"requested_tables", tables)
+
+	// Step 1: Query valid tables from database as whitelist
+	rows, err := s.db.Writer.QueryContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'sqle_%'
+		ORDER BY name`)
+	if err != nil {
+		return fmt.Errorf("query tables: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var validTables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return fmt.Errorf("scan table name: %w", err)
+		}
+		validTables = append(validTables, tableName)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows iteration: %w", err)
+	}
+
+	// Build whitelist map for O(1) lookup
+	validTableSet := make(map[string]struct{}, len(validTables))
+	for _, t := range validTables {
+		validTableSet[t] = struct{}{}
+	}
+
+	slog.Debug("SQLiteSinker.Truncate: valid tables",
+		"database", s.name,
+		"valid_count", len(validTables))
+
+	// Step 2: Filter requested tables against whitelist
+	var tablesToTruncate []string
+	var skipped []string
+	for _, table := range tables {
+		// Double-check: skip any table starting with sqle_ (defense in depth)
+		if strings.HasPrefix(table, "sqle_") {
+			skipped = append(skipped, table)
+			continue
+		}
+		// Check if table exists in database
+		if _, ok := validTableSet[table]; !ok {
+			skipped = append(skipped, table)
+			continue
+		}
+		tablesToTruncate = append(tablesToTruncate, table)
+	}
+
+	if len(skipped) > 0 {
+		slog.Warn("SQLiteSinker.Truncate: skipped invalid tables",
+			"database", s.name,
+			"skipped", skipped)
+	}
+
+	if len(tablesToTruncate) == 0 {
+		return errors.New("no valid tables to truncate after filtering")
+	}
+
+	// Step 3: Capture original foreign_keys setting and disable for truncate.
+	var fkEnabled bool
+	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
+	if err := row.Scan(&fkEnabled); err != nil {
+		return fmt.Errorf("read foreign_keys setting: %w", err)
+	}
+
+	if fkEnabled {
+		if _, err := s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = off"); err != nil {
+			return fmt.Errorf("disable foreign keys: %w", err)
+		}
+		if err := s.db.Flush(); err != nil {
+			return fmt.Errorf("flush after disabling foreign keys: %w", err)
+		}
+		// Ensure FK is re-enabled after truncate.
+		defer func() {
+			_, _ = s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = on")
+		}()
+	}
+
+	// Step 4: Delete from each valid table
+	for _, tableName := range tablesToTruncate {
+		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
+		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
+			slog.Warn("SQLiteSinker.Truncate: failed to delete from table",
+				"database", s.name,
+				"table", tableName,
+				"error", err)
+			return fmt.Errorf("delete from %s: %w", tableName, err)
+		}
+
+		slog.Debug("SQLiteSinker.Truncate: truncated table",
+			"database", s.name,
+			"table", tableName)
+	}
+
+	// Step 5: Flush to ensure changes are persisted
+	if err := s.db.Flush(); err != nil {
+		slog.Warn("SQLiteSinker.Truncate: flush failed",
+			"database", s.name,
+			"error", err)
+	}
+
+	slog.Info("SQLiteSinker.Truncate: completed",
+		"database", s.name,
+		"tables_truncated", len(tablesToTruncate))
+
 
 	return nil
 }
