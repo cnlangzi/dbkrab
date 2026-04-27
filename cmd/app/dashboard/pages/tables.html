@@ -147,8 +147,8 @@ function renderTables(tables) {
     }
 
     const sortedTables = [...tables].sort((a, b) => {
-        if (a.cdc_enabled !== b.cdc_enabled) {
-            return a.cdc_enabled ? -1 : 1;
+        if (a.tracked !== b.tracked) {
+            return b.tracked ? -1 : 1;
         }
         const nameA = `${a.schema}.${a.name}`;
         const nameB = `${b.schema}.${b.name}`;
@@ -280,6 +280,7 @@ function updateSelectedTables() {
 }
 
 async function saveConfiguration() {
+    updateSelectedTables(); // Sync with current DOM state before saving
     const tables = Array.from(selectedTables);
     
     const saveBtn = document.getElementById('save-btn');
