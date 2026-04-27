@@ -263,12 +263,24 @@ func (c *ChangeCapturer) getFromLSN(ctx context.Context, table string, stored of
 // UpdateTables updates the table list for CDC polling.
 // Called by main.go when config reload signal is received.
 func (c *ChangeCapturer) UpdateTables(tables []string) {
-	c.mu.Lock()
-	c.Tables = tables
-	c.mu.Unlock()
-	slog.Info("ChangeCapturer: tables updated", "count", len(tables), "tables", tables)
-}
+	// Defensive copy to prevent caller from mutating our configuration.
+	newTables := append([]string(nil), tables...)
 
+	c.mu.Lock()
+	c.Tables = newTables
+	c.mu.Unlock()
+
+	// Log count and sample of tables (avoid noisy logs with large table lists)
+	const maxLoggedTables = 5
+	sample := newTables
+	if len(newTables) > maxLoggedTables {
+		sample = newTables[:maxLoggedTables]
+	}
+	slog.Info("ChangeCapturer: tables updated",
+		"count", len(newTables),
+		"tables_sample", sample,
+	)
+}
 // Stop signals the capturer to stop.
 func (c *ChangeCapturer) Stop() {
 	if c.stopped {

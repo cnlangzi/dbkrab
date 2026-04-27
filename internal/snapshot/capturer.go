@@ -76,6 +76,7 @@ type Progress struct {
 type SnapshotCapturer struct {
 	querier     *Querier
 	tables      []CDCTable
+	pendingTables []CDCTable  // staged tables from UpdateTables, applied in Restart
 	offsetStore offset.StoreInterface
 
 	mu           sync.Mutex
@@ -115,6 +116,11 @@ func (c *SnapshotCapturer) Restart(ctx context.Context) error {
 	c.mu.Lock()
 	oldTx := c.tx
 	c.pending = true
+	// Apply any staged tables from UpdateTables
+	if c.pendingTables != nil {
+		c.tables = c.pendingTables
+		c.pendingTables = nil
+	}
 	c.started = false
 	c.completed = false
 	c.stopped = false
@@ -217,26 +223,34 @@ func (c *SnapshotCapturer) markError(msg string) {
 	c.pending = false
 	c.mu.Unlock()
 }
-
 // UpdateTables updates the table list for snapshot.
 // Called by main.go when config reload signal is received.
-// NOTE: If snapshot is currently running, this update will NOT affect the ongoing
-// snapshot - it will only be used when Restart() is called for the next snapshot.
+// If a snapshot is currently running or pending, the new tables are staged in
+// pendingTables and will be applied when Restart() is called for the next snapshot.
+// Otherwise, tables are updated immediately for the next snapshot run.
 func (c *SnapshotCapturer) UpdateTables(tables []CDCTable) {
-	c.mu.Lock()
-	c.tables = tables
-	isRunning := c.started && !c.completed && !c.stopped
-	c.mu.Unlock()
+	// Defensive copy to prevent caller from mutating our configuration.
+	newTables := make([]CDCTable, len(tables))
+	copy(newTables, tables)
 
-	if isRunning {
-		slog.Warn("SnapshotCapturer: tables updated but snapshot is running",
-			"count", len(tables), "note", "new tables will apply on next snapshot")
+	c.mu.Lock()
+	// Check if snapshot is active (includes pending state during Restart initialization)
+	isActive := c.pending || (c.started && !c.completed && !c.stopped)
+
+	if isActive {
+		// Stage the update for the next snapshot run
+		c.pendingTables = newTables
+		c.mu.Unlock()
+		slog.Warn("SnapshotCapturer: tables staged for next snapshot",
+			"count", len(newTables), "note", "will apply on next Restart() call")
 	} else {
-		slog.Info("SnapshotCapturer: tables updated", "count", len(tables))
+		// Apply immediately since no snapshot is running
+		c.tables = newTables
+		c.pendingTables = nil // clear any previously staged tables
+		c.mu.Unlock()
+		slog.Info("SnapshotCapturer: tables updated", "count", len(newTables))
 	}
 }
-// Stop signals the capturer to stop. Idempotent.
-// The open snapshot transaction (if any) is rolled back.
 func (c *SnapshotCapturer) Stop() {
 	c.mu.Lock()
 	if c.stopped {
