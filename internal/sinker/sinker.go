@@ -32,4 +32,10 @@ type Sinker interface {
 
 	// Close closes the sinker and releases resources
 	Close() error
+
+	// QueryTables returns the list of user tables in the sink database
+	QueryTables() ([]string, error)
+
+	// Query executes a read-only query and returns results
+	Query(query string, limit int) ([]map[string]any, error)
 }

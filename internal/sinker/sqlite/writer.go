@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/cnlangzi/dbkrab/internal/core"
@@ -260,4 +261,78 @@ func (s *Sinker) Reset(ctx context.Context) error {
 		"tables_cleared", len(tables))
 
 	return nil
+}
+
+// QueryTables returns the list of user tables in the sink database.
+// Uses the existing Reader connection instead of creating a temporary one.
+func (s *Sinker) QueryTables() ([]string, error) {
+	if s.closed {
+		return nil, errors.New("sinker is closed")
+	}
+
+	rows, err := s.db.Reader.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("query tables: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			continue
+		}
+		// Skip internal SQLite tables
+		if !strings.HasPrefix(tableName, "sqlite_") {
+			tables = append(tables, tableName)
+		}
+	}
+
+	return tables, rows.Err()
+}
+
+// Query executes a read-only query and returns results.
+// Uses the existing Reader connection instead of creating a temporary one.
+func (s *Sinker) Query(query string, limit int) ([]map[string]any, error) {
+	if s.closed {
+		return nil, errors.New("sinker is closed")
+	}
+
+	// Add LIMIT if not present
+	limitQuery := query
+	if limit > 0 && !strings.Contains(strings.ToUpper(query), "LIMIT") {
+		limitQuery = fmt.Sprintf("%s LIMIT %d", query, limit)
+	}
+
+	rows, err := s.db.Reader.Query(limitQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("columns: %w", err)
+	}
+
+	var results []map[string]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		valPtrs := make([]any, len(cols))
+		for i := range vals {
+			valPtrs[i] = &vals[i]
+		}
+
+		if err := rows.Scan(valPtrs...); err != nil {
+			continue
+		}
+
+		row := make(map[string]any)
+		for i, col := range cols {
+			row[col] = vals[i]
+		}
+		results = append(results, row)
+	}
+
+	return results, rows.Err()
 }
