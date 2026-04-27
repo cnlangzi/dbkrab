@@ -176,8 +176,9 @@ async function executeQuery() {
         return;
     }
     
-    // Clear previous error
+    // Clear previous error and perf stats
     hideError();
+    hidePerfStats();
     
     // Record query start time for network timing
     const queryStartTime = Date.now();
@@ -255,6 +256,7 @@ function renderResults(columns, rows, count, dbTimeMs, queryStartTime, downloadE
             </div>
         `;
         resultsCount.textContent = '0 rows';
+        hidePerfStats();
         return;
     }
     
