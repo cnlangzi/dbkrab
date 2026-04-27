@@ -7,10 +7,17 @@ import (
 	"github.com/bytedance/sonic"
 )
 
+// ===================== 配置 =====================
+
+// stdAPI uses ConfigStd for deterministic output (SortMapKeys + EscapeHTML)
+var stdAPI = sonic.ConfigStd
+
 // ===================== 核心函数 =====================
 
-// Marshal is an alias for sonic.Marshal
-var Marshal = sonic.Marshal
+// Marshal uses ConfigStd for deterministic key ordering
+// This is critical for use cases that depend on consistent JSON serialization
+// (e.g., hashing for deduplication)
+var Marshal = stdAPI.Marshal
 
 // Unmarshal is an alias for sonic.Unmarshal
 var Unmarshal = sonic.Unmarshal
@@ -23,14 +30,14 @@ type Encoder = sonic.Encoder
 // Decoder is an alias for sonic.Decoder
 type Decoder = sonic.Decoder
 
-// NewEncoder returns a new Encoder that writes to w
+// NewEncoder returns a new Encoder that writes to w using deterministic stdAPI config
 func NewEncoder(w io.Writer) Encoder {
-	return sonic.ConfigDefault.NewEncoder(w)
+	return stdAPI.NewEncoder(w)
 }
 
-// NewDecoder returns a new Decoder that reads from r
+// NewDecoder returns a new Decoder that reads from r using deterministic stdAPI config
 func NewDecoder(r io.Reader) Decoder {
-	return sonic.ConfigDefault.NewDecoder(r)
+	return stdAPI.NewDecoder(r)
 }
 
 // ===================== 工具函数 =====================
@@ -51,9 +58,10 @@ var Indent = json.Indent
 var HTMLEscape = json.HTMLEscape
 
 // MarshalIndent is like Marshal but applies Indent
-var MarshalIndent = sonic.MarshalIndent
+var MarshalIndent = stdAPI.MarshalIndent
 
 // ===================== 类型别名 =====================
 
-// RawMessage is an alias for sonic.NoCopyRawMessage
-type RawMessage = sonic.NoCopyRawMessage
+// RawMessage is an alias for encoding/json.RawMessage for compatibility
+// Use this instead of sonic.NoCopyRawMessage to maintain compatibility with stdlib
+type RawMessage = json.RawMessage

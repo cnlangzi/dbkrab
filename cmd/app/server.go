@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -59,6 +60,7 @@ type Server struct {
 	port            int
 	app             *xun.App
 	mux             *http.ServeMux
+	srv             *http.Server
 	configPath      string
 	config          *config.Config
 	configWatcher   *config.Watcher
@@ -148,18 +150,27 @@ func (s *Server) Start() error {
 	s.app.Start()
 
 	// Create http server using our mux
-	srv := &http.Server{
+	s.srv = &http.Server{
 		Addr:         ":" + strconv.Itoa(s.port),
 		Handler:      s.mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
-	return srv.ListenAndServe()
+	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Dashboard error: %v", err)
+		panic(err)
+	}
+	return nil
 }
 
-// Stop stops the API server
+// Stop stops the API server gracefully
 func (s *Server) Stop() error {
+	if s.srv != nil {
+		if err := s.srv.Shutdown(context.Background()); err != nil && err != http.ErrServerClosed {
+			slog.Warn("failed to shutdown server", "error", err)
+		}
+	}
 	if s.app != nil {
 		s.app.Close()
 	}
@@ -236,6 +247,7 @@ func (s *Server) registerAPIRoutes() {
 	api.Get("/sinks/{id}/tables", s.handleSinkTables, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/sinks/{id}/query", s.handleSinkQuery, xun.WithViewer(&xun.JsonViewer{}))
 	api.Post("/sinks/{id}/migrate", s.handleSinkMigrate, xun.WithViewer(&xun.JsonViewer{}))
+	api.Post("/sinks/{id}/truncate", s.handleSinkTruncate, xun.WithViewer(&xun.JsonViewer{}))
 
 	api.Get("/health", s.handleHealth, xun.WithViewer(&xun.JsonViewer{}))
 	api.Get("/overview", s.handleOverview)
@@ -1409,6 +1421,70 @@ func (s *Server) handleSinkMigrate(c *xun.Context) error {
 	return c.View(map[string]any{
 		"success": true,
 		"message": "migration completed successfully",
+	})
+}
+
+// handleSinkTruncate handles POST /api/sinks/{id}/truncate
+func (s *Server) handleSinkTruncate(c *xun.Context) error {
+	id := c.Request.PathValue("id")
+	if id == "" {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "sink id is required",
+		})
+	}
+
+	// Find sink by ID
+	sinkCfg, err := s.getSinkById(id)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Tables []string `json:"tables"`
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "failed to read request body",
+		})
+	}
+	defer func() { _ = c.Request.Body.Close() }()
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "invalid request body",
+		})
+	}
+
+	if len(req.Tables) == 0 {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   "no tables specified",
+		})
+	}
+
+	slog.Info("handleSinkTruncate: truncating tables",
+		"sink", sinkCfg.Name,
+		"tables", req.Tables)
+
+	if err := s.sinkerManager.Truncate(c.Request.Context(), sinkCfg.Name, req.Tables); err != nil {
+		return c.View(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.View(map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("truncated %d table(s)", len(req.Tables)),
 	})
 }
 

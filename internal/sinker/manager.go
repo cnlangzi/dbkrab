@@ -281,6 +281,37 @@ func (m *Manager) QueryTables(dbName string) ([]string, error) {
 	return skr.QueryTables()
 }
 
+// Truncate deletes all data from specified tables in a sink database
+func (m *Manager) Truncate(ctx context.Context, dbName string, tables []string) error {
+	m.mu.RLock()
+	_, ok := m.dbConfigs[dbName]
+	m.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("sink %s not configured", dbName)
+	}
+
+	if len(tables) == 0 {
+		return fmt.Errorf("no tables specified")
+	}
+
+	sinker, err := m.GetSinker(dbName)
+	if err != nil {
+		return fmt.Errorf("get sinker: %w", err)
+	}
+
+	// Delegate to the specific sinker implementation
+	if err := sinker.Truncate(ctx, tables); err != nil {
+		return fmt.Errorf("truncate via sinker: %w", err)
+	}
+
+	slog.Info("sinker.Manager.Truncate: completed",
+		"database", dbName,
+		"tables", tables)
+
+	return nil
+}
+
 // Query executes a read-only SELECT query on a sink and returns results.
 // Uses the Sinker's existing Reader connection instead of creating a temporary one.
 func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error) {
