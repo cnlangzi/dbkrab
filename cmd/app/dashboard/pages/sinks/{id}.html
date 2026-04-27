@@ -74,6 +74,24 @@
             <span id="results-count" class="text-sm text-textMuted"></span>
         </div>
 
+        <!-- Performance Stats -->
+        <div id="perf-stats" class="hidden px-4 sm:px-6 py-3 bg-surfaceHover/30 border-b border-border text-sm font-mono text-textMuted">
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">DB:</span>
+                <span id="perf-db" class="text-primary font-medium">-</span>
+            </span>
+            <span class="mx-3 text-border">|</span>
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">Network:</span>
+                <span id="perf-network" class="text-primary font-medium">-</span>
+            </span>
+            <span class="mx-3 text-border">|</span>
+            <span class="inline-flex items-center gap-1">
+                <span class="text-textMuted">Render:</span>
+                <span id="perf-render" class="text-primary font-medium">-</span>
+            </span>
+        </div>
+
         <!-- Results Container -->
         <div id="results-container" class="p-0">
             <div class="p-8 text-center text-textMuted">
@@ -158,8 +176,12 @@ async function executeQuery() {
         return;
     }
     
-    // Clear previous error
+    // Clear previous error and perf stats
     hideError();
+    hidePerfStats();
+    
+    // Record query start time for network timing
+    const queryStartTime = Date.now();
     
     // Show loading state
     const resultsContainer = document.getElementById('results-container');
@@ -181,9 +203,13 @@ async function executeQuery() {
         
         const data = await response.json();
         
+        // Record download end time (after full response body received and parsed)
+        const downloadEndTime = Date.now();
+        
         if (data.success) {
-            renderResults(data.columns, data.rows, data.count);
+            renderResults(data.columns, data.rows, data.count, data.dbTimeMs, queryStartTime, downloadEndTime);
         } else {
+            hidePerfStats();
             showError('Query failed: ' + data.error);
             resultsContainer.innerHTML = `
                 <div class="p-8 text-center text-textMuted">
@@ -195,6 +221,7 @@ async function executeQuery() {
             `;
         }
     } catch (err) {
+        hidePerfStats();
         showError('Error executing query: ' + err.message);
         resultsContainer.innerHTML = `
             <div class="p-8 text-center text-textMuted">
@@ -207,12 +234,19 @@ async function executeQuery() {
     }
 }
 
-function renderResults(columns, rows, count) {
+function renderResults(columns, rows, count, dbTimeMs, queryStartTime, downloadEndTime) {
     const resultsContainer = document.getElementById('results-container');
     const resultsCount = document.getElementById('results-count');
+    const perfStats = document.getElementById('perf-stats');
     
-    resultsCount.textContent = `${count} row${count !== 1 ? 's' : ''}`;
+    // Calculate network time: total elapsed - db time - other overhead
+    // Clamp to 0 in case of clock skew or large queries
+    const networkTime = Math.max(0, downloadEndTime - queryStartTime - dbTimeMs);
     
+    // Record render start time
+    const renderStartTime = Date.now();
+    
+    // Handle empty results
     if (rows.length === 0) {
         resultsContainer.innerHTML = `
             <div class="p-8 text-center text-textMuted">
@@ -222,10 +256,12 @@ function renderResults(columns, rows, count) {
                 <p>No results returned</p>
             </div>
         `;
+        resultsCount.textContent = '0 rows';
+        hidePerfStats();
         return;
     }
     
-    // Create responsive table
+    // Render the table
     let html = '<div class="overflow-x-auto">';
     html += '<table class="w-full">';
     html += '<thead class="bg-surfaceHover">';
@@ -252,6 +288,26 @@ function renderResults(columns, rows, count) {
     html += '</div>';
     
     resultsContainer.innerHTML = html;
+    resultsCount.textContent = `${count} row${count !== 1 ? 's' : ''}`;
+    
+    // Use requestAnimationFrame to measure render completion (paint done)
+    requestAnimationFrame(() => {
+        const renderEndTime = Date.now();
+        const renderTime = renderEndTime - renderStartTime;
+        
+        // Show performance stats
+        perfStats.classList.remove('hidden');
+        document.getElementById('perf-db').textContent = dbTimeMs + 'ms';
+        document.getElementById('perf-network').textContent = networkTime + 'ms';
+        document.getElementById('perf-render').textContent = renderTime + 'ms';
+    });
+}
+
+function hidePerfStats() {
+    const perfStats = document.getElementById('perf-stats');
+    if (perfStats) {
+        perfStats.classList.add('hidden');
+    }
 }
 
 function showError(message) {
@@ -270,6 +326,7 @@ function showError(message) {
 function hideError() {
     const errorEl = document.getElementById('error-message');
     errorEl.classList.add('hidden');
+    hidePerfStats();
 }
 
 async function runMigration() {

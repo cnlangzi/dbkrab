@@ -255,13 +255,21 @@ func main() {
 	// Start config watcher
 	go configWatcher.Start()
 
-	// Listen for config reload and update sinker manager
+	// Listen for config reload and update components
 	go func() {
 		for newCfg := range configWatcher.ReloadChan() {
-			if newCfg != nil && newCfg.Sinks != nil {
+			if newCfg == nil {
+				continue
+			}
+			// Update sinker manager
+			if newCfg.Sinks != nil {
 				sinkerMgr.Configure(newCfg.Sinks.ToMap())
 				slog.Info("sinker manager reconfigured", "databases", len(newCfg.Sinks.ToMap()))
 			}
+			// Update ChangeCapturer tables
+			changeCapturer.UpdateTables(newCfg.Tables)
+			// Update SnapshotCapturer tables
+			snapshotCapturer.UpdateTables(snapshot.GetCDCTables(newCfg))
 		}
 	}()
 

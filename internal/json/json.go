@@ -30,14 +30,14 @@ type Encoder = sonic.Encoder
 // Decoder is an alias for sonic.Decoder
 type Decoder = sonic.Decoder
 
-// NewEncoder returns a new Encoder that writes to w
+// NewEncoder returns a new Encoder that writes to w using deterministic stdAPI config
 func NewEncoder(w io.Writer) Encoder {
-	return sonic.ConfigDefault.NewEncoder(w)
+	return stdAPI.NewEncoder(w)
 }
 
-// NewDecoder returns a new Decoder that reads from r
+// NewDecoder returns a new Decoder that reads from r using deterministic stdAPI config
 func NewDecoder(r io.Reader) Decoder {
-	return sonic.ConfigDefault.NewDecoder(r)
+	return stdAPI.NewDecoder(r)
 }
 
 // ===================== 工具函数 =====================
