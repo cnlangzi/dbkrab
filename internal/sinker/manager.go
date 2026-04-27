@@ -289,8 +289,10 @@ func (m *Manager) QueryTables(dbName string) ([]string, error) {
 		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
 	}
 
-	// Open read-only connection
-	db, err := sql.Open("sqlite3", path+"?mode=ro")
+	// Open read-only connection with busy_timeout to handle WAL lock contention
+	// When main process is writing to WAL, we need to wait for the lock
+	dsn := fmt.Sprintf("%s?mode=ro&_busy_timeout=5000", path)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -337,8 +339,10 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
 	}
 
-	// Open read-only connection
-	db, err := sql.Open("sqlite3", path+"?mode=ro")
+	// Open read-only connection with busy_timeout to handle WAL lock contention
+	// When main process is writing to WAL, we need to wait for the lock
+	dsn := fmt.Sprintf("%s?mode=ro&_busy_timeout=5000", path)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
