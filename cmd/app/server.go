@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -59,6 +60,7 @@ type Server struct {
 	port            int
 	app             *xun.App
 	mux             *http.ServeMux
+	srv             *http.Server
 	configPath      string
 	config          *config.Config
 	configWatcher   *config.Watcher
@@ -148,18 +150,27 @@ func (s *Server) Start() error {
 	s.app.Start()
 
 	// Create http server using our mux
-	srv := &http.Server{
+	s.srv = &http.Server{
 		Addr:         ":" + strconv.Itoa(s.port),
 		Handler:      s.mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
-	return srv.ListenAndServe()
+	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Dashboard error: %v", err)
+		panic(err)
+	}
+	return nil
 }
 
-// Stop stops the API server
+// Stop stops the API server gracefully
 func (s *Server) Stop() error {
+	if s.srv != nil {
+		if err := s.srv.Shutdown(context.Background()); err != nil && err != http.ErrServerClosed {
+			slog.Warn("failed to shutdown server", "error", err)
+		}
+	}
 	if s.app != nil {
 		s.app.Close()
 	}
