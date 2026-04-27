@@ -173,17 +173,20 @@ func (s *Sinker) Migrate(ctx context.Context) error {
 // during the clear operation and flushing changes to disk upon completion.
 // This is used by snapshot startup to prepare sinks before loading data.
 func (s *Sinker) Reset(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	slog.Info("SQLiteSinker.Reset: starting reset",
 		"database", s.name)
 
-	// Get all valid tables from database
+	// Get all valid tables from database (without lock, safe read)
 	tables, err := s.getValidTables(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Delegate to Truncate to clear all tables
-	return s.truncateTables(ctx, tables)
+	// Delegate to truncateTables with lock held and fail-fast=false for Reset
+	return s.truncateTables(ctx, tables, false)
 }
 
 // getValidTables returns all valid user tables from the database
@@ -195,7 +198,11 @@ func (s *Sinker) getValidTables(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query tables: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Warn("SQLiteSinker.getValidTables: failed to close rows", "error", err)
+		}
+	}()
 
 	var tables []string
 	for rows.Next() {
@@ -274,12 +281,13 @@ func (s *Sinker) Truncate(ctx context.Context, tables []string) error {
 		return errors.New("no valid tables to truncate after filtering")
 	}
 
-	// Step 3: Execute truncate
-	return s.truncateTables(ctx, tablesToTruncate)
+	// Step 3: Execute truncate with fail-fast for Truncate operation
+	return s.truncateTables(ctx, tablesToTruncate, true)
 }
 
 // truncateTables performs the actual table truncation (called with lock held)
-func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
+// failFast: if true, return on first error; if false, log and continue (best-effort)
+func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast bool) error {
 	// Capture original foreign_keys setting and disable for truncate.
 	var fkEnabled bool
 	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
@@ -288,19 +296,24 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 	}
 
 	if fkEnabled {
-		if _, err := s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = off"); err != nil {
+		// Disable foreign keys with the same context for consistent cancellation handling
+		if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = off"); err != nil {
 			return fmt.Errorf("disable foreign keys: %w", err)
 		}
 		if err := s.db.Flush(); err != nil {
 			return fmt.Errorf("flush after disabling foreign keys: %w", err)
 		}
-		// Ensure FK is re-enabled after truncate.
+		// Ensure FK is re-enabled after truncate - log any error
 		defer func() {
-			_, _ = s.db.Writer.ExecContext(context.Background(), "PRAGMA foreign_keys = on")
+			if _, err := s.db.Writer.ExecContext(ctx, "PRAGMA foreign_keys = on"); err != nil {
+				slog.Warn("SQLiteSinker.Truncate: failed to re-enable foreign keys",
+					"database", s.name, "error", err)
+			}
 		}()
 	}
 
 	// Delete from each valid table
+	var deletedCount int
 	for _, tableName := range tables {
 		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
 		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
@@ -308,9 +321,14 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 				"database", s.name,
 				"table", tableName,
 				"error", err)
-			return fmt.Errorf("delete from %s: %w", tableName, err)
+			if failFast {
+				return fmt.Errorf("delete from %s: %w", tableName, err)
+			}
+			// Best-effort: continue with remaining tables
+			continue
 		}
 
+		deletedCount++
 		slog.Debug("SQLiteSinker.Truncate: truncated table",
 			"database", s.name,
 			"table", tableName)
@@ -318,6 +336,9 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 
 	// Flush to ensure changes are persisted
 	if err := s.db.Flush(); err != nil {
+		if failFast {
+			return fmt.Errorf("flush after truncate: %w", err)
+		}
 		slog.Warn("SQLiteSinker.Truncate: flush failed",
 			"database", s.name,
 			"error", err)
@@ -325,7 +346,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 
 	slog.Info("SQLiteSinker.Truncate: completed",
 		"database", s.name,
-		"tables_truncated", len(tables))
+		"tables_truncated", deletedCount)
 
 	return nil
 }

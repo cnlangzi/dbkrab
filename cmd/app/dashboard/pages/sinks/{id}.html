@@ -510,6 +510,7 @@ function showSuccessBanner(message) {
         <span class="text-text font-medium">${escapeHtml(message)}</span>
     `;
     const container = document.querySelector('.max-w-7xl');
+    if (!container) return;
     container.insertBefore(banner, container.firstChild);
     
     // Auto-remove after 5 seconds

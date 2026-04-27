@@ -2,6 +2,7 @@ package sinker
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -320,7 +321,7 @@ func (m *Manager) QueryTables(dbName string) ([]string, error) {
 // Truncate deletes all data from specified tables in a sink database
 func (m *Manager) Truncate(ctx context.Context, dbName string, tables []string) error {
 	m.mu.RLock()
-	dbConfig, ok := m.dbConfigs[dbName]
+	_, ok := m.dbConfigs[dbName]
 	m.mu.RUnlock()
 
 	if !ok {
