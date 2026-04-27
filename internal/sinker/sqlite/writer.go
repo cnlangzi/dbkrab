@@ -168,27 +168,6 @@ func (s *Sinker) Migrate(ctx context.Context) error {
 
 	return nil
 }
-
-// Reset clears all user tables in the sink, disabling foreign key checks
-// during the clear operation and flushing changes to disk upon completion.
-// This is used by snapshot startup to prepare sinks before loading data.
-func (s *Sinker) Reset(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	slog.Info("SQLiteSinker.Reset: starting reset",
-		"database", s.name)
-
-	// Get all valid tables from database (without lock, safe read)
-	tables, err := s.getValidTables(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Delegate to truncateTables with lock held and fail-fast=false for Reset
-	return s.truncateTables(ctx, tables, false)
-}
-
 // getValidTables returns all valid user tables from the database
 func (s *Sinker) getValidTables(ctx context.Context) ([]string, error) {
 	rows, err := s.db.Writer.QueryContext(ctx, `
