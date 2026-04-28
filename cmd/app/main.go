@@ -243,7 +243,7 @@ func main() {
 	snapshotConfig := &snapshot.Config{BatchSize: cfg.Snapshot.BatchSize}
 	snapshotQuerier := snapshot.NewQuerier(mssqlDB, config.ParseTimezone(cfg.MSSQL.Timezone), snapshotConfig)
 	snapshotTables := snapshot.GetCDCTables(cfg)
-	snapshotCapturer := snapshot.NewSnapshotCapturer(snapshotQuerier, snapshotTables, offsetStore)
+	snapshotCapturer := snapshot.NewSnapshotCapturer(snapshotQuerier, snapshotTables)
 
 	// Create replay capturer (reuses appStore which implements Store interface)
 	replayCapturer := replay.NewReplayCapturer(appStore)

@@ -151,35 +151,6 @@ func (h *testHandler) HandleTable(ctx context.Context, changes []core.Change) er
 	return nil
 }
 
-// testOffsetStore implements OffsetUpdater for testing
-type testOffsetStore struct {
-	offsets map[string]struct{ last, next string }
-	flushes int
-}
-
-func newTestOffsetStore() *testOffsetStore {
-	return &testOffsetStore{
-		offsets: make(map[string]struct{ last, next string }),
-	}
-}
-
-func (s *testOffsetStore) Set(table string, lastLSN, nextLSN string) error {
-	s.offsets[table] = struct{ last, next string }{lastLSN, nextLSN}
-	return nil
-}
-
-func (s *testOffsetStore) Flush() error {
-	s.flushes++
-	return nil
-}
-
-func (s *testOffsetStore) Get(table string) (string, string, bool) {
-	if o, ok := s.offsets[table]; ok {
-		return o.last, o.next, true
-	}
-	return "", "", false
-}
-
 func TestNewQuerier_WithDefaults(t *testing.T) {
 	config := DefaultConfig()
 
@@ -222,43 +193,6 @@ func TestHandlerFunc(t *testing.T) {
 	}
 	if len(captured) != 1 {
 		t.Errorf("captured changes count = %d, want 1", len(captured))
-	}
-}
-
-func TestRunner_OffsetUpdate(t *testing.T) {
-	store := newTestOffsetStore()
-
-	err := store.Set("dbo.test_table", "000000000000000001", "000000000000000002")
-	if err != nil {
-		t.Errorf("Set error = %v", err)
-	}
-
-	last, next, ok := store.Get("dbo.test_table")
-	if !ok {
-		t.Error("offset not found")
-	}
-	if last != "000000000000000001" {
-		t.Errorf("last LSN = %s, want 000000000000000001", last)
-	}
-	if next != "000000000000000002" {
-		t.Errorf("next LSN = %s, want 000000000000000002", next)
-	}
-
-	err = store.Flush()
-	if err != nil {
-		t.Errorf("Flush error = %v", err)
-	}
-	if store.flushes != 1 {
-		t.Errorf("flush count = %d, want 1", store.flushes)
-	}
-}
-
-func TestRunner_GetNonExistentOffset(t *testing.T) {
-	store := newTestOffsetStore()
-
-	_, _, ok := store.Get("dbo.non_existent")
-	if ok {
-		t.Error("should not find non-existent offset")
 	}
 }
 
