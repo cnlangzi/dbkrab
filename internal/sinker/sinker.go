@@ -25,15 +25,18 @@ type Sinker interface {
 	// It re-discovers and re-applies migrations from the configured migrations path.
 	Migrate(ctx context.Context) error
 
-	// Reset clears all user tables in the sink, disabling foreign key checks
-	// during the clear operation and flushing changes to disk upon completion.
-	// This is used by snapshot startup to prepare sinks before loading data.
-	Reset(ctx context.Context) error
-
 	// Truncate deletes all data from the specified tables.
 	// It disables foreign key checks during the operation.
 	Truncate(ctx context.Context, tables []string) error
 
 	// Close closes the sinker and releases resources
 	Close() error
+
+	// QueryTables returns the list of user tables in the sink database
+	QueryTables() ([]string, error)
+
+	// Query executes a read-only query and returns columns and results.
+	// Uses the existing Reader connection instead of creating a temporary one.
+	// Returns columns in SQLite table order (not alphabetically sorted).
+	Query(query string, limit int) ([]string, []map[string]any, error)
 }

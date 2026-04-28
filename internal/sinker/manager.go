@@ -2,7 +2,6 @@ package sinker
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/monitor"
 	sinkSqlite "github.com/cnlangzi/dbkrab/internal/sinker/sqlite"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // Manager manages Sinkers and routes sink operations to appropriate sinkers.
@@ -270,52 +268,16 @@ func (m *Manager) GetSinkConfig(dbName string) (config.SinkConfig, bool) {
 	return cfg, ok
 }
 
-// QueryTables returns the list of tables in a sink database
+// QueryTables returns the list of tables in a sink database.
+// Uses the Sinker's existing Reader connection instead of creating a temporary one.
 func (m *Manager) QueryTables(dbName string) ([]string, error) {
-	m.mu.RLock()
-	dbConfig, ok := m.dbConfigs[dbName]
-	m.mu.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("sink %s not configured", dbName)
-	}
-
-	if dbConfig.Type != "sqlite" {
-		return nil, fmt.Errorf("QueryTables only supported for sqlite sinks")
-	}
-
-	path := dbConfig.DSN
-	if path == "" {
-		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite3", path+"?mode=ro")
+	// Get existing sinker to reuse its Reader connection
+	skr, err := m.GetSinker(dbName)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	// Query tables from sqlite_master
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
-	if err != nil {
-		return nil, fmt.Errorf("query tables: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			continue
-		}
-		// Skip internal SQLite tables
-		if !strings.HasPrefix(tableName, "sqlite_") {
-			tables = append(tables, tableName)
-		}
+		return nil, fmt.Errorf("get sinker %s: %w", dbName, err)
 	}
 
-	return tables, rows.Err()
+	return skr.QueryTables()
 }
 
 // Truncate deletes all data from specified tables in a sink database
@@ -349,109 +311,44 @@ func (m *Manager) Truncate(ctx context.Context, dbName string, tables []string) 
 	return nil
 }
 
-// Query executes a read-only SELECT query on a sink and returns results
+// Query executes a read-only SELECT query on a sink and returns results.
+// Uses the Sinker's existing Reader connection instead of creating a temporary one.
 func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error) {
-	m.mu.RLock()
-	dbConfig, ok := m.dbConfigs[dbName]
-	m.mu.RUnlock()
-
-	if !ok {
-		return nil, nil, fmt.Errorf("sink %s not configured", dbName)
-	}
-
-	if dbConfig.Type != "sqlite" {
-		return nil, nil, fmt.Errorf("Query only supported for sqlite sinks")
-	}
-
-	path := dbConfig.DSN
-	if path == "" {
-		path = fmt.Sprintf("./data/sinks/%s.db", dbName)
-	}
-
-	// Open read-only connection
-	db, err := sql.Open("sqlite3", path+"?mode=ro")
+	// Get existing sinker to reuse its Reader connection
+	skr, err := m.GetSinker(dbName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open database: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	// Add LIMIT if not present
-	limitQuery := query
-	if !strings.Contains(strings.ToUpper(query), "LIMIT") {
-		limitQuery = fmt.Sprintf("%s LIMIT 1000", query)
+		return nil, nil, fmt.Errorf("get sinker %s: %w", dbName, err)
 	}
 
-	rows, err := db.Query(limitQuery)
+	// Execute query via sinker (limit 1000 for safety)
+	// Returns columns in SQLite table order
+	columns, results, err := skr.Query(query, 1000)
 	if err != nil {
-		return nil, nil, fmt.Errorf("execute query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	// Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get columns: %w", err)
+		return nil, nil, fmt.Errorf("query: %w", err)
 	}
 
-	// Get column types to identify datetime columns
-	colTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get column types: %w", err)
-	}
+	// Handle datetime conversion for API response
+	for _, row := range results {
+		for col, val := range row {
+			colNameLower := strings.ToLower(col)
+			isDatetimeCol := strings.Contains(colNameLower, "date") ||
+				strings.Contains(colNameLower, "time") ||
+				strings.Contains(colNameLower, "dt") ||
+				strings.Contains(colNameLower, "ts")
 
-	// Identify datetime columns and attempt to parse time values
-	// Note: SQLite's ColumnTypes() may not return "datetime" for datetime columns
-	// because SQLite uses dynamic typing. We also check for time-like string values.
-	datetimeCols := make(map[int]bool)
-	for i, ct := range colTypes {
-		// SQLite datetime type is stored as "datetime" in schema
-		dbTypeName := ct.DatabaseTypeName()
-		slog.Debug("Query column type", "i", i, "col", columns[i], "dbType", dbTypeName)
-
-		if strings.EqualFold(dbTypeName, "datetime") {
-			datetimeCols[i] = true
-		}
-		// Also mark columns whose names suggest they are datetime
-		colNameLower := strings.ToLower(columns[i])
-		if strings.Contains(colNameLower, "date") || strings.Contains(colNameLower, "time") || strings.Contains(colNameLower, "dt") || strings.Contains(colNameLower, "ts") {
-			datetimeCols[i] = true
-			slog.Debug("Query marked datetime col by name", "col", columns[i])
-		}
-	}
-
-	slog.Info("Query datetimeCols", "datetimeCols", datetimeCols)
-	results := []map[string]any{}
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, nil, fmt.Errorf("scan row: %w", err)
-		}
-
-		rowMap := make(map[string]any)
-		for i, col := range columns {
-			val := values[i]
-			// For datetime columns, convert time.Time back to string if it's valid
-			// The SQLite driver sometimes incorrectly converts TEXT datetime columns
-			if t, ok := val.(time.Time); ok {
-				if !t.IsZero() {
-					// Valid time, convert to string
-					val = t.UTC().Format("2006-01-02 15:04:05")
-				} else {
-					// Zero time - keep as null in output
-					val = nil
+			if isDatetimeCol {
+				if t, ok := val.(time.Time); ok {
+					if !t.IsZero() {
+						row[col] = t.UTC().Format("2006-01-02 15:04:05")
+					} else {
+						row[col] = nil
+					}
 				}
 			}
-			rowMap[col] = val
 		}
-		results = append(results, rowMap)
 	}
 
-	return columns, results, rows.Err()
+	return columns, results, nil
 }
 
 // GetTimezone returns the configured MSSQL timezone

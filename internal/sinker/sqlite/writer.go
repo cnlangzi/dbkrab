@@ -168,27 +168,6 @@ func (s *Sinker) Migrate(ctx context.Context) error {
 
 	return nil
 }
-
-// Reset clears all user tables in the sink, disabling foreign key checks
-// during the clear operation and flushing changes to disk upon completion.
-// This is used by snapshot startup to prepare sinks before loading data.
-func (s *Sinker) Reset(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	slog.Info("SQLiteSinker.Reset: starting reset",
-		"database", s.name)
-
-	// Get all valid tables from database (without lock, safe read)
-	tables, err := s.getValidTables(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Delegate to truncateTables with lock held and fail-fast=false for Reset
-	return s.truncateTables(ctx, tables, false)
-}
-
 // getValidTables returns all valid user tables from the database
 func (s *Sinker) getValidTables(ctx context.Context) ([]string, error) {
 	rows, err := s.db.Writer.QueryContext(ctx, `
@@ -282,12 +261,11 @@ func (s *Sinker) Truncate(ctx context.Context, tables []string) error {
 	}
 
 	// Step 3: Execute truncate with fail-fast for Truncate operation
-	return s.truncateTables(ctx, tablesToTruncate, true)
+	return s.truncateTables(ctx, tablesToTruncate)
 }
 
 // truncateTables performs the actual table truncation (called with lock held)
-// failFast: if true, return on first error; if false, log and continue (best-effort)
-func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast bool) error {
+func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 	// Capture original foreign_keys setting and disable for truncate.
 	var fkEnabled bool
 	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
@@ -317,15 +295,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 	for _, tableName := range tables {
 		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
 		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
-			slog.Warn("SQLiteSinker.Truncate: failed to delete from table",
-				"database", s.name,
-				"table", tableName,
-				"error", err)
-			if failFast {
-				return fmt.Errorf("delete from %s: %w", tableName, err)
-			}
-			// Best-effort: continue with remaining tables
-			continue
+			return fmt.Errorf("delete from %s: %w", tableName, err)
 		}
 
 		deletedCount++
@@ -336,12 +306,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 
 	// Flush to ensure changes are persisted
 	if err := s.db.Flush(); err != nil {
-		if failFast {
-			return fmt.Errorf("flush after truncate: %w", err)
-		}
-		slog.Warn("SQLiteSinker.Truncate: flush failed",
-			"database", s.name,
-			"error", err)
+		return fmt.Errorf("flush after truncate: %w", err)
 	}
 
 	slog.Info("SQLiteSinker.Truncate: completed",
@@ -349,4 +314,80 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 		"tables_truncated", deletedCount)
 
 	return nil
+}
+
+// QueryTables returns the list of user tables in the sink database.
+// Uses the existing Reader connection instead of creating a temporary one.
+func (s *Sinker) QueryTables() ([]string, error) {
+	if s.closed {
+		return nil, errors.New("sinker is closed")
+	}
+
+	rows, err := s.db.Reader.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("query tables: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			continue
+		}
+		// Skip internal SQLite tables
+		if !strings.HasPrefix(tableName, "sqlite_") {
+			tables = append(tables, tableName)
+		}
+	}
+
+	return tables, rows.Err()
+}
+
+// Query executes a read-only query and returns columns and results.
+// Uses the existing Reader connection instead of creating a temporary one.
+// Returns columns in SQLite table order (not alphabetically sorted).
+func (s *Sinker) Query(query string, limit int) ([]string, []map[string]any, error) {
+	if s.closed {
+		return nil, nil, errors.New("sinker is closed")
+	}
+
+	// Add LIMIT if not present
+	limitQuery := query
+	if limit > 0 && !strings.Contains(strings.ToUpper(query), "LIMIT") {
+		limitQuery = fmt.Sprintf("%s LIMIT %d", query, limit)
+	}
+
+	rows, err := s.db.Reader.Query(limitQuery)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("columns: %w", err)
+	}
+
+	var res []map[string]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		valPtrs := make([]any, len(cols))
+		for i := range vals {
+			valPtrs[i] = &vals[i]
+		}
+
+		if err := rows.Scan(valPtrs...); err != nil {
+			continue
+		}
+
+		row := make(map[string]any)
+		for i, col := range cols {
+			row[col] = vals[i]
+		}
+		res = append(res, row)
+	}
+
+	// Return columns in SQLite order, not alphabetically sorted
+	return cols, res, rows.Err()
 }
