@@ -11,6 +11,7 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/core"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
+	"github.com/cnlangzi/dbkrab/internal/types"
 	"github.com/yaitoo/sqle"
 	"github.com/yaitoo/sqle/migrate"
 )
@@ -347,6 +348,7 @@ func (s *Sinker) QueryTables() ([]string, error) {
 // Query executes a read-only query and returns columns and results.
 // Uses the existing Reader connection instead of creating a temporary one.
 // Returns columns in SQLite table order (not alphabetically sorted).
+// Time columns are automatically formatted to "2006-01-02 15:04:05" via types.Codec.
 func (s *Sinker) Query(query string, limit int) ([]string, []map[string]any, error) {
 	if s.closed {
 		return nil, nil, errors.New("sinker is closed")
@@ -369,21 +371,36 @@ func (s *Sinker) Query(query string, limit int) ([]string, []map[string]any, err
 		return nil, nil, fmt.Errorf("columns: %w", err)
 	}
 
+	// Get column types for typed scanning
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("column types: %w", err)
+	}
+
+	// Create SQLite codec - DATETIME/TIMESTAMP columns will use NullTime scanner
+	codec := types.NewSQLiteCodec()
+
 	var res []map[string]any
 	for rows.Next() {
-		vals := make([]any, len(cols))
-		valPtrs := make([]any, len(cols))
-		for i := range vals {
-			valPtrs[i] = &vals[i]
-		}
+		// Create typed scan destinations based on column types
+		dest := codec.CreateDest(colTypes)
 
-		if err := rows.Scan(valPtrs...); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			continue
 		}
 
+		// Extract values from scanners, calling .Value() for unified formatting
 		row := make(map[string]any)
 		for i, col := range cols {
-			row[col] = vals[i]
+			if scanner, ok := dest[i].(types.DBType); ok {
+				if val, err := scanner.Value(); err == nil {
+					row[col] = val
+				} else {
+					row[col] = nil
+				}
+			} else {
+				row[col] = dest[i]
+			}
 		}
 		res = append(res, row)
 	}

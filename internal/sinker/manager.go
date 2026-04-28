@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -313,6 +312,7 @@ func (m *Manager) Truncate(ctx context.Context, dbName string, tables []string) 
 
 // Query executes a read-only SELECT query on a sink and returns results.
 // Uses the Sinker's existing Reader connection instead of creating a temporary one.
+// Time formatting is handled by types.Codec in the sinker.Query() method.
 func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error) {
 	// Get existing sinker to reuse its Reader connection
 	skr, err := m.GetSinker(dbName)
@@ -321,31 +321,10 @@ func (m *Manager) Query(dbName, query string) ([]string, []map[string]any, error
 	}
 
 	// Execute query via sinker (limit 1000 for safety)
-	// Returns columns in SQLite table order
+	// Time columns are automatically formatted to "2006-01-02 15:04:05" by types.Codec
 	columns, results, err := skr.Query(query, 1000)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
-	}
-
-	// Handle datetime conversion for API response
-	for _, row := range results {
-		for col, val := range row {
-			colNameLower := strings.ToLower(col)
-			isDatetimeCol := strings.Contains(colNameLower, "date") ||
-				strings.Contains(colNameLower, "time") ||
-				strings.Contains(colNameLower, "dt") ||
-				strings.Contains(colNameLower, "ts")
-
-			if isDatetimeCol {
-				if t, ok := val.(time.Time); ok {
-					if !t.IsZero() {
-						row[col] = t.UTC().Format("2006-01-02 15:04:05")
-					} else {
-						row[col] = nil
-					}
-				}
-			}
-		}
 	}
 
 	return columns, results, nil
