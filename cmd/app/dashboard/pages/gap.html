@@ -220,6 +220,7 @@ function renderTables(tables) {
             <tr>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Table</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Status</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Min LSN</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Current LSN</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Max LSN</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-textMuted uppercase tracking-wider">Lag</th>
@@ -250,6 +251,12 @@ function renderDesktopRow(t) {
         ? `<span class="text-error font-semibold">DATA LOSS</span>`
         : formatBytes(t.lag_bytes);
     
+    // Highlight LSN comparison for gap visualization
+    const currentLsnClass = t.has_gap ? 'text-error font-semibold' : 'text-textMuted';
+    const minLsnDisplay = t.min_lsn || 'N/A';
+    const currentLsnDisplay = t.current_lsn || 'N/A';
+    const maxLsnDisplay = t.max_lsn || 'N/A';
+    
     return `
         <tr class="${t.status === 'healthy' ? '' : 'bg-' + t.status_color + '/5'} hover:bg-surfaceHover transition-colors">
             <td class="px-6 py-4 whitespace-nowrap">
@@ -260,10 +267,15 @@ function renderDesktopRow(t) {
                 ${statusBadge}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-                <code class="text-xs font-mono text-textMuted">${t.current_lsn}</code>
+                <code class="text-xs font-mono text-textMuted">${minLsnDisplay}</code>
+                <div class="text-xs text-textMuted">CDC boundary</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-                <code class="text-xs font-mono text-textMuted">${t.max_lsn}</code>
+                <code class="text-xs font-mono ${currentLsnClass}">${currentLsnDisplay}</code>
+                ${t.has_gap ? '<div class="text-xs text-error">← before min!</div>' : ''}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <code class="text-xs font-mono text-textMuted">${maxLsnDisplay}</code>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
                 <div class="text-sm text-text">${lagDisplay}</div>
@@ -285,6 +297,11 @@ function renderMobileCard(t) {
         ? `<span class="text-error font-semibold">DATA LOSS</span>`
         : formatBytes(t.lag_bytes);
     
+    const currentLsnClass = t.has_gap ? 'text-error font-semibold' : 'text-text';
+    const minLsnDisplay = t.min_lsn || 'N/A';
+    const currentLsnDisplay = t.current_lsn || 'N/A';
+    const maxLsnDisplay = t.max_lsn || 'N/A';
+    
     return `
         <div class="p-4 hover:bg-surfaceHover transition-colors ${t.status === 'healthy' ? '' : 'bg-' + t.status_color + '/5'}">
             <div class="flex items-start justify-between gap-3 mb-3">
@@ -296,12 +313,18 @@ function renderMobileCard(t) {
             </div>
             <div class="grid grid-cols-2 gap-3 text-sm">
                 <div>
+                    <span class="text-textMuted text-xs">Min LSN:</span>
+                    <div class="font-mono text-xs text-text truncate">${minLsnDisplay}</div>
+                    <div class="text-xs text-textMuted">CDC boundary</div>
+                </div>
+                <div>
                     <span class="text-textMuted text-xs">Current LSN:</span>
-                    <div class="font-mono text-xs text-text truncate">${t.current_lsn}</div>
+                    <div class="font-mono text-xs ${currentLsnClass} truncate">${currentLsnDisplay}</div>
+                    ${t.has_gap ? '<div class="text-xs text-error">← before min!</div>' : ''}
                 </div>
                 <div>
                     <span class="text-textMuted text-xs">Max LSN:</span>
-                    <div class="font-mono text-xs text-text truncate">${t.max_lsn}</div>
+                    <div class="font-mono text-xs text-text truncate">${maxLsnDisplay}</div>
                 </div>
                 <div>
                     <span class="text-textMuted text-xs">Lag:</span>
@@ -311,7 +334,7 @@ function renderMobileCard(t) {
                     <span class="text-textMuted text-xs">Duration:</span>
                     <div class="text-text">${formatDuration(t.lag_duration_secs)}</div>
                 </div>
-                <div class="col-span-2">
+                <div>
                     <span class="text-textMuted text-xs">Checked At:</span>
                     <div class="text-text text-xs">${formatLocalTime(t.checked_at)}</div>
                 </div>

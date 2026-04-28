@@ -29,11 +29,11 @@ LSN = 10 bytes = VLF offset (4B) + log block offset (2B) + slot offset (4B)
 
 ### Key LSN Types
 
-| LSN 类型 | 来源函数 | 含义 | 用途 |
-|---------|---------|------|------|
-| **Min LSN** | `sys.fn_cdc_get_min_lsn(@capture_instance)` | CDC 清理边界，此值之前的数据已被 cleanup job 清理 | 断档检测基准 |
-| **Table Max LSN** | `SELECT MAX(__$start_lsn) FROM cdc.{capture_instance}_CT` | 单表最新变更位置 | Lag 计算基准 |
-| **Current LSN** | `offset.db` 的 `offsets` 表 | 本系统上次处理到的位置（per-table tracking） | 断档/延迟起点 |
+| LSN 类型 | 来源函数 | 含义 | 用途 | 为空时行为 |
+|---------|---------|------|------|------------|
+| **Min LSN** | `sys.fn_cdc_get_min_lsn(@capture_instance)` | CDC 清理边界，此值之前的数据已被 cleanup job 清理 | 断档检测基准 | 为空时跳过 Gap 检测 |
+| **Table Max LSN** | `SELECT MAX(__$start_lsn) FROM cdc.{capture_instance}_CT` | 单表最新变更位置 | Lag 计算基准 | 为空时跳过 Lag 计算 |
+| **Current LSN** | `offset.db` 的 `offsets` 表 | 本系统上次处理到的位置（per-table tracking） | 断档/延迟起点 | 为空时无法检测 |
 
 ### Global Max LSN（仅供参考）
 
@@ -43,11 +43,15 @@ sys.fn_cdc_get_max_lsn() → 全局数据库最新变更位置
 
 **重要**：全局 Max LSN **不参与单表 gap 检测**，仅用于 Dashboard UI 显示"整体进度参考"。
 
-**为什么不用全局 Max LSN 计算单表 Lag？**
+**nil 返回值处理原则**：
 
-- 全局 Max LSN 是整个数据库的最新变更位置，不代表特定表的变更
-- 一张表可能很久没有变更，但全局 Max LSN 一直在推进
-- 用全局 LSN 计算单表 lag 会产生**错误的延迟警报**
+| LSN 为 nil | 影响 | 原因 |
+|-------------|------|------|
+| **minLSN = nil** | 跳过 Gap 检测 | CDC capture instance 可能未启用或已被清理 |
+| **tableMaxLSN = nil** | 跳过 Lag 计算 | CT 表为空（无变更或已被清理） |
+| **currentLSN = nil** | 无法检测 | 该表从未被处理过 |
+
+**注意**：Gap 检测需要 minLSN 和 currentLSN 都非空，Lag 计算需要 tableMaxLSN 和 currentLSN 都非空。
 
 ---
 
