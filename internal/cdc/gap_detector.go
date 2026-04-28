@@ -41,7 +41,14 @@ func NewGapDetector(db *sql.DB) *GapDetector {
 // CheckGap checks for CDC gaps and lag for a specific table
 // tableName: original table name in schema.table format
 // captureInstance: CDC capture instance name
-// tableMaxLSN: optional per-table max LSN. If nil, uses global max LSN.
+// currentLSN: LSN position from offset.db (system's last processed position)
+// tableMaxLSN: per-table max LSN from CDC change table. If empty/nil, lag calculation is skipped.
+//
+// IMPORTANT: This function NEVER falls back to global GetMaxLSN() for per-table lag.
+// When tableMaxLSN is nil/empty, lag calculation is skipped entirely. This is correct because
+// global max LSN represents the latest change across the entire database, not specific to this table.
+// A table may have no changes for a long time while other tables are active, so using global max LSN
+// would incorrectly report lag for tables with no recent changes.
 func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance string, currentLSN []byte, tableMaxLSN []byte) (GapInfo, error) {
 	gap := GapInfo{
 		Table:           tableName,
@@ -57,16 +64,14 @@ func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance s
 	}
 	gap.MinLSN = minLSN
 
-	// Get CDC max LSN (latest change) - use per-table if provided, otherwise global
+	// Set max LSN (ONLY from tableMaxLSN, never fallback to global)
+	// If tableMaxLSN is nil/empty, skip lag-related calculations
 	if len(tableMaxLSN) > 0 {
 		gap.MaxLSN = tableMaxLSN
-	} else {
-		maxLSN, err := d.GetMaxLSN(ctx)
-		if err != nil {
-			return gap, fmt.Errorf("get max LSN: %w", err)
-		}
-		gap.MaxLSN = maxLSN
 	}
+	// NOTE: Do NOT fallback to GetMaxLSN() - global LSN is NOT per-table accurate.
+	// A table may have no changes for a long time while global max LSN keeps advancing
+	// from other tables' changes. Using global LSN for per-table lag produces false alerts.
 
 	// Check if current LSN is behind min LSN (data loss)
 	if len(currentLSN) > 0 && len(minLSN) > 0 {
