@@ -137,7 +137,7 @@ func (c *Codec) create(typeName string) DBType {
 		}
 	}
 
-	switch strings.ToUpper(typeName) {
+	switch upper {
 	case TypeBigInt, TypeInt, TypeSmallInt, TypeTinyInt:
 		return &NullInt64{}
 	case TypeFloat, TypeReal, TypeMoney, TypeSmallMoney:
