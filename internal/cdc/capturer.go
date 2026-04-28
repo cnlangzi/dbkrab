@@ -26,10 +26,10 @@ type ChangeCapturer struct {
 	Interval      time.Duration  // Exported for testing
 	stopCh        chan struct{}
 	stopped       bool
-	lastPollTime  time.Time      // Last time Fetch() was called
-	totalChanges  int            // Total CDC rows fetched (persisted to DB)
-	totalInserted int            // Total rows actually written (persisted to DB)
-	mu            sync.RWMutex   // Protects Tables field for hot reload
+	lastPollTime  time.Time    // Last time Fetch() was called
+	totalChanges  int          // Total CDC rows fetched (persisted to DB)
+	totalInserted int          // Total rows actually written (persisted to DB)
+	mu            sync.RWMutex // Protects Tables field for hot reload
 }
 
 // CDCQuerier interface for CDC database operations (allows mocking in tests)
@@ -161,38 +161,37 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 	// Write changes to cdc.db store
 	var insertedCount int
+	var lastLSN string
 	if c.Store != nil && len(allChanges) > 0 {
 		coreChanges := c.convertToCoreChanges(allChanges)
 		n, err := c.Store.Write(coreChanges)
 		if err != nil {
 			slog.Warn("ChangeCapturer: failed to write to store", "error", err)
-		} else {
-			insertedCount = n
-			if err := c.Store.Flush(); err != nil {
-				slog.Warn("ChangeCapturer: failed to flush store", "error", err)
-			}
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
+		}
+		insertedCount = n
+
+		// Update poller state on every poll cycle to keep last_poll_time current
+		lastLSN = hex.EncodeToString(globalMaxLSN)
+		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
+			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
+		}
+
+		if err := c.Store.Flush(); err != nil {
+			slog.Warn("ChangeCapturer: failed to flush store", "error", err)
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 		}
 	}
 
-	// Save offsets for tables that had changes
+	// Update in-memory counters only after successful store operations
+	c.totalChanges += len(allChanges)
+	c.totalInserted += insertedCount
+
+	// Save offsets for tables that had changes (only if store operations succeeded)
 	for table, maxLSN := range maxLSNByTable {
 		if err := c.OffsetMgr.SaveOffset(ctx, table, maxLSN); err != nil {
 			slog.Warn("ChangeCapturer: failed to save offset", "table", table, "error", err)
-		}
-	}
-
-	// Update poller state on every poll cycle to keep last_poll_time current
-	// Use globalMaxLSN as last_lsn only when we fetched changes; otherwise preserve existing last_lsn
-	if c.Store != nil {
-		var lastLSN string
-		if len(allChanges) > 0 && len(globalMaxLSN) > 0 {
-			lastLSN = hex.EncodeToString(globalMaxLSN)
-		}
-		// Update in-memory counters
-		c.totalChanges += len(allChanges)
-		c.totalInserted += insertedCount
-		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
-			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
 		}
 	}
 
@@ -281,6 +280,7 @@ func (c *ChangeCapturer) UpdateTables(tables []string) {
 		"tables_sample", sample,
 	)
 }
+
 // Stop signals the capturer to stop.
 func (c *ChangeCapturer) Stop() {
 	if c.stopped {

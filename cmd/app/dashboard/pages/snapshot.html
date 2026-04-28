@@ -86,7 +86,13 @@
     <div class="bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-base sm:text-lg font-semibold text-text">CDC Tables</h3>
-            <button id="refresh-btn" onclick="loadTables()" class="text-sm text-primary hover:underline">Refresh</button>
+            <div class="flex items-center gap-3">
+                <label id="select-all-label" class="flex items-center gap-1.5 text-sm text-textMuted cursor-pointer select-none">
+                    <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this.checked)" class="w-4 h-4 rounded border-border text-primary cursor-pointer">
+                    Select All
+                </label>
+                <button id="refresh-btn" onclick="loadTables()" class="text-sm text-primary hover:underline">Refresh</button>
+            </div>
         </div>
         <div id="tables-list" class="space-y-2">
             <p class="text-textMuted text-sm">Loading...</p>
@@ -132,10 +138,28 @@ function loadTables() {
 }
 
 function renderStaticTables() {
-    var dbIcon = '<svg class="w-4 h-4 text-textMuted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 6h4M10 18h4M4 6h1M4 18h1M19 6h1M19 18h1"/></svg>';
     document.getElementById('tables-list').innerHTML = staticTables.map(function(t) {
-        return '<div class="flex items-center gap-3 p-3 rounded-lg bg-surfaceHover border border-border">' + dbIcon + '<span class="text-sm font-medium text-text">' + t.full + '</span></div>';
+        return '<div class="flex items-center gap-3 p-3 rounded-lg bg-surfaceHover border border-border">'
+            + '<input type="checkbox" class="table-checkbox w-4 h-4 rounded border-border text-primary cursor-pointer flex-shrink-0" value="' + t.full + '" onchange="syncSelectAllCheckbox()">'
+            + '<span class="text-sm font-medium text-text">' + t.full + '</span>'
+            + '</div>';
     }).join('');
+    syncSelectAllCheckbox();
+}
+
+function toggleSelectAll(checked) {
+    document.querySelectorAll('.table-checkbox:not([disabled])').forEach(function(cb) {
+        cb.checked = checked;
+    });
+}
+
+function syncSelectAllCheckbox() {
+    var all = document.querySelectorAll('.table-checkbox');
+    var checked = document.querySelectorAll('.table-checkbox:checked');
+    var sa = document.getElementById('select-all-checkbox');
+    if (!sa) return;
+    sa.indeterminate = checked.length > 0 && checked.length < all.length;
+    sa.checked = all.length > 0 && checked.length === all.length;
 }
 
 function checkInitialStatus() {
@@ -145,6 +169,7 @@ function checkInitialStatus() {
             if (!data.success) { renderButton('idle'); return; }
             if (data.state === 'running') {
                 if (data.start_time) snapshotStartTime = new Date(data.start_time);
+                setCheckboxesDisabled(true);
                 showRunningPanel();
                 updateRunningUI(data);
                 startPolling();
@@ -152,7 +177,6 @@ function checkInitialStatus() {
                 renderButton('running');
             } else if (data.state === 'completed') {
                 showSummaryPanel(data);
-                updateTableProgress(data.tables, data.state, data.current_table);
                 renderButton('idle');
             } else {
                 renderButton('idle');
@@ -162,8 +186,18 @@ function checkInitialStatus() {
 }
 
 function startSnapshot() {
+    var selected = Array.from(document.querySelectorAll('.table-checkbox:checked')).map(function(cb) { return cb.value; });
+    if (selected.length === 0) {
+        alert('Please select at least one table to snapshot.');
+        return;
+    }
     renderButton('loading');
-    fetch('/api/snapshot/start', { method: 'POST' })
+    setCheckboxesDisabled(true);
+    fetch('/api/snapshot/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tables: selected })
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) {
@@ -175,11 +209,12 @@ function startSnapshot() {
                 startElapsedTimer();
                 renderButton('running');
             } else {
+                setCheckboxesDisabled(false);
                 renderButton('idle');
                 alert('Failed to start snapshot: ' + (data.error || 'unknown error'));
             }
         })
-        .catch(function(err) { renderButton('idle'); alert('Failed to start snapshot: ' + err); });
+        .catch(function(err) { setCheckboxesDisabled(false); renderButton('idle'); alert('Failed to start snapshot: ' + err); });
 }
 
 function startPolling() {
@@ -208,7 +243,7 @@ function checkStatus() {
                 stopElapsedTimer();
                 hideRunningPanel();
                 showSummaryPanel(data);
-                updateTableProgress(data.tables, data.state, data.current_table);
+                renderStaticTables();
                 renderButton('idle');
             }
         })
@@ -310,6 +345,12 @@ function updateTableProgress(tables, state, currentTable) {
             + miniBar
             + '</div>';
     }).join('');
+}
+
+function setCheckboxesDisabled(disabled) {
+    document.querySelectorAll('.table-checkbox').forEach(function(cb) { cb.disabled = disabled; });
+    var sa = document.getElementById('select-all-checkbox');
+    if (sa) sa.disabled = disabled;
 }
 
 function fmtNum(n) { return (n || 0).toLocaleString(); }

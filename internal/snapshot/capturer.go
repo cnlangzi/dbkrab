@@ -74,10 +74,10 @@ type Progress struct {
 //  4. When all tables are done the transaction is committed and NextCapturer: CapturerCDC
 //     is returned.
 type SnapshotCapturer struct {
-	querier     *Querier
-	tables      []CDCTable
-	pendingTables []CDCTable  // staged tables from UpdateTables, applied in Restart
-	offsetStore offset.StoreInterface
+	querier       *Querier
+	tables        []CDCTable
+	pendingTables []CDCTable // staged tables from UpdateTables, applied in Restart
+	offsetStore   offset.StoreInterface
 
 	mu           sync.Mutex
 	pending      bool // set by Restart before DB init; reports as Started so status shows "running"
@@ -111,12 +111,13 @@ func NewSnapshotCapturer(querier *Querier, tables []CDCTable, offsetStore offset
 // It captures MaxLSN, opens a single snapshot-isolation transaction covering all tables,
 // discovers primary keys, and fetches approximate row counts.
 // Returns an error if any DB setup step fails; no state is changed in that case.
-func (c *SnapshotCapturer) Restart(ctx context.Context) error {
+// selectedTables specifies which tables to snapshot in this run.
+func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTable) error {
 	// Phase 1: reset state and close any previous transaction.
 	c.mu.Lock()
 	oldTx := c.tx
 	c.pending = true
-	// Apply any staged tables from UpdateTables
+	// Apply any staged tables from UpdateTables (keeps c.tables in sync with config)
 	if c.pendingTables != nil {
 		c.tables = c.pendingTables
 		c.pendingTables = nil
@@ -171,13 +172,13 @@ func (c *SnapshotCapturer) Restart(ctx context.Context) error {
 	}
 
 	// 2d. Per-table setup: approximate row count + PK discovery.
-	n := len(c.tables)
+	n := len(selectedTables)
 	tableTotals := make([]int64, n)
 	tableRead := make([]int64, n)
 	tableDone := make([]bool, n)
 	tablePKs := make([]*PrimaryKeyInfo, n)
 
-	for i, t := range c.tables {
+	for i, t := range selectedTables {
 		fullName := fmt.Sprintf("%s.%s", t.Schema, t.Name)
 
 		count, countErr := c.querier.GetApproxRowCount(ctx, t.Schema, t.Name)
@@ -208,6 +209,7 @@ func (c *SnapshotCapturer) Restart(ctx context.Context) error {
 	c.tableRead = tableRead
 	c.tableDone = tableDone
 	c.tablePKs = tablePKs
+	c.tables = selectedTables // use the selected tables for this run
 	c.startTime = time.Now()
 	c.endTime = time.Time{}
 	c.mu.Unlock()
@@ -223,6 +225,7 @@ func (c *SnapshotCapturer) markError(msg string) {
 	c.pending = false
 	c.mu.Unlock()
 }
+
 // UpdateTables updates the table list for snapshot.
 // Called by main.go when config reload signal is received.
 // If a snapshot is currently running or pending, the new tables are staged in
