@@ -261,12 +261,11 @@ func (s *Sinker) Truncate(ctx context.Context, tables []string) error {
 	}
 
 	// Step 3: Execute truncate with fail-fast for Truncate operation
-	return s.truncateTables(ctx, tablesToTruncate, true)
+	return s.truncateTables(ctx, tablesToTruncate)
 }
 
 // truncateTables performs the actual table truncation (called with lock held)
-// failFast: if true, return on first error; if false, log and continue (best-effort)
-func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast bool) error {
+func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 	// Capture original foreign_keys setting and disable for truncate.
 	var fkEnabled bool
 	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
@@ -296,15 +295,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 	for _, tableName := range tables {
 		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
 		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
-			slog.Warn("SQLiteSinker.Truncate: failed to delete from table",
-				"database", s.name,
-				"table", tableName,
-				"error", err)
-			if failFast {
-				return fmt.Errorf("delete from %s: %w", tableName, err)
-			}
-			// Best-effort: continue with remaining tables
-			continue
+			return fmt.Errorf("delete from %s: %w", tableName, err)
 		}
 
 		deletedCount++
@@ -315,12 +306,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 
 	// Flush to ensure changes are persisted
 	if err := s.db.Flush(); err != nil {
-		if failFast {
-			return fmt.Errorf("flush after truncate: %w", err)
-		}
-		slog.Warn("SQLiteSinker.Truncate: flush failed",
-			"database", s.name,
-			"error", err)
+		return fmt.Errorf("flush after truncate: %w", err)
 	}
 
 	slog.Info("SQLiteSinker.Truncate: completed",
