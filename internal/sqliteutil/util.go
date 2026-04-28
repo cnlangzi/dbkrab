@@ -21,7 +21,7 @@ type TxExec interface {
 // format consistent with NullTime.Value() output. Non-time values pass through
 // unchanged — in particular, strings produced by NullTime.Value() are already
 // in the correct format and must not be re-parsed into time.Time.
-func normalizeRowValues(columns []string, row []interface{}) []interface{} {
+func normalizeRowValues(row []interface{}) []interface{} {
 	result := make([]interface{}, len(row))
 	for i, val := range row {
 		if t, ok := val.(time.Time); ok {
@@ -111,7 +111,7 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 					"sql", updateSQL,
 					"pkValue", pkValue)
 				// Normalize values for UPDATE
-				normalizedUpdateValues := normalizeRowValues(columns, updateValues)
+				normalizedUpdateValues := normalizeRowValues(updateValues)
 				result, err := tx.Exec(updateSQL, normalizedUpdateValues...)
 				if err != nil {
 					slog.Error("sqliteutil.InsertInTx: update failed",
@@ -146,7 +146,7 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				"sql", insertSQL,
 				"pkValue", pkValue)
 			// Normalize values for INSERT
-			normalizedRow := normalizeRowValues(columns, row)
+			normalizedRow := normalizeRowValues(row)
 			_, err := tx.Exec(insertSQL, normalizedRow...)
 			if err != nil {
 				slog.Error("sqliteutil.InsertInTx: insert failed",
@@ -164,7 +164,7 @@ func InsertInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				"rowLen", len(row))
 
 			// Pass row directly - driver handles time.Time serialization
-			normalizedRow := normalizeRowValues(columns, row)
+			normalizedRow := normalizeRowValues(row)
 			slog.Debug("sqliteutil.InsertInTx: exec insert or replace", "table", config.Output, "sql", sqlStr, "args_len", len(normalizedRow))
 			result, err := tx.Exec(sqlStr, normalizedRow...)
 			if err != nil {
@@ -269,7 +269,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 					"sql", updateSQL,
 					"pkValue", pkValue)
 				// Normalize values for UPDATE
-				normalizedUpdateValues := normalizeRowValues(columns, updateValues)
+				normalizedUpdateValues := normalizeRowValues(updateValues)
 				result, err := tx.Exec(updateSQL, normalizedUpdateValues...)
 				if err != nil {
 					slog.Error("sqliteutil.UpdateInTx: update failed",
@@ -304,7 +304,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				"sql", insertSQL,
 				"pkValue", pkValue)
 			// Normalize values for INSERT
-			normalizedRow := normalizeRowValues(columns, row)
+			normalizedRow := normalizeRowValues(row)
 			_, err := tx.Exec(insertSQL, normalizedRow...)
 			if err != nil {
 				slog.Error("sqliteutil.UpdateInTx: insert failed",
@@ -330,7 +330,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				"table", config.Output,
 				"sql", sqlStr,
 				"pkValue", pkValue)
-			normalizedValues := normalizeRowValues(columns, values)
+			normalizedValues := normalizeRowValues(values)
 			_, err := tx.Exec(sqlStr, normalizedValues...)
 			if err != nil {
 				slog.Error("sqliteutil.UpdateInTx: exec failed",
@@ -363,7 +363,7 @@ func UpdateInTx(tx TxExec, config TableConfig, columns []string, rows [][]interf
 				"pkValue", pkValue,
 				"valuesCount", len(values))
 
-			normalizedValues := normalizeRowValues(columns, values)
+			normalizedValues := normalizeRowValues(values)
 			result, err := tx.Exec(sqlStr, normalizedValues...)
 			if err != nil {
 				slog.Error("sqliteutil.UpdateInTx: exec failed",
