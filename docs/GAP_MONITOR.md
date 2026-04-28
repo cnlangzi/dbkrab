@@ -63,7 +63,7 @@ sys.fn_cdc_get_max_lsn() → 全局数据库最新变更位置
 
 **原则**：
 1. **只用表级 LSN**：从 `cdc.{capture_instance}_CT` 查询 `MAX(__$start_lsn)`
-2. **nil 则跳过**：如果 CT 表为空（无变更或被清理），返回 nil，跳过 gap 检测
+2. **nil 则跳过 Lag 计算**：如果 CT 表为空（无变更或被清理），返回 nil，跳过 Lag 计算（但 Gap 检测仍继续）
 3. **不 fallback 全局**：即使 table max LSN 为 nil，也不用全局 max LSN 替代
 
 ### 实现逻辑
@@ -92,7 +92,7 @@ func (d *GapDetector) GetTableMaxLSN(ctx context.Context, captureInstance string
     }
     
     // lsn == nil means CT table is empty (no changes or cleaned)
-    // → return nil, caller should skip gap detection
+    // → return nil, caller should skip lag calculation (gap detection still runs)
     return lsn, nil
 }
 ```
@@ -101,10 +101,10 @@ func (d *GapDetector) GetTableMaxLSN(ctx context.Context, captureInstance string
 
 | 情况 | GetTableMaxLSN 返回 | API 处理 |
 |------|---------------------|---------|
-| CT 表存在，有变更 | `[]byte` (非 nil) | 正常执行 gap 检测 |
-| CT 表存在，但空（无变更） | `nil` | 跳过 gap 检测 |
-| CT 表不存在或查询失败 | `error` | warn + continue（跳过） |
-| CT 表数据被 CDC cleanup 清理 | `nil` 或可能小于 min_lsn | 跳过 gap 检测 |
+| CT 表存在，有变更 | `[]byte` (非 nil) | 正常执行 Gap 检测 + Lag 计算 |
+| CT 表存在，但空（无变更） | `nil` | Gap 检测继续，跳过 Lag 计算 |
+| CT 表不存在或查询失败 | `error` | warn + continue（跳过该表） |
+| CT 表数据被 CDC cleanup 清理 | `nil` 或可能小于 min_lsn | Gap 检测继续，跳过 Lag 计算 |
 
 ---
 
@@ -122,7 +122,7 @@ func (d *GapDetector) GetTableMaxLSN(ctx context.Context, captureInstance string
 //
 // tableMaxLSN Behavior:
 //   - len(tableMaxLSN) > 0: use it as gap.MaxLSN for lag calculation
-//   - len(tableMaxLSN) == 0: skip lag calculation (table has no changes or cleaned)
+//   - len(tableMaxLSN) == 0: skip lag calculation (but gap detection still runs with minLSN/currentLSN)
 //   - DO NOT fallback to global GetMaxLSN() - global LSN is NOT per-table accurate
 func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance string, 
     currentLSN []byte, tableMaxLSN []byte) (GapInfo, error) {
@@ -161,7 +161,8 @@ func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance s
     }
 
     // Step 4: Lag calculation (ONLY if max_lsn is available)
-    // Skip if tableMaxLSN was nil (no changes or cleaned)
+    // Note: Gap detection (Step 3) runs regardless of tableMaxLSN availability.
+    // Lag calculation requires tableMaxLSN because it measures progress lag.
     if len(gap.MaxLSN) > 0 && len(currentLSN) > 0 {
         gap.LagBytes = LSNBytesDiff(gap.MaxLSN, currentLSN)
         
@@ -181,14 +182,14 @@ func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance s
 
 ### Gap vs Lag
 
-| 概念 | 条件 | 含义 | 状态 |
-|------|------|------|------|
-| **Gap (数据断档)** | `current_lsn < min_lsn` | 需要处理的数据已被 CDC cleanup 清理 | **Critical** |
-| **Lag (复制延迟)** | `max_lsn - current_lsn > threshold` | 处理进度落后于最新变更 | Warning/Critical |
+| 概念 | 条件 | 所需 LSN | 含义 | 状态 |
+|------|------|----------|------|------|
+| **Gap (数据断档)** | `current_lsn < min_lsn` | currentLSN + minLSN | 需要处理的数据已被 CDC cleanup 清理 | **Critical** |
+| **Lag (复制延迟)** | `max_lsn - current_lsn > threshold` | currentLSN + tableMaxLSN | 处理进度落后于最新变更 | Warning/Critical |
 
 **关键区别**：
-- Gap 检测不需要 max_lsn，只需要 current_lsn vs min_lsn
-- Lag 计算需要 max_lsn，如果 tableMaxLSN 为 nil 则跳过 lag 计算
+- **Gap 检测**：只需要 `currentLSN` 和 `minLSN`，**不依赖** tableMaxLSN
+- **Lag 计算**：需要 `tableMaxLSN`，如果为 nil 则跳过（但 Gap 检测仍正常运行）
 
 ---
 
@@ -205,8 +206,9 @@ func determineStatus(gapInfo GapInfo, warnBytes, warnDuration, critBytes, critDu
     }
     
     // No max_lsn means table has no changes or cleaned - skip lag checks
+    // Gap detection already ran above (doesn't need max_lsn)
     if len(gapInfo.MaxLSN) == 0 {
-        return "healthy"  // or "no_data" for UI differentiation
+        return "healthy"  // No lag to measure, but no gap either
     }
     
     // Critical lag threshold
@@ -504,10 +506,11 @@ func TestCheckGap_NoTableMaxLSN(t *testing.T) {
 ### Key Design Principles
 
 1. **只用表级 LSN**：`GetTableMaxLSN()` 是单表 lag 计算的唯一来源
-2. **nil 则跳过**：CT 表为空时跳过 gap/lag 计算，不 fallback
+2. **nil 则跳过 Lag**：CT 表为空时跳过 Lag 计算，但 Gap 检测仍继续（Gap 不需要 tableMaxLSN）
 3. **全局仅供参考**：`GetMaxLSN()` 只用于 UI 显示，不参与单表计算
 4. **Gap 优于 Lag**：数据断档永远 Critical，延迟需要阈值判定
 5. **Per-table tracking**：每表独立 offset，不同表进度可能不同
+6. **Gap 检测独立**：Gap 检测只用 currentLSN vs minLSN，即使没有 tableMaxLSN 也能正常工作
 
 ### Files to Modify
 
