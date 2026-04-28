@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -69,6 +70,7 @@ type Server struct {
 	metricsProvider PollMetricsProvider // Provides CDC poll metrics
 	runtime         *core.Runtime       // Runtime for capturer management
 	poller          interface{}         // CDC poller (deprecated, use Runtime/Capturer)
+	offsetStore     offset.StoreInterface // Per-table offset tracking
 }
 
 // NewServer creates a new API server with all features
@@ -110,6 +112,7 @@ func NewServer(
 		skillsPath:    skillsPath,
 		poller:        poller,
 		runtime:       runtime,
+		offsetStore:   offsetStore,
 	}
 }
 
@@ -715,14 +718,24 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 	gapDetector := cdc.NewGapDetector(db)
 	ctx := context.Background()
 
-	// Get CDC max LSN once (shared across all tables)
+	// Load offsetStore data for per-table LSN tracking
+	// This ensures we have the latest offsets from the offset database
+	if s.offsetStore != nil {
+		if err := s.offsetStore.Load(); err != nil {
+			slog.Warn("failed to load offset store", "error", err)
+		}
+	}
+
+	// Get a global max LSN for backward compatibility response
+	var globalMaxLSN []byte
 	maxLSN, err := gapDetector.GetMaxLSN(ctx)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,
-			"error":   fmt.Sprintf("get max LSN: %v", err),
+			"error":   fmt.Sprintf("get global max LSN: %v", err),
 		})
 	}
+	globalMaxLSN = maxLSN
 
 	// Collect gap info for all tracked tables
 	gapInfos := make([]map[string]any, 0, len(trackedTables))
@@ -735,23 +748,29 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 		schema, name := parts[0], parts[1]
 		captureInstance := fmt.Sprintf("%s_%s", schema, name)
 
-		// Get current LSN from poller state (approximation - in real scenario would track per-table)
-		// For now, use the global last_lsn from poller state
-		state, err := s.store.GetPollerState()
+		// Get current LSN from offset store (per-table tracking)
+		var currentLSN []byte
+		if s.offsetStore != nil {
+			offset, err := s.offsetStore.Get(table)
+			if err == nil && offset.LastLSN != "" {
+				// Convert hex string to bytes
+				currentLSN, err = hex.DecodeString(offset.LastLSN)
+				if err != nil {
+					slog.Warn("failed to decode current LSN", "table", table, "lsn", offset.LastLSN, "error", err)
+					currentLSN = nil
+				}
+			}
+		}
+
+		// Get per-table max LSN from CDC system tables
+		tableMaxLSN, err := gapDetector.GetTableMaxLSN(ctx, captureInstance)
 		if err != nil {
-			slog.Warn("failed to get poller state", "table", table, "error", err)
+			slog.Warn("failed to get table max LSN", "table", table, "error", err)
 			continue
 		}
 
-		var currentLSN []byte
-		if lsnStr, ok := state["last_lsn"].(string); ok && lsnStr != "" {
-			// Convert hex string back to bytes if needed
-			// For now, we'll query the actual current LSN from CDC
-			currentLSN = maxLSN // Use max as approximation
-		}
-
 		// Check gap for this table
-		gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
+		gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN, tableMaxLSN)
 		if err != nil {
 			slog.Warn("failed to check gap", "table", table, "error", err)
 			continue
@@ -793,7 +812,7 @@ func (s *Server) handleCDCGap(c *xun.Context) error {
 		"success": true,
 		"count":   len(gapInfos),
 		"tables":  gapInfos,
-		"max_lsn": formatLSN(maxLSN),
+		"max_lsn": formatLSN(globalMaxLSN),
 		"thresholds": map[string]any{
 			"warning_lag_bytes":     warnLagBytes,
 			"warning_lag_duration":  warnLagDuration.String(),
@@ -1136,7 +1155,7 @@ func (s *Server) collectOverviewMetrics() OverviewMetrics {
 						schema, name := parts[0], parts[1]
 						captureInstance := fmt.Sprintf("%s_%s", schema, name)
 
-						gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN)
+						gapInfo, err := gapDetector.CheckGap(ctx, table, captureInstance, currentLSN, nil)
 						if err != nil {
 							continue
 						}

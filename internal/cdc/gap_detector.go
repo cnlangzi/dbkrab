@@ -41,7 +41,8 @@ func NewGapDetector(db *sql.DB) *GapDetector {
 // CheckGap checks for CDC gaps and lag for a specific table
 // tableName: original table name in schema.table format
 // captureInstance: CDC capture instance name
-func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance string, currentLSN []byte) (GapInfo, error) {
+// tableMaxLSN: optional per-table max LSN. If nil, uses global max LSN.
+func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance string, currentLSN []byte, tableMaxLSN []byte) (GapInfo, error) {
 	gap := GapInfo{
 		Table:           tableName,
 		CaptureInstance: captureInstance,
@@ -56,12 +57,16 @@ func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance s
 	}
 	gap.MinLSN = minLSN
 
-	// Get CDC max LSN (latest change)
-	maxLSN, err := d.GetMaxLSN(ctx)
-	if err != nil {
-		return gap, fmt.Errorf("get max LSN: %w", err)
+	// Get CDC max LSN (latest change) - use per-table if provided, otherwise global
+	if len(tableMaxLSN) > 0 {
+		gap.MaxLSN = tableMaxLSN
+	} else {
+		maxLSN, err := d.GetMaxLSN(ctx)
+		if err != nil {
+			return gap, fmt.Errorf("get max LSN: %w", err)
+		}
+		gap.MaxLSN = maxLSN
 	}
-	gap.MaxLSN = maxLSN
 
 	// Check if current LSN is behind min LSN (data loss)
 	if len(currentLSN) > 0 && len(minLSN) > 0 {
@@ -76,15 +81,15 @@ func (d *GapDetector) CheckGap(ctx context.Context, tableName, captureInstance s
 	}
 
 	// Calculate lag in bytes (max_lsn - current_lsn)
-	if len(maxLSN) > 0 && len(currentLSN) > 0 {
-		gap.LagBytes = LSNBytesDiff(maxLSN, currentLSN)
+	if len(gap.MaxLSN) > 0 && len(currentLSN) > 0 {
+		gap.LagBytes = LSNBytesDiff(gap.MaxLSN, currentLSN)
 	}
 
 	// Estimate lag duration (requires querying LSN time mapping)
-	if len(currentLSN) > 0 && len(maxLSN) > 0 {
+	if len(currentLSN) > 0 && len(gap.MaxLSN) > 0 {
 		currentTime, err := d.GetLSNTime(ctx, currentLSN)
 		if err == nil {
-			maxTime, err := d.GetLSNTime(ctx, maxLSN)
+			maxTime, err := d.GetLSNTime(ctx, gap.MaxLSN)
 			if err == nil {
 				gap.LagDuration = maxTime.Sub(currentTime)
 			}
@@ -112,6 +117,28 @@ func (d *GapDetector) GetMaxLSN(ctx context.Context) ([]byte, error) {
 	var lsn []byte
 	err := d.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_get_max_lsn()").Scan(&lsn)
 	return lsn, err
+}
+
+// GetTableMaxLSN returns the max LSN for a specific capture instance (per-table)
+// This queries the CDC change table (CT) to get the actual max LSN for each table's changes.
+// If the change table is empty or doesn't exist, returns nil (caller should fallback to global max LSN).
+func (d *GapDetector) GetTableMaxLSN(ctx context.Context, captureInstance string) ([]byte, error) {
+	// Validate capture instance to prevent SQL injection
+	if !validCaptureInstance.MatchString(captureInstance) {
+		return nil, fmt.Errorf("invalid capture instance name: %s", captureInstance)
+	}
+
+	var lsn []byte
+	// Query the CDC change table (CT) for the maximum __$start_lsn
+	// The CT table name follows the pattern: cdc.<capture_instance>_CT
+	ctTable := fmt.Sprintf("cdc.%s_CT", captureInstance)
+	query := fmt.Sprintf("SELECT MAX(__$start_lsn) FROM %s", ctTable)
+	err := d.db.QueryRowContext(ctx, query).Scan(&lsn)
+	if err != nil {
+		return nil, fmt.Errorf("query table max LSN from %s: %w", ctTable, err)
+	}
+	// lsn will be nil if the table is empty (no changes yet)
+	return lsn, nil
 }
 
 // GetLSNTime returns the timestamp for a given LSN
