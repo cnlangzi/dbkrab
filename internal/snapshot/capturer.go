@@ -3,7 +3,6 @@ package snapshot
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,13 +11,17 @@ import (
 
 	"github.com/cnlangzi/dbkrab/internal/config"
 	"github.com/cnlangzi/dbkrab/internal/core"
-	"github.com/cnlangzi/dbkrab/internal/offset"
 )
 
 // CDCTable represents a CDC-enabled table.
 type CDCTable struct {
 	Schema string
 	Name   string
+}
+
+// FullName returns the schema-qualified table name.
+func (t CDCTable) FullName() string {
+	return t.Schema + "." + t.Name
 }
 
 // GetCDCTables returns CDC-enabled tables from config.
@@ -69,15 +72,14 @@ type Progress struct {
 //     discovers PKs and approximate row counts for all tables.
 //  2. Runtime calls Fetch(ctx) repeatedly — each call fetches one batch (BatchSize rows)
 //     from the current table using the open transaction.
-//  3. When a table is exhausted the LSN checkpoint is saved to offsetStore so CDC
-//     can resume from the correct position.
+//  3. When a table is exhausted CDC will automatically pick up from min_lsn (cold start),
+//     replaying changes idempotently — no offset checkpoint needed.
 //  4. When all tables are done the transaction is committed and NextCapturer: CapturerCDC
 //     is returned.
 type SnapshotCapturer struct {
 	querier       *Querier
 	tables        []CDCTable
 	pendingTables []CDCTable // staged tables from UpdateTables, applied in Restart
-	offsetStore   offset.StoreInterface
 
 	mu           sync.Mutex
 	pending      bool // set by Restart before DB init; reports as Started so status shows "running"
@@ -85,7 +87,6 @@ type SnapshotCapturer struct {
 	completed    bool
 	stopped      bool
 	tx           *sql.Tx // open snapshot-isolation transaction; nil until Restart succeeds
-	startLSN     []byte  // MaxLSN captured before snapshot tx; stable CDC resume point
 	tableIndex   int
 	rowOffset    int // row offset within current table
 	currentTable string
@@ -99,11 +100,10 @@ type SnapshotCapturer struct {
 }
 
 // NewSnapshotCapturer creates a new SnapshotCapturer.
-func NewSnapshotCapturer(querier *Querier, tables []CDCTable, offsetStore offset.StoreInterface) *SnapshotCapturer {
+func NewSnapshotCapturer(querier *Querier, tables []CDCTable) *SnapshotCapturer {
 	return &SnapshotCapturer{
-		querier:     querier,
-		tables:      tables,
-		offsetStore: offsetStore,
+		querier: querier,
+		tables:  tables,
 	}
 }
 
@@ -126,7 +126,6 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	c.completed = false
 	c.stopped = false
 	c.tx = nil
-	c.startLSN = nil
 	c.tableIndex = 0
 	c.rowOffset = 0
 	c.currentTable = ""
@@ -151,14 +150,9 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 		return fmt.Errorf("snapshot isolation check: %w", err)
 	}
 
-	// 2b. Capture MaxLSN outside any transaction — this is the stable CDC resume point.
-	//     All tables will use this same LSN so CDC can resume correctly after snapshot.
-	startLSN, err := c.querier.GetMaxLSN(ctx)
-	if err != nil {
-		c.markError(fmt.Sprintf("capture max LSN: %v", err))
-		return fmt.Errorf("capture max LSN: %w", err)
-	}
-	slog.Info("SnapshotCapturer: captured start LSN", "lsn", hex.EncodeToString(startLSN))
+	// 2b. Open snapshot-isolation transaction for consistent MVCC read view.
+	//     IMPORTANT: Use context.Background() (not the caller's HTTP-request context) so
+	//     the transaction is NOT automatically rolled back when the HTTP handler returns.
 
 	// 2c. Open ONE snapshot-isolation transaction covering all table reads.
 	//     Snapshot isolation gives a consistent MVCC read view — new DML on the source
@@ -179,7 +173,7 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	tablePKs := make([]*PrimaryKeyInfo, n)
 
 	for i, t := range selectedTables {
-		fullName := fmt.Sprintf("%s.%s", t.Schema, t.Name)
+		fullName := t.FullName()
 
 		count, countErr := c.querier.GetApproxRowCount(ctx, t.Schema, t.Name)
 		if countErr != nil {
@@ -204,7 +198,6 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	// Phase 3: commit initialised state under mutex.
 	c.mu.Lock()
 	c.tx = tx
-	c.startLSN = startLSN
 	c.tableTotals = tableTotals
 	c.tableRead = tableRead
 	c.tableDone = tableDone
@@ -282,7 +275,7 @@ func (c *SnapshotCapturer) Progress() Progress {
 	var totalRows, readRows int64
 	for i, t := range c.tables {
 		tp := TableProgress{
-			Table: fmt.Sprintf("%s.%s", t.Schema, t.Name),
+			Table: t.FullName(),
 		}
 		if i < len(c.tableTotals) {
 			tp.TotalRows = c.tableTotals[i]
@@ -375,7 +368,7 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	batchSize := c.querier.config.BatchSize
 	offset := c.rowOffset
 	tx := c.tx
-	c.currentTable = fmt.Sprintf("%s.%s", table.Schema, table.Name)
+	c.currentTable = table.FullName()
 
 	c.mu.Unlock()
 
@@ -435,13 +428,11 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		c.rowOffset = 0
 	}
 
-	startLSN := c.startLSN // capture for offset saving (outside lock)
 	c.mu.Unlock()
 
 	if isLastBatch || len(batchRows) == 0 {
 		slog.Info("SnapshotCapturer: table completed",
 			"table", c.currentTable, "read_rows", readSoFar)
-		c.saveTableOffset(ctx, tableIdx, startLSN)
 	}
 
 	if len(batchRows) == 0 {
@@ -465,34 +456,6 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		BatchID:      batchCtx.BatchID,
 		NextCapturer: core.CapturerSnapshot,
 	}
-}
-
-// saveTableOffset persists the CDC-resume LSN checkpoint for a completed table.
-// Must be called without holding the mutex.
-func (c *SnapshotCapturer) saveTableOffset(ctx context.Context, tableIdx int, startLSN []byte) {
-	if c.offsetStore == nil || len(startLSN) == 0 {
-		return
-	}
-	table := c.tables[tableIdx]
-	fullName := fmt.Sprintf("%s.%s", table.Schema, table.Name)
-
-	nextLSN, err := c.querier.IncrementLSN(ctx, startLSN)
-	if err != nil {
-		slog.Warn("SnapshotCapturer: increment LSN failed", "table", fullName, "error", err)
-		return
-	}
-	startStr := hex.EncodeToString(startLSN)
-	nextStr := hex.EncodeToString(nextLSN)
-	if err := c.offsetStore.Set(fullName, startStr, nextStr); err != nil {
-		slog.Warn("SnapshotCapturer: set offset failed", "table", fullName, "error", err)
-		return
-	}
-	if err := c.offsetStore.Flush(); err != nil {
-		slog.Warn("SnapshotCapturer: flush offset failed", "table", fullName, "error", err)
-		return
-	}
-	slog.Info("SnapshotCapturer: offset saved",
-		"table", fullName, "start_lsn", startStr, "next_lsn", nextStr)
 }
 
 // Ensure SnapshotCapturer satisfies the Capturer interface.
