@@ -85,6 +85,11 @@ func colType(v any) string {
 		return "TEXT"
 	case reflect.Bool:
 		return "INTEGER"
+	case reflect.Struct:
+		if rv.Type() == reflect.TypeOf(time.Time{}) {
+			return "DATETIME"
+		}
+		return "TEXT"
 	default:
 		return "TEXT"
 	}

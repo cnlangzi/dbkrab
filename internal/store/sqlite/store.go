@@ -14,6 +14,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/json"
 	"github.com/cnlangzi/dbkrab/internal/sqliteutil"
 	"github.com/cnlangzi/dbkrab/internal/store"
+	"github.com/cnlangzi/dbkrab/internal/types"
 )
 
 // Store implements store.Store for SQLite
@@ -34,7 +35,7 @@ func (s *Store) UpdatePollerState(lastLSN string, fetchedCount, insertedCount in
 	// Use Go time.Now().UTC() for consistency with rest of the codebase
 	// This ensures all timestamps are in UTC with nanosecond precision
 	now := time.Now().UTC()
-	
+
 	// Use COALESCE to keep existing LSN if new one is empty
 	_, err := s.db.Exec(`
 		UPDATE poller_state
@@ -56,7 +57,7 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 		WHERE id = 1
 	`)
 
-	var lastPollTime, lastLSN, updatedAt sql.NullString
+	var lastPollTime, lastLSN, updatedAt types.NullString
 	var totalChanges, totalInserted int
 
 	if err := row.Scan(&lastPollTime, &lastLSN, &totalChanges, &totalInserted, &updatedAt); err != nil {
@@ -68,14 +69,14 @@ func (s *Store) GetPollerState() (map[string]interface{}, error) {
 		"total_inserted": totalInserted,
 	}
 
-	if lastPollTime.Valid {
-		state["last_poll_time"] = lastPollTime.String
+	if lastPollTime.Valid() {
+		state["last_poll_time"] = lastPollTime.Val()
 	}
-	if lastLSN.Valid {
-		state["last_lsn"] = lastLSN.String
+	if lastLSN.Valid() {
+		state["last_lsn"] = lastLSN.Val()
 	}
-	if updatedAt.Valid {
-		state["updated_at"] = updatedAt.String
+	if updatedAt.Valid() {
+		state["updated_at"] = updatedAt.Val()
 	}
 
 	return state, nil

@@ -3,6 +3,8 @@ package cdc
 import (
 	"testing"
 	"time"
+
+	"github.com/cnlangzi/dbkrab/internal/types"
 )
 
 func TestConvertCommitTime(t *testing.T) {
@@ -59,10 +61,10 @@ func TestConvertCommitTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := convertCommitTime(tt.driverTime, tt.timezone)
+			got := types.ConvertCommitTime(tt.driverTime, tt.timezone)
 			gotStr := got.Format(time.RFC3339Nano)
 			if gotStr != tt.wantUTC {
-				t.Errorf("convertCommitTime() = %v, want %v", gotStr, tt.wantUTC)
+				t.Errorf("types.ConvertCommitTime() = %v, want %v", gotStr, tt.wantUTC)
 			}
 		})
 	}
@@ -91,7 +93,7 @@ func TestConvertCommitTimeChangedBeforePulled(t *testing.T) {
 	driverTime := time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC) // Driver's incorrect UTC
 	pulledAt := time.Date(2026, 4, 9, 6, 32, 0, 0, time.UTC)    // Actual pull time
 
-	changedAt := convertCommitTime(driverTime, shanghai)
+	changedAt := types.ConvertCommitTime(driverTime, shanghai)
 
 	if changedAt.After(pulledAt) {
 		t.Errorf("REGRESSION: changed_at (%v) is after pulled_at (%v)",
@@ -117,11 +119,11 @@ func TestConvertCommitTimeFixedZone(t *testing.T) {
 	utcPlus8 := time.FixedZone("UTC+8", 8*3600)
 
 	driverTime := time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC)
-	changedAt := convertCommitTime(driverTime, utcPlus8)
+	changedAt := types.ConvertCommitTime(driverTime, utcPlus8)
 
 	expected := time.Date(2026, 4, 9, 4, 26, 0, 0, time.UTC)
 	if !changedAt.Equal(expected) {
-		t.Errorf("convertCommitTime with FixedZone = %v, want %v", changedAt, expected)
+		t.Errorf("types.ConvertCommitTime with FixedZone = %v, want %v", changedAt, expected)
 	}
 }
 

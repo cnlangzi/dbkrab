@@ -24,6 +24,7 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/snapshot"
 	internal_store "github.com/cnlangzi/dbkrab/internal/store"
 	storeSQLite "github.com/cnlangzi/dbkrab/internal/store/sqlite"
+	"github.com/cnlangzi/dbkrab/internal/types"
 	"github.com/cnlangzi/dbkrab/plugin"
 	_ "github.com/denisenkom/go-mssqldb"
 )
@@ -194,7 +195,11 @@ func main() {
 	sinkerMgr := sinker.NewManager()
 	sinkerMgr.Configure(cfg.Sinks.ToMap())
 	// Set MSSQL timezone for datetime conversion
-	sinkerMgr.SetTimezone(config.ParseTimezone(cfg.MSSQL.Timezone))
+	tz := config.ParseTimezone(cfg.MSSQL.Timezone)
+	sinkerMgr.SetTimezone(tz)
+	// Propagate timezone to the scanner package so that plugin SQL queries
+	// on MSSQL also apply the correct timezone reinterpretation.
+	types.SetDefaultTimezone(tz)
 
 	// Initialize all sinks and run migrations
 	if err := sinkerMgr.InitAll(ctx); err != nil {

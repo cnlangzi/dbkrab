@@ -1,6 +1,6 @@
 # Build output
 /dbkrab
-/cmd/app/dbkrabs
+/cmd/app/dbkrab
 /bin/dbkrab
 /dbkrab_test
 /app
