@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -187,11 +188,13 @@ func (i *NullInt64) Scan(src interface{}) error {
 		i.val, i.valid = int64(v), true
 		return nil
 	case []byte:
-		if _, err := fmt.Sscanf(string(v), "%d", &i.val); err != nil {
+		s := string(v)
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
 			i.val, i.valid = 0, false
-			return fmt.Errorf("NullInt64.Scan: cannot parse %q as int64: %w", string(v), err)
+			return fmt.Errorf("NullInt64.Scan: cannot parse %q as int64: %w", s, err)
 		}
-		i.valid = true
+		i.val, i.valid = n, true
 		return nil
 	default:
 		i.val, i.valid = 0, false
@@ -218,11 +221,13 @@ func (f *NullFloat64) Scan(src interface{}) error {
 		f.val, f.valid = float64(v), true
 		return nil
 	case []byte:
-		if _, err := fmt.Sscanf(string(v), "%f", &f.val); err != nil {
+		s := string(v)
+		f64, err := strconv.ParseFloat(s, 64)
+		if err != nil {
 			f.val, f.valid = 0, false
-			return fmt.Errorf("NullFloat64.Scan: cannot parse %q as float64: %w", string(v), err)
+			return fmt.Errorf("NullFloat64.Scan: cannot parse %q as float64: %w", s, err)
 		}
-		f.valid = true
+		f.val, f.valid = f64, true
 		return nil
 	default:
 		f.val, f.valid = 0, false
@@ -323,11 +328,16 @@ func (b *NullBool) Scan(src interface{}) error {
 	case int64:
 		b.val, b.valid = v != 0, true
 	case []byte:
-		if len(v) > 0 {
-			b.val, b.valid = v[0] != 0, true
-		} else {
+		if len(v) == 0 {
 			b.val, b.valid = false, false
+			return nil
 		}
+		parsed, err := strconv.ParseBool(string(v))
+		if err != nil {
+			b.val, b.valid = false, false
+			return fmt.Errorf("NullBool.Scan: cannot parse %q as bool: %w", string(v), err)
+		}
+		b.val, b.valid = parsed, true
 	default:
 		b.val, b.valid = false, false
 		return fmt.Errorf("NullBool.Scan: unsupported type %T", src)
