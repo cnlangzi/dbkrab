@@ -227,6 +227,8 @@ func (q *Querier) ScanBatch(rows *sql.Rows) ([]map[string]interface{}, error) {
 			if s, ok := dest[i].(scannerpkg.DBType); ok {
 				if val, scanErr := s.Value(); scanErr == nil {
 					data[strings.ToLower(col)] = val
+				} else {
+					slog.Debug("snapshot: skip column due to Value() error", "column", col, "err", scanErr)
 				}
 			}
 		}
