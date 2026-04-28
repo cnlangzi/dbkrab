@@ -333,11 +333,12 @@ func (b *NullBool) Scan(src interface{}) error {
 			return nil
 		}
 		parsed, err := strconv.ParseBool(string(v))
-		if err != nil {
-			b.val, b.valid = false, false
-			return fmt.Errorf("NullBool.Scan: cannot parse %q as bool: %w", string(v), err)
+		if err == nil {
+			b.val, b.valid = parsed, true
+			return nil
 		}
-		b.val, b.valid = parsed, true
+		b.val, b.valid = v[0] != 0, true
+		return nil
 	default:
 		b.val, b.valid = false, false
 		return fmt.Errorf("NullBool.Scan: unsupported type %T", src)
