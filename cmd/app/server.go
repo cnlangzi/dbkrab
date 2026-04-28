@@ -1374,11 +1374,11 @@ func (s *Server) handleSinkQuery(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{
-		"success":   true,
-		"columns":   columns,
-		"rows":      queryResults,
-		"count":     len(queryResults),
-		"dbTimeMs":  dbTimeMs,
+		"success":  true,
+		"columns":  columns,
+		"rows":     queryResults,
+		"count":    len(queryResults),
+		"dbTimeMs": dbTimeMs,
 	})
 }
 
@@ -1601,6 +1601,41 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "no CDC tables configured"})
 	}
 
+	// Parse selected tables from request body.
+	var body struct {
+		Tables []string `json:"tables"`
+	}
+	rawBody, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.View(map[string]any{"success": false, "error": "failed to read request body"})
+	}
+	defer func() { _ = c.Request.Body.Close() }()
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		return c.View(map[string]any{"success": false, "error": "invalid request body"})
+	}
+	if len(body.Tables) == 0 {
+		return c.View(map[string]any{"success": false, "error": "no tables selected"})
+	}
+
+	// Build a lookup set of configured tables for validation.
+	configured := make(map[string]struct{}, len(cfg.Tables))
+	for _, t := range cfg.Tables {
+		configured[t] = struct{}{}
+	}
+
+	// Convert selected table strings to CDCTable and validate against config.
+	selectedTables := make([]snapshot.CDCTable, 0, len(body.Tables))
+	for _, t := range body.Tables {
+		if _, ok := configured[t]; !ok {
+			return c.View(map[string]any{"success": false, "error": "table not in CDC config: " + t})
+		}
+		parts := strings.SplitN(t, ".", 2)
+		if len(parts) != 2 {
+			return c.View(map[string]any{"success": false, "error": "malformed table name: " + t})
+		}
+		selectedTables = append(selectedTables, snapshot.CDCTable{Schema: parts[0], Name: parts[1]})
+	}
+
 	snap := s.runtime.Snapshot().(*snapshot.SnapshotCapturer)
 
 	// Guard: reject concurrent starts — snapshot must run to completion.
@@ -1609,11 +1644,9 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "snapshot is already running"})
 	}
 
-
-
 	// Initialise snapshot: capture MaxLSN, open tx, discover PKs, count rows.
 	ctx := c.Request.Context()
-	if err := snap.Restart(ctx); err != nil {
+	if err := snap.Restart(ctx, selectedTables); err != nil {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 	s.runtime.SwitchTo(core.CapturerSnapshot)
