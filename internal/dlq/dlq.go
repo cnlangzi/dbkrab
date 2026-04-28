@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cnlangzi/dbkrab/internal/json"
+	"github.com/cnlangzi/dbkrab/internal/types"
 	"github.com/cnlangzi/sqlite"
 	"github.com/yaitoo/sqle"
 	"github.com/yaitoo/sqle/migrate"
@@ -213,8 +214,8 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 	var entries []*DLQEntry
 	for rows.Next() {
 		entry := &DLQEntry{}
-		var traceID, source, resolvedBy, resolvedNote sql.NullString
-		var resolvedAt sql.NullTime
+		var traceID, source, resolvedBy, resolvedNote types.NullString
+		var resolvedAt types.NullTime
 
 		err := rows.Scan(
 			&entry.ID, &traceID, &source, &entry.LSN, &entry.TableName, &entry.Operation,
@@ -226,20 +227,20 @@ func (d *DLQ) List(status string) ([]*DLQEntry, error) {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
 
-		if traceID.Valid {
-			entry.TraceID = traceID.String
+		if traceID.Valid() {
+			entry.TraceID = traceID.Val()
 		}
-		if source.Valid {
-			entry.Source = source.String
+		if source.Valid() {
+			entry.Source = source.Val()
 		}
-		if resolvedBy.Valid {
-			entry.ResolvedBy = resolvedBy.String
+		if resolvedBy.Valid() {
+			entry.ResolvedBy = resolvedBy.Val()
 		}
-		if resolvedAt.Valid {
-			entry.ResolvedAt = resolvedAt.Time
+		if resolvedAt.Valid() {
+			entry.ResolvedAt = resolvedAt.Time()
 		}
-		if resolvedNote.Valid {
-			entry.ResolvedNote = resolvedNote.String
+		if resolvedNote.Valid() {
+			entry.ResolvedNote = resolvedNote.Val()
 		}
 
 		entries = append(entries, entry)
@@ -258,8 +259,8 @@ func (d *DLQ) Get(id int64) (*DLQEntry, error) {
 	}
 
 	entry := &DLQEntry{}
-	var resolvedBy, resolvedNote sql.NullString
-	var resolvedAt sql.NullTime
+	var resolvedBy, resolvedNote types.NullString
+	var resolvedAt types.NullTime
 
 	err := d.db.Reader.QueryRow(`
 		SELECT id, lsn, table_name, operation, change_data, error_message,
@@ -280,14 +281,14 @@ func (d *DLQ) Get(id int64) (*DLQEntry, error) {
 		return nil, fmt.Errorf("query entry: %w", err)
 	}
 
-	if resolvedBy.Valid {
-		entry.ResolvedBy = resolvedBy.String
+	if resolvedBy.Valid() {
+		entry.ResolvedBy = resolvedBy.Val()
 	}
-	if resolvedAt.Valid {
-		entry.ResolvedAt = resolvedAt.Time
+	if resolvedAt.Valid() {
+		entry.ResolvedAt = resolvedAt.Time()
 	}
-	if resolvedNote.Valid {
-		entry.ResolvedNote = resolvedNote.String
+	if resolvedNote.Valid() {
+		entry.ResolvedNote = resolvedNote.Val()
 	}
 
 	return entry, nil
@@ -315,8 +316,8 @@ func (d *DLQ) Replay(ctx context.Context, id int64, handler func(entry *DLQEntry
 
 	// Get the entry
 	entry := &DLQEntry{}
-	var resolvedBy, resolvedNote sql.NullString
-	var resolvedAt sql.NullTime
+	var resolvedBy, resolvedNote types.NullString
+	var resolvedAt types.NullTime
 
 	err := d.db.Reader.QueryRowContext(ctx, `
 		SELECT id, lsn, table_name, operation, change_data, error_message,

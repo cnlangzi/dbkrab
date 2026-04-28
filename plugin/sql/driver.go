@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/scanner"
+	"github.com/cnlangzi/dbkrab/internal/types"
 )
 
 // DriverType represents the type of database driver
@@ -108,9 +108,8 @@ func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, erro
 		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 	}
 
-	// Use ScannerFactory to create appropriate scanners for each column
-	factory := scanner.NewScannerFactory()
-	dest := factory.CreateDest(colTypes)
+	codec := types.NewMSSQLCodec()
+	dest := codec.CreateDest(colTypes)
 
 	// Scan results
 	var resultRows [][]interface{}
@@ -123,7 +122,7 @@ func (e *MSSQLExecutor) query(sqlStr string, args []interface{}) (*DataSet, erro
 		// Extract values from scanners
 		row := make([]interface{}, len(dest))
 		for i, d := range dest {
-			if s, ok := d.(scanner.Scanner); ok {
+			if s, ok := d.(types.DBType); ok {
 				row[i], _ = s.Value()
 			} else {
 				row[i] = d
@@ -208,19 +207,30 @@ func (e *SQLiteExecutor) query(sqlStr string, args []interface{}) (*DataSet, err
 		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 	}
 
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
+	}
+
+	codec := types.NewSQLiteCodec()
+	dest := codec.CreateDest(colTypes)
+
 	var resultRows [][]interface{}
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		err := rows.Scan(valuePtrs...)
+		err := rows.Scan(dest...)
 		if err != nil {
 			return nil, NewExecutionError(sqlStr, map[string]interface{}{"args": args}, err)
 		}
-		resultRows = append(resultRows, values)
+
+		row := make([]interface{}, len(dest))
+		for i, d := range dest {
+			if s, ok := d.(types.DBType); ok {
+				row[i], _ = s.Value()
+			} else {
+				row[i] = d
+			}
+		}
+		resultRows = append(resultRows, row)
 	}
 
 	return &DataSet{

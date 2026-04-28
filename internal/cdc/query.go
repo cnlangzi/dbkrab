@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	scannerpkg "github.com/cnlangzi/dbkrab/internal/scanner"
+	scannerpkg "github.com/cnlangzi/dbkrab/internal/types"
 )
 
 // validCaptureInstance validates capture instance name to prevent SQL injection
@@ -30,7 +30,7 @@ type Change struct {
 type Querier struct {
 	db       *sql.DB
 	timezone *time.Location // SQL Server timezone for CDC timestamp conversion
-	factory  *ScannerFactory
+	factory  *scannerpkg.Codec
 }
 
 // NewQuerier creates a new CDC querier
@@ -43,7 +43,7 @@ func NewQuerier(db *sql.DB, timezone *time.Location) *Querier {
 	return &Querier{
 		db:       db,
 		timezone: timezone,
-		factory:  NewScannerFactory(timezone),
+		factory:  scannerpkg.NewMSSQLCodecWithOptions(timezone, ""),
 	}
 }
 
@@ -152,8 +152,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		colIndex[col] = i
 	}
 
-	// Create typed dest slice using ScannerFactory
-	dest := q.factory.CreateDest(columns, colTypes)
+	// Create typed destination slice using codec mapping
+	dest := q.factory.CreateDest(colTypes)
 
 	var changes []Change
 	for rows.Next() {
@@ -164,7 +164,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract LSN
 		var lsn []byte
 		if idx, ok := colIndex["__$start_lsn"]; ok {
-			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+			if s, ok := dest[idx].(scannerpkg.DBType); ok {
 				if val, err := s.Value(); err == nil && val != nil {
 					if b, ok := val.([]byte); ok {
 						lsn = b
@@ -176,7 +176,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract transaction ID
 		var txID string
 		if idx, ok := colIndex["__$transaction_id"]; ok {
-			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+			if s, ok := dest[idx].(scannerpkg.DBType); ok {
 				if val, err := s.Value(); err == nil && val != nil {
 					switch v := val.(type) {
 					case string:
@@ -193,7 +193,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract operation
 		var op int64
 		if idx, ok := colIndex["__$operation"]; ok {
-			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
+			if s, ok := dest[idx].(scannerpkg.DBType); ok {
 				if val, err := s.Value(); err == nil && val != nil {
 					switch v := val.(type) {
 					case int64:
@@ -213,13 +213,8 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		// Extract commit time
 		var commitTime time.Time
 		if idx, ok := colIndex["__$commit_time"]; ok {
-			if s, ok := dest[idx].(scannerpkg.Scanner); ok {
-				if val, err := s.Value(); err == nil && val != nil {
-					// DateTime.Value now returns time.Time directly
-					if t, ok := val.(time.Time); ok {
-						commitTime = t
-					}
-				}
+			if nt, ok := dest[idx].(*scannerpkg.NullTime); ok && nt.Valid() {
+				commitTime = nt.Time()
 			}
 		}
 
@@ -231,7 +226,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 				continue
 			}
 
-			if s, ok := dest[i].(scannerpkg.Scanner); ok {
+			if s, ok := dest[i].(scannerpkg.DBType); ok {
 				if val, err := s.Value(); err == nil {
 					data[strings.ToLower(col)] = val
 				}

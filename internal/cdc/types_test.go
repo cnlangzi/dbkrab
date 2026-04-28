@@ -2,19 +2,22 @@ package cdc
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/cnlangzi/dbkrab/internal/types"
 )
 
 func TestNullableScanValue(t *testing.T) {
 	t.Run("int64_nil_src", func(t *testing.T) {
-		var n Nullable[int64]
+		var n types.Nullable[int64]
 
 		if err := n.Scan(nil); err != nil {
 			t.Fatalf("Scan(nil) error = %v, want nil", err)
 		}
 
-		if n.valid {
+		if n.Valid() {
 			t.Fatalf("n.valid = true after Scan(nil), want false")
 		}
 
@@ -28,18 +31,18 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("int64_exact_type", func(t *testing.T) {
-		var n Nullable[int64]
+		var n types.Nullable[int64]
 
 		const want int64 = 123
 		if err := n.Scan(want); err != nil {
 			t.Fatalf("Scan(int64) error = %v, want nil", err)
 		}
 
-		if !n.valid {
+		if !n.Valid() {
 			t.Fatalf("n.valid = false after Scan(int64), want true")
 		}
-		if n.val != want {
-			t.Fatalf("n.val = %v, want %v", n.val, want)
+		if n.Val() != want {
+			t.Fatalf("n.val = %v, want %v", n.Val(), want)
 		}
 
 		v, err := n.Value()
@@ -52,7 +55,7 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("int64_mismatched_type_returns_error", func(t *testing.T) {
-		var n Nullable[int64]
+		var n types.Nullable[int64]
 
 		// database/sql may return int32 for some drivers; should return error, not panic
 		if err := n.Scan(int32(123)); err == nil {
@@ -61,13 +64,13 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("string_nil_src", func(t *testing.T) {
-		var n Nullable[string]
+		var n types.Nullable[string]
 
 		if err := n.Scan(nil); err != nil {
 			t.Fatalf("Scan(nil) error = %v, want nil", err)
 		}
 
-		if n.valid {
+		if n.Valid() {
 			t.Fatalf("n.valid = true after Scan(nil), want false")
 		}
 
@@ -81,18 +84,18 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("string_exact_type", func(t *testing.T) {
-		var n Nullable[string]
+		var n types.Nullable[string]
 
 		const want = "hello"
 		if err := n.Scan(want); err != nil {
 			t.Fatalf("Scan(string) error = %v, want nil", err)
 		}
 
-		if !n.valid {
+		if !n.Valid() {
 			t.Fatalf("n.valid = false after Scan(string), want true")
 		}
-		if n.val != want {
-			t.Fatalf("n.val = %q, want %q", n.val, want)
+		if n.Val() != want {
+			t.Fatalf("n.val = %q, want %q", n.Val(), want)
 		}
 
 		v, err := n.Value()
@@ -105,7 +108,7 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("string_mismatched_type_returns_error", func(t *testing.T) {
-		var n Nullable[string]
+		var n types.Nullable[string]
 
 		// database/sql commonly returns []byte for textual columns; should return error
 		if err := n.Scan([]byte("hello")); err == nil {
@@ -114,9 +117,9 @@ func TestNullableScanValue(t *testing.T) {
 	})
 
 	t.Run("zero_value_never_scanned", func(t *testing.T) {
-		var n Nullable[int64] // never populated via Scan
+		var n types.Nullable[int64] // never populated via Scan
 
-		if n.valid {
+		if n.Valid() {
 			t.Fatalf("zero-value Nullable.valid = true, want false")
 		}
 
@@ -171,7 +174,7 @@ func TestInt64ScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var i Int64
+			var i types.NullInt64
 			if err := i.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -225,7 +228,7 @@ func TestFloat64ScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var f Float64
+			var f types.NullFloat64
 			if err := f.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -284,7 +287,7 @@ func TestNumericStringScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var s NumericString
+			var s types.NullDecimal
 			if err := s.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -340,7 +343,7 @@ func TestGUIDScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var g GUID
+			var g types.NullGUID
 			if err := g.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -364,32 +367,34 @@ func TestDateTimeScanValue(t *testing.T) {
 	tests := []struct {
 		name    string
 		src     interface{}
-		wantVal driver.Value
+		wantVal string // Value() now returns formatted string
 		wantNil bool
 	}{
 		{
-			name:    "valid time.Time",
+			// Driver delivers time.Time tagged as UTC but it's actually Shanghai local time.
+			// NullTime reinterprets the wall clock in Shanghai and converts it to UTC.
+			name:    "valid time.Time (driver UTC, reinterpreted as Shanghai)",
 			src:     time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			wantVal: time.Date(2026, 4, 9, 4, 26, 0, 0, time.UTC), // Driver UTC 12:26 reinterpreted as Shanghai 12:26 → UTC 04:26
+			wantVal: "2026-04-09 04:26:00",
 			wantNil: false,
 		},
 		{
 			name:    "nil",
 			src:     nil,
-			wantVal: nil, // Invalid time stored as NULL
 			wantNil: true,
 		},
 		{
-			name:    "RFC3339Nano string",
+			// A string already carries explicit timezone (Z = UTC); no reinterpretation.
+			name:    "RFC3339 string stays as-is",
 			src:     "2026-04-09T12:26:00Z",
-			wantVal: time.Date(2026, 4, 9, 4, 26, 0, 0, time.UTC), // String 12:26 UTC reinterpreted as Shanghai → UTC 04:26
+			wantVal: "2026-04-09 12:26:00",
 			wantNil: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dt := NewDateTime(shanghai)
+			dt := types.NewNullTime(shanghai, "")
 			if err := dt.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -401,31 +406,216 @@ func TestDateTimeScanValue(t *testing.T) {
 				if got != nil {
 					t.Errorf("Value() = %v, want nil", got)
 				}
-			} else {
-				gotTime, ok := got.(time.Time)
-				if !ok {
-					t.Fatalf("Value() returned %T, want time.Time", got)
-				}
-				wantTime := tt.wantVal.(time.Time)
-				if !gotTime.Equal(wantTime) {
-					t.Errorf("Value() = %v, want %v", gotTime, wantTime)
-				}
+				return
+			}
+			gotStr, ok := got.(string)
+			if !ok {
+				t.Fatalf("Value() type = %T, want string", got)
+			}
+			if gotStr != tt.wantVal {
+				t.Errorf("Value() = %q, want %q", gotStr, tt.wantVal)
 			}
 		})
 	}
 }
 
 func TestDateTimeZeroValue(t *testing.T) {
-	// Zero/invalid time should return nil (stored as NULL in SQLite)
-	dt := NewDateTime(time.UTC)
-	dt.Scan(time.Time{})
+	// Zero/invalid time should return nil (stored as NULL).
+	dt := types.NewNullTime(time.UTC, "")
+	_ = dt.Scan(time.Time{})
 	got, err := dt.Value()
 	if err != nil {
 		t.Fatalf("Value() error = %v", err)
 	}
-	// Expect nil for invalid/zero time
 	if got != nil {
 		t.Errorf("Value() for zero time = %v, want nil", got)
+	}
+}
+
+// TestNullTimeFormats verifies all TimeFormat serialization options.
+func TestNullTimeFormats(t *testing.T) {
+	utcTime := time.Date(2026, 4, 9, 10, 30, 0, 500000000, time.UTC)
+
+	cases := []struct {
+		format  types.TimeFormat
+		wantStr string
+		wantInt int64
+		isInt   bool
+	}{
+		{types.TimeFormatRFC3339Nano, "2026-04-09T10:30:00.5Z", 0, false},
+		{types.TimeFormatRFC3339, "2026-04-09T10:30:00Z", 0, false},
+		{types.TimeFormatDatetime, "2026-04-09 10:30:00", 0, false},
+		{types.TimeFormatDate, "2026-04-09", 0, false},
+		{types.TimeFormatUnix, "", utcTime.Unix(), true},
+		{types.TimeFormatUnixMilli, "", utcTime.UnixMilli(), true},
+		{types.TimeFormatUnixNano, "", utcTime.UnixNano(), true},
+	}
+
+	for _, c := range cases {
+		t.Run(string(c.format), func(t *testing.T) {
+			m := types.NewNullTime(time.UTC, c.format)
+			if err := m.Scan(utcTime); err != nil {
+				t.Fatalf("Scan: %v", err)
+			}
+			v, err := m.Value()
+			if err != nil {
+				t.Fatalf("Value: %v", err)
+			}
+			// Value() and MarshalJSON() must produce identical results.
+			if c.isInt {
+				gotInt, ok := v.(int64)
+				if !ok {
+					t.Fatalf("Value() type = %T, want int64", v)
+				}
+				if gotInt != c.wantInt {
+					t.Errorf("Value() = %d, want %d", gotInt, c.wantInt)
+				}
+			} else {
+				gotStr, ok := v.(string)
+				if !ok {
+					t.Fatalf("Value() type = %T, want string", v)
+				}
+				if gotStr != c.wantStr {
+					t.Errorf("Value() = %q, want %q", gotStr, c.wantStr)
+				}
+			}
+
+			marshaled, err := json.Marshal(m)
+			if err != nil {
+				t.Fatalf("MarshalJSON: %v", err)
+			}
+			if c.isInt {
+				var gotInt int64
+				if err := json.Unmarshal(marshaled, &gotInt); err != nil {
+					t.Fatalf("UnmarshalJSON int: %v", err)
+				}
+				if gotInt != c.wantInt {
+					t.Errorf("MarshalJSON() = %d, want %d", gotInt, c.wantInt)
+				}
+			} else {
+				var gotStr string
+				if err := json.Unmarshal(marshaled, &gotStr); err != nil {
+					t.Fatalf("UnmarshalJSON string: %v", err)
+				}
+				if gotStr != c.wantStr {
+					t.Errorf("MarshalJSON() = %q, want %q", gotStr, c.wantStr)
+				}
+			}
+		})
+	}
+}
+
+// TestNullTimeJSON verifies json.Marshal and json.Unmarshal round-trips.
+func TestNullTimeJSON(t *testing.T) {
+	utcTime := time.Date(2026, 4, 9, 10, 30, 0, 0, time.UTC)
+
+	t.Run("marshal RFC3339Nano", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, types.TimeFormatRFC3339Nano)
+		_ = m.Scan(utcTime)
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want := `"2026-04-09T10:30:00Z"`
+		if string(b) != want {
+			t.Errorf("Marshal() = %s, want %s", b, want)
+		}
+	})
+
+	t.Run("marshal unix", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, types.TimeFormatUnix)
+		_ = m.Scan(utcTime)
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		wantNum := utcTime.Unix()
+		var got int64
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("Unmarshal number: %v", err)
+		}
+		if got != wantNum {
+			t.Errorf("Marshal unix = %d, want %d", got, wantNum)
+		}
+	})
+
+	t.Run("marshal null", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, types.TimeFormatRFC3339Nano)
+		_ = m.Scan(nil)
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if string(b) != "null" {
+			t.Errorf("Marshal null = %s, want null", b)
+		}
+	})
+
+	t.Run("unmarshal RFC3339 string", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, "")
+		if err := json.Unmarshal([]byte(`"2026-04-09T10:30:00Z"`), m); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if !m.Valid() {
+			t.Fatal("Valid() = false, want true")
+		}
+		if !m.Time().Equal(utcTime) {
+			t.Errorf("Time() = %v, want %v", m.Time(), utcTime)
+		}
+	})
+
+	t.Run("unmarshal unix number", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, "")
+		data, _ := json.Marshal(utcTime.Unix())
+		if err := json.Unmarshal(data, m); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if !m.Valid() {
+			t.Fatal("Valid() = false, want true")
+		}
+		if !m.Time().Equal(utcTime) {
+			t.Errorf("Time() = %v, want %v", m.Time(), utcTime)
+		}
+	})
+
+	t.Run("unmarshal null", func(t *testing.T) {
+		m := types.NewNullTime(time.UTC, "")
+		if err := json.Unmarshal([]byte("null"), m); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if m.Valid() {
+			t.Fatal("Valid() = true after null, want false")
+		}
+	})
+}
+
+// TestFormatTimeValue verifies the weak-typed FormatTimeValue helper.
+func TestFormatTimeValue(t *testing.T) {
+	utcTime := time.Date(2026, 4, 9, 10, 30, 0, 0, time.UTC)
+	rfc := "2026-04-09T10:30:00Z"
+
+	cases := []struct {
+		name   string
+		input  interface{}
+		format types.TimeFormat
+		want   interface{}
+	}{
+		{"time.Time to RFC3339", utcTime, types.TimeFormatRFC3339, rfc},
+		{"string to RFC3339", rfc, types.TimeFormatRFC3339, rfc},
+		{"string to unix", rfc, types.TimeFormatUnix, utcTime.Unix()},
+		{"nil passthrough", nil, types.TimeFormatRFC3339, nil},
+		{"non-date passthrough", "hello", types.TimeFormatRFC3339, "hello"},
+		{"int64 unix to RFC3339", utcTime.Unix(), types.TimeFormatRFC3339, rfc},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := types.FormatTimeValue(c.input, c.format)
+			if got != c.want {
+				t.Errorf("FormatTimeValue(%v, %s) = %v (%T), want %v (%T)",
+					c.input, c.format, got, got, c.want, c.want)
+			}
+		})
 	}
 }
 
@@ -464,7 +654,7 @@ func TestStringScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var s String
+			var s types.NullString
 			if err := s.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -541,7 +731,7 @@ func TestBoolScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var b Bool
+			var b types.NullBool
 			if err := b.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -588,7 +778,7 @@ func TestBytesScanValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var b Bytes
+			var b types.NullBytes
 			if err := b.Scan(tt.src); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -607,84 +797,5 @@ func TestBytesScanValue(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestScannerFactoryCreateDest(t *testing.T) {
-	// We can't easily mock sql.ColumnType here since it's from database/sql package.
-	// Instead, we test the individual scanners and createScanner indirectly.
-	factory := NewScannerFactory(nil)
-
-	// Test that createScanner returns correct types
-	scanner := factory.createScanner("BIGINT")
-	if _, ok := scanner.(*Int64); !ok {
-		t.Errorf("createScanner(BIGINT) should return *Int64")
-	}
-
-	scanner = factory.createScanner("VARCHAR")
-	if _, ok := scanner.(*String); !ok {
-		t.Errorf("createScanner(VARCHAR) should return *String")
-	}
-
-	scanner = factory.createScanner("UNIQUEIDENTIFIER")
-	if _, ok := scanner.(*GUID); !ok {
-		t.Errorf("createScanner(UNIQUEIDENTIFIER) should return *GUID")
-	}
-
-	scanner = factory.createScanner("DATETIME")
-	if _, ok := scanner.(*DateTime); !ok {
-		t.Errorf("createScanner(DATETIME) should return *DateTime")
-	}
-
-	scanner = factory.createScanner("DECIMAL")
-	if _, ok := scanner.(*NumericString); !ok {
-		t.Errorf("createScanner(DECIMAL) should return *NumericString")
-	}
-
-	// Ensure VARBINARY uses *Bytes scanner and round-trips []byte values.
-	varbinaryScanner := factory.createScanner("VARBINARY")
-	bytesScanner, ok := varbinaryScanner.(*Bytes)
-	if !ok {
-		t.Fatalf("createScanner(VARBINARY) should return *Bytes, got %T", varbinaryScanner)
-	}
-
-	original := []byte{0x01, 0x02, 0x03}
-	if err := bytesScanner.Scan(original); err != nil {
-		t.Fatalf("Bytes.Scan() error = %v", err)
-	}
-
-	gotVal, err := bytesScanner.Value()
-	if err != nil {
-		t.Fatalf("Bytes.Value() error = %v", err)
-	}
-
-	gotBytes, ok := gotVal.([]byte)
-	if !ok {
-		t.Fatalf("Bytes.Value() type = %T, want []byte", gotVal)
-	}
-	if string(gotBytes) != string(original) {
-		t.Errorf("Bytes.Value() = %v, want %v", gotBytes, original)
-	}
-
-	scanner = factory.createScanner("UNKNOWN_TYPE")
-	if _, ok := scanner.(*String); !ok {
-		t.Errorf("createScanner(UNKNOWN_TYPE) should fallback to *String")
-	}
-}
-
-func TestFormatMSSQLGUID(t *testing.T) {
-	// Standard GUID: 01020304-0506-0708-090a-0b0c0d0e0f10
-	input := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
-	want := "04030201-0605-0807-090a-0b0c0d0e0f10"
-
-	got := FormatMSSQLGUID(input)
-	if got != want {
-		t.Errorf("FormatMSSQLGUID() = %v, want %v", got, want)
-	}
-
-	// Invalid length
-	got = FormatMSSQLGUID([]byte{0x01, 0x02})
-	if got != "0102" {
-		t.Errorf("FormatMSSQLGUID() for invalid = %v, want 0102", got)
 	}
 }

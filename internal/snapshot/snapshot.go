@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cnlangzi/dbkrab/internal/cdc"
 	"github.com/cnlangzi/dbkrab/internal/core"
-	scannerpkg "github.com/cnlangzi/dbkrab/internal/scanner"
+	scannerpkg "github.com/cnlangzi/dbkrab/internal/types"
 )
 
 // Config holds configuration for snapshot sync operations.
@@ -49,7 +48,7 @@ func snapshotTxOptions() *sql.TxOptions {
 type Querier struct {
 	db       *sql.DB
 	timezone *time.Location
-	factory  *cdc.ScannerFactory
+	factory  *scannerpkg.Codec
 	config   *Config
 }
 
@@ -63,7 +62,7 @@ func NewQuerier(db *sql.DB, timezone *time.Location, config *Config) *Querier {
 	return &Querier{
 		db:       db,
 		timezone: timezone,
-		factory:  cdc.NewScannerFactory(timezone),
+		factory:  scannerpkg.NewMSSQLCodecWithOptions(timezone, ""),
 		config:   config,
 	}
 }
@@ -216,7 +215,7 @@ func (q *Querier) ScanBatch(rows *sql.Rows) ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("get column types: %w", err)
 	}
 
-	dest := q.factory.CreateDest(columns, colTypes)
+	dest := q.factory.CreateDest(colTypes)
 	result := make([]map[string]interface{}, 0)
 
 	for rows.Next() {
@@ -225,7 +224,7 @@ func (q *Querier) ScanBatch(rows *sql.Rows) ([]map[string]interface{}, error) {
 		}
 		data := make(map[string]interface{})
 		for i, col := range columns {
-			if s, ok := dest[i].(scannerpkg.Scanner); ok {
+			if s, ok := dest[i].(scannerpkg.DBType); ok {
 				if val, scanErr := s.Value(); scanErr == nil {
 					data[strings.ToLower(col)] = val
 				}
@@ -326,7 +325,7 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler TableHa
 		}
 
 		// Create scanner destinations
-		dest := q.factory.CreateDest(columns, colTypes)
+		dest := q.factory.CreateDest(colTypes)
 
 		// Scan rows into batch
 		batchRows := make([]map[string]interface{}, 0, batchSize)
@@ -341,7 +340,7 @@ func (q *Querier) Run(ctx context.Context, schema, table string, handler TableHa
 			// Build data map from scanned values
 			data := make(map[string]interface{})
 			for i, col := range columns {
-				if s, ok := dest[i].(scannerpkg.Scanner); ok {
+				if s, ok := dest[i].(scannerpkg.DBType); ok {
 					if val, err := s.Value(); err == nil {
 						data[strings.ToLower(col)] = val
 					}
