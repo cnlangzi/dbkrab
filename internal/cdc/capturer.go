@@ -161,7 +161,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 	// Write changes to cdc.db store
 	var insertedCount int
-	if len(allChanges) > 0 {
+	if c.Store != nil && len(allChanges) > 0 {
 		coreChanges := c.convertToCoreChanges(allChanges)
 		n, err := c.Store.Write(coreChanges)
 		if err != nil {
@@ -181,12 +181,14 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	// Update in-memory counters
 	c.totalChanges += len(allChanges)
 	c.totalInserted += insertedCount
-	if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
-		slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
-	}
+	if c.Store != nil {
+		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
+			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
+		}
 
-	if err := c.Store.Flush(); err != nil {
-		slog.Warn("ChangeCapturer: failed to flush store", "error", err)
+		if err := c.Store.Flush(); err != nil {
+			slog.Warn("ChangeCapturer: failed to flush store", "error", err)
+		}
 	}
 
 	// Save offsets for tables that had changes
