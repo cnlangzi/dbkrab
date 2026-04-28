@@ -170,13 +170,6 @@ func (q *Querier) CheckSnapshotIsolation(ctx context.Context) error {
 	return nil
 }
 
-// IncrementLSN returns the next LSN after the given one
-func (q *Querier) IncrementLSN(ctx context.Context, lsn []byte) ([]byte, error) {
-	var nextLSN []byte
-	err := q.db.QueryRowContext(ctx, "SELECT sys.fn_cdc_increment_lsn(@p1)", lsn).Scan(&nextLSN)
-	return nextLSN, err
-}
-
 // GetApproxRowCount returns the approximate row count for a table using sys.partitions.
 // This avoids a full COUNT(*) scan and returns results in milliseconds.
 // The count may be slightly off if rows were inserted/deleted recently and stats not yet updated.
@@ -428,68 +421,4 @@ type TableHandlerFunc func(ctx context.Context, changes []core.Change) error
 // HandleTable implements the TableHandler interface by calling the function itself.
 func (f TableHandlerFunc) HandleTable(ctx context.Context, changes []core.Change) error {
 	return f(ctx, changes)
-}
-
-// OffsetUpdater updates offset storage after snapshot completes.
-// It persists the LSN checkpoint so subsequent CDC sync can resume correctly.
-type OffsetUpdater interface {
-	Set(table string, lastLSN string, nextLSN string) error
-	Flush() error
-}
-
-// Runner coordinates full snapshot run with offset update.
-// It runs the snapshot querier and persists the resulting LSN checkpoint.
-type Runner struct {
-	querier     *Querier
-	offsetStore OffsetUpdater
-}
-
-// NewRunner creates a new snapshot Runner with the given querier and offset store.
-func NewRunner(querier *Querier, offsetStore OffsetUpdater) *Runner {
-	return &Runner{
-		querier:     querier,
-		offsetStore: offsetStore,
-	}
-}
-
-// RunFull runs snapshot for a table and updates offset store on success.
-// The schema parameter should be like "dbo", and table is the table name without schema.
-// After snapshot completes, the LSN checkpoint is stored so CDC can resume.
-func (r *Runner) RunFull(ctx context.Context, schema, table string, handler TableHandler) error {
-	fullTableName := schema + "." + table
-
-	// Run snapshot and get start LSN checkpoint
-	startLSN, err := r.querier.Run(ctx, schema, table, handler)
-	if err != nil {
-		return fmt.Errorf("snapshot run: %w", err)
-	}
-
-	// Calculate next LSN for CDC to resume from
-	// CDC should start from increment(startLSN), not startLSN itself
-	// This ensures no duplicates with snapshot data
-	nextLSN, err := r.querier.IncrementLSN(ctx, startLSN)
-	if err != nil {
-		return fmt.Errorf("increment LSN: %w", err)
-	}
-
-	// Update offset store with startLSN and nextLSN
-	// last_lsn = startLSN (the checkpoint captured before snapshot)
-	// next_lsn = increment(startLSN) (where CDC should resume)
-	startLSNStr := hex.EncodeToString(startLSN)
-	nextLSNStr := hex.EncodeToString(nextLSN)
-
-	if err := r.offsetStore.Set(fullTableName, startLSNStr, nextLSNStr); err != nil {
-		return fmt.Errorf("set offset: %w", err)
-	}
-
-	if err := r.offsetStore.Flush(); err != nil {
-		return fmt.Errorf("flush offset: %w", err)
-	}
-
-	slog.Info("snapshot: offset updated",
-		"table", fullTableName,
-		"last_lsn", startLSNStr,
-		"next_lsn", nextLSNStr)
-
-	return nil
 }
