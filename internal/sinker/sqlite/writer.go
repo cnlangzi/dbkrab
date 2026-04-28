@@ -168,27 +168,6 @@ func (s *Sinker) Migrate(ctx context.Context) error {
 
 	return nil
 }
-
-// Reset clears all user tables in the sink, disabling foreign key checks
-// during the clear operation and flushing changes to disk upon completion.
-// This is used by snapshot startup to prepare sinks before loading data.
-func (s *Sinker) Reset(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	slog.Info("SQLiteSinker.Reset: starting reset",
-		"database", s.name)
-
-	// Get all valid tables from database (without lock, safe read)
-	tables, err := s.getValidTables(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Delegate to truncateTables with lock held and fail-fast=false for Reset
-	return s.truncateTables(ctx, tables, false)
-}
-
 // getValidTables returns all valid user tables from the database
 func (s *Sinker) getValidTables(ctx context.Context) ([]string, error) {
 	rows, err := s.db.Writer.QueryContext(ctx, `
@@ -282,12 +261,11 @@ func (s *Sinker) Truncate(ctx context.Context, tables []string) error {
 	}
 
 	// Step 3: Execute truncate with fail-fast for Truncate operation
-	return s.truncateTables(ctx, tablesToTruncate, true)
+	return s.truncateTables(ctx, tablesToTruncate)
 }
 
 // truncateTables performs the actual table truncation (called with lock held)
-// failFast: if true, return on first error; if false, log and continue (best-effort)
-func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast bool) error {
+func (s *Sinker) truncateTables(ctx context.Context, tables []string) error {
 	// Capture original foreign_keys setting and disable for truncate.
 	var fkEnabled bool
 	row := s.db.Writer.QueryRowContext(ctx, "PRAGMA foreign_keys")
@@ -317,15 +295,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 	for _, tableName := range tables {
 		query := fmt.Sprintf("DELETE FROM %s", QuoteIdent(tableName))
 		if _, err := s.db.Writer.ExecContext(ctx, query); err != nil {
-			slog.Warn("SQLiteSinker.Truncate: failed to delete from table",
-				"database", s.name,
-				"table", tableName,
-				"error", err)
-			if failFast {
-				return fmt.Errorf("delete from %s: %w", tableName, err)
-			}
-			// Best-effort: continue with remaining tables
-			continue
+			return fmt.Errorf("delete from %s: %w", tableName, err)
 		}
 
 		deletedCount++
@@ -336,12 +306,7 @@ func (s *Sinker) truncateTables(ctx context.Context, tables []string, failFast b
 
 	// Flush to ensure changes are persisted
 	if err := s.db.Flush(); err != nil {
-		if failFast {
-			return fmt.Errorf("flush after truncate: %w", err)
-		}
-		slog.Warn("SQLiteSinker.Truncate: flush failed",
-			"database", s.name,
-			"error", err)
+		return fmt.Errorf("flush after truncate: %w", err)
 	}
 
 	slog.Info("SQLiteSinker.Truncate: completed",

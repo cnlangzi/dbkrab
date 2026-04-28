@@ -1609,20 +1609,7 @@ func (s *Server) handleSnapshotStart(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": "snapshot is already running"})
 	}
 
-	// Clear all sink tables before snapshot so data is written fresh.
-	if s.manager != nil {
-		ctx := c.Request.Context()
-		for _, sinkName := range s.manager.ListDatabases() {
-			sink, err := s.manager.GetSinker(sinkName)
-			if err != nil {
-				slog.Warn("snapshot: failed to get sinker, skipping", "sink", sinkName, "error", err)
-				continue
-			}
-			if err := sink.Reset(ctx); err != nil {
-				slog.Warn("snapshot: failed to reset sink, continuing", "sink", sinkName, "error", err)
-			}
-		}
-	}
+
 
 	// Initialise snapshot: capture MaxLSN, open tx, discover PKs, count rows.
 	ctx := c.Request.Context()
