@@ -12,7 +12,8 @@ import (
 )
 
 // validTableName validates table name to prevent SQL injection
-var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// Supports both "table" and "schema.table" formats
+var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)?$`)
 
 // TableSchema represents primary key information for a table
 type TableSchema struct {
@@ -42,35 +43,55 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		return nil
 	}
 
-	// Convert all table names to schema.table format
+	// Convert all table names to schema.table format and track schema/table separately
+	type tableInfo struct {
+		schema string
+		table  string
+	}
+	infos := make([]tableInfo, len(tableNames))
 	fullNames := make([]string, len(tableNames))
+
 	for i, name := range tableNames {
 		schema, table := ParseTableName(name)
+		infos[i] = tableInfo{schema: schema, table: table}
 		fullNames[i] = fmt.Sprintf("%s.%s", schema, table)
+
+		// Validate table name (supports both "table" and "schema.table")
+		if !validTableName.MatchString(fullNames[i]) {
+			return fmt.Errorf("invalid table name: %s", fullNames[i])
+		}
 	}
 
-	// Build query with IN clause
-	placeholders := make([]string, len(fullNames))
-	args := make([]interface{}, len(fullNames))
-	for i, name := range fullNames {
-		// Validate table name
-		if !validTableName.MatchString(name) {
-			return fmt.Errorf("invalid table name: %s", name)
-		}
-		placeholders[i] = "?"
-		args[i] = name
+	// Build separate lists for schema and table names
+	schemas := make([]string, len(infos))
+	tables := make([]string, len(infos))
+	for i, info := range infos {
+		schemas[i] = info.schema
+		tables[i] = info.table
+	}
+
+	// Use schema-qualified filtering to handle schema.table inputs correctly
+	schemaPlaceholders := make([]string, len(schemas))
+	tablePlaceholders := make([]string, len(tables))
+	args := make([]interface{}, 0, len(schemas)+len(tables))
+
+	for i := range schemas {
+		schemaPlaceholders[i] = "?"
+		tablePlaceholders[i] = "?"
+		args = append(args, schemas[i], tables[i])
 	}
 
 	query := fmt.Sprintf(`
-		SELECT t.name AS table_name, c.name AS column_name
+		SELECT t.name AS table_name, c.name AS column_name, schema_name(t.schema_id) AS table_schema
 		FROM sys.tables t
-		INNER JOIN sys.index_columns ic ON ic.object_id = t.object_id AND ic.key_ordinal = 1
+		INNER JOIN sys.index_columns ic ON ic.object_id = t.object_id
 		INNER JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 		INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
 		WHERE i.is_primary_key = 1
+		AND schema_name(t.schema_id) IN (%s)
 		AND t.name IN (%s)
 		ORDER BY t.name, ic.key_ordinal
-	`, strings.Join(placeholders, ","))
+	`, strings.Join(schemaPlaceholders, ","), strings.Join(tablePlaceholders, ","))
 
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -82,23 +103,16 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		}
 	}()
 
-	// Group results by table
-	results := make(map[string]TableSchema)
+	// Group results by table, collecting all key columns
+	results := make(map[string][]string)
 	for rows.Next() {
-		var tableName, columnName string
-		if err := rows.Scan(&tableName, &columnName); err != nil {
+		var tableName, columnName, tableSchema string
+		if err := rows.Scan(&tableName, &columnName, &tableSchema); err != nil {
 			return fmt.Errorf("scan row: %w", err)
 		}
-
-		if _, ok := results[tableName]; !ok {
-			results[tableName] = TableSchema{
-				TableName: tableName,
-				Columns:   []string{},
-			}
-		}
-		schema := results[tableName]
-		schema.Columns = append(schema.Columns, columnName)
-		results[tableName] = schema
+		// Use schema.table as key
+		key := fmt.Sprintf("%s.%s", tableSchema, tableName)
+		results[key] = append(results[key], columnName)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -109,28 +123,25 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Build map of tableName to schema prefix from fullNames lookup
-	tableToSchema := make(map[string]string)
-	for _, fullName := range fullNames {
-		schema, table := ParseTableName(fullName)
-		tableToSchema[table] = schema
-	}
-
-	// Clear and rebuild, using full schema.table format as key
+	// Clear and rebuild
 	c.schema = make(map[string]TableSchema)
-	for _, s := range results {
-		// Use schema.table format as key to avoid collision across schemas
-		schemaPref := tableToSchema[s.TableName]
-		if schemaPref == "" {
-			schemaPref = "dbo" // default
+	for key, cols := range results {
+		// Parse key to get table name
+		parts := strings.SplitN(key, ".", 2)
+		tableName := key
+		if len(parts) == 2 {
+			tableName = parts[1]
 		}
-		key := fmt.Sprintf("%s.%s", schemaPref, s.TableName)
-		c.schema[key] = s
+		c.schema[key] = TableSchema{
+			TableName: tableName,
+			Columns:  cols,
+		}
 	}
 
 	slog.Info("TableSchemaCache: loaded primary keys",
 		"tables", len(results),
-		"table_names", fullNames)
+		"schemas", schemas,
+		"table_names", tables)
 
 	return nil
 }
