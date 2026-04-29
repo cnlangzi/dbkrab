@@ -1,0 +1,12 @@
+-- Migration: 001_add_table_keys
+-- Module: dbkrab-store
+-- Description: Add table_keys column to store primary key column names
+--
+-- This enables filtering and tracking changes by primary key values.
+--
+-- =============================================================================
+-- Add table_keys column to changes
+-- =============================================================================
+-- table_keys stores primary key column names as comma-separated string
+-- e.g., "id" for single PK, "order_id,line_no" for composite PK
+ALTER TABLE changes ADD COLUMN table_keys TEXT;
