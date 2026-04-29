@@ -352,10 +352,11 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 		commitTime, _ := cc["commit_time"].(time.Time)
 		id, _ := cc["id"].(string)
 
-		// Get primary key columns from schema cache
-		var tableKeys []string
+		// Get primary key columns from schema cache and join as string
+		var tableKeysStr string
 		if c.SchemaCache != nil && table != "" {
-			tableKeys, _ = c.SchemaCache.Get(table)
+			tableKeys, _ := c.SchemaCache.Get(table)
+			tableKeysStr = strings.Join(tableKeys, ",")
 		}
 
 		changes = append(changes, core.Change{
@@ -366,7 +367,7 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 			Data:         data,
 			CommitTime:   commitTime,
 			ID:           id,
-			TableKeys:    tableKeys,
+			TableKeys:    tableKeysStr,
 		})
 	}
 	return changes

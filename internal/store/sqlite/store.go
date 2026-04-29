@@ -123,11 +123,8 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 			lsnStr = "0x" + hex.EncodeToString(change.LSN)
 		}
 
-		// Convert table keys to comma-separated string
-		var tableKeysStr string
-		if len(change.TableKeys) > 0 {
-			tableKeysStr = strings.Join(change.TableKeys, ",")
-		}
+		// Table keys are stored as comma-separated string
+		tableKeysStr := change.TableKeys
 
 		// Use pre-computed ID from poller layer (computed using core.ComputeChangeID)
 		// If not available (e.g., changes from other sources), compute it here
