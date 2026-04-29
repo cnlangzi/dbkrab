@@ -85,9 +85,35 @@ func (s *memStore) Write(changes []core.Change) (int, error) {
 	return len(changes), nil
 }
 
+func (s *memStore) WriteOps(ops []core.Sink) error { return nil }
+
+func (s *memStore) GetChanges(limit int) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (s *memStore) GetChangesWithFilter(limit int, tableName, operation, txID, tableKeys string) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (s *memStore) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {
+	return nil
+}
+
+func (s *memStore) GetPollerState() (map[string]interface{}, error) {
+	return nil, nil
+}
+
 func (s *memStore) Flush() error { return nil }
 
+
 func (s *memStore) Close() error { return s.closeErr }
+
+
+func (s *memStore) GetLSNs() ([]string, error) { return nil, nil }
+
+func (s *memStore) GetChangesWithLSN(lsn string) ([]core.Change, error) {
+	return nil, nil
+}
 
 // simpleTransformer implements core.Transformer with a simple function
 type simpleTransformer struct {
