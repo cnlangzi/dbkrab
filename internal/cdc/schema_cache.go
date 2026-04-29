@@ -38,9 +38,8 @@ func NewTableSchemaCache(db *sql.DB) *TableSchemaCache {
 
 // Load fetches primary key information for the given tables
 // tableNames should be in "schema.table" or "table" format
-// If replace is true, the cache is cleared before loading (full refresh).
-// If replace is false (default), entries are merged with existing cache (partial load).
-func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string, replace bool) error {
+// This replaces all cached entries with the newly loaded ones.
+func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error {
 	if len(tableNames) == 0 {
 		return nil
 	}
@@ -128,12 +127,10 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string, replac
 		c.schema = make(map[string]TableSchema)
 	}
 
-	// If replace mode, clear all entries first
-	if replace {
-		c.schema = make(map[string]TableSchema)
-	}
+	// Clear all entries and rebuild from scratch
+	c.schema = make(map[string]TableSchema)
 
-	// Merge: insert/overwrite only the fetched keys, preserving existing entries
+	// Insert/overwrite with fetched keys
 	for key, cols := range results {
 		// Parse key to get table name
 		parts := strings.SplitN(key, ".", 2)
