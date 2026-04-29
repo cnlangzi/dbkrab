@@ -18,7 +18,7 @@ var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)?$`)
 // TableSchema represents primary key information for a table
 type TableSchema struct {
 	TableName string
-	Columns  []string // Primary key columns in order
+	Columns  []string // Read-only: defensive copies are returned by Get/GetSchema
 }
 
 // TableSchemaCache caches primary key information from MSSQL
@@ -117,12 +117,16 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		return fmt.Errorf("iterate rows: %w", err)
 	}
 
-	// Update cache
+	// Update cache - merge with existing entries
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Clear and rebuild
-	c.schema = make(map[string]TableSchema)
+	// Ensure schema map is initialized
+	if c.schema == nil {
+		c.schema = make(map[string]TableSchema)
+	}
+
+	// Merge: insert/overwrite only the fetched keys, preserving existing entries
 	for key, cols := range results {
 		// Parse key to get table name
 		parts := strings.SplitN(key, ".", 2)
@@ -130,18 +134,30 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		if len(parts) == 2 {
 			tableName = parts[1]
 		}
+		// Clone Columns slice before storing
+		colsCopy := make([]string, len(cols))
+		copy(colsCopy, cols)
 		c.schema[key] = TableSchema{
 			TableName: tableName,
-			Columns:  cols,
+			Columns:  colsCopy,
 		}
 	}
 
 	slog.Info("TableSchemaCache: loaded primary keys",
 		"tables", len(results),
-		"schemas", schemas,
 		"table_names", tables)
 
 	return nil
+}
+
+// cloneColumns creates a defensive copy of the Columns slice
+func cloneColumns(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	dst := make([]string, len(src))
+	copy(dst, src)
+	return dst
 }
 
 // Get returns the primary key columns for a table
@@ -152,24 +168,34 @@ func (c *TableSchemaCache) Get(tableName string) ([]string, bool) {
 
 	// Normalize to tableName format
 	schema, table := ParseTableName(tableName)
-	key := table // Try table name first
 
-	// Check if we have it as-is
+	// Try full schema.table format first (most specific)
+	key := fmt.Sprintf("%s.%s", schema, table)
 	if s, ok := c.schema[key]; ok {
-		return s.Columns, true
+		return cloneColumns(s.Columns), true
 	}
 
-	// Try with schema prefix
-	key = fmt.Sprintf("%s.%s", schema, table)
-	if s, ok := c.schema[key]; ok {
-		return s.Columns, true
+	// Try bare table name if input was not qualified
+	if schema == "" || schema == "dbo" {
+		if s, ok := c.schema[table]; ok {
+			return cloneColumns(s.Columns), true
+		}
 	}
 
-	// Also try looking through all entries
+	// Fallback: collect all matches for bare table name
+	// Return only if exactly one match; ambiguous matches return false
+	var match []string
 	for _, s := range c.schema {
 		if s.TableName == table || s.TableName == tableName {
-			return s.Columns, true
+			if match != nil {
+				// Multiple matches - ambiguous
+				return nil, false
+			}
+			match = cloneColumns(s.Columns)
 		}
+	}
+	if match != nil {
+		return match, true
 	}
 
 	return nil, false
@@ -181,21 +207,44 @@ func (c *TableSchemaCache) GetSchema(tableName string) (TableSchema, bool) {
 	defer c.mu.RUnlock()
 
 	schema, table := ParseTableName(tableName)
-	key := table
 
+	// Try full schema.table format first
+	key := fmt.Sprintf("%s.%s", schema, table)
 	if s, ok := c.schema[key]; ok {
-		return s, true
+		return TableSchema{
+			TableName: s.TableName,
+			Columns:  cloneColumns(s.Columns),
+		}, true
 	}
 
-	key = fmt.Sprintf("%s.%s", schema, table)
-	if s, ok := c.schema[key]; ok {
-		return s, true
-	}
-
-	for _, s := range c.schema {
-		if s.TableName == table || s.TableName == tableName {
-			return s, true
+	// Try bare table name
+	if schema == "" || schema == "dbo" {
+		if s, ok := c.schema[table]; ok {
+			return TableSchema{
+				TableName: s.TableName,
+				Columns:  cloneColumns(s.Columns),
+			}, true
 		}
+	}
+
+	// Fallback with ambiguity detection
+	var found TableSchema
+	var foundKey string
+	for k, s := range c.schema {
+		if s.TableName == table || s.TableName == tableName {
+			if foundKey != "" {
+				// Multiple matches - ambiguous
+				return TableSchema{}, false
+			}
+			foundKey = k
+			found = TableSchema{
+				TableName: s.TableName,
+				Columns:  cloneColumns(s.Columns),
+			}
+		}
+	}
+	if foundKey != "" {
+		return found, true
 	}
 
 	return TableSchema{}, false
@@ -215,14 +264,12 @@ func (c *TableSchemaCache) All() map[string]TableSchema {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Return a copy
+	// Return a copy (already clones in loop)
 	result := make(map[string]TableSchema, len(c.schema))
 	for k, v := range c.schema {
-		cols := make([]string, len(v.Columns))
-		copy(cols, v.Columns)
 		result[k] = TableSchema{
 			TableName: v.TableName,
-			Columns:   cols,
+			Columns:  cloneColumns(v.Columns),
 		}
 	}
 	return result
