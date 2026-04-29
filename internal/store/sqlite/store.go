@@ -258,10 +258,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id string
-		var resultTxID, resultTableName, resultOperation, dataStr, tableKeysStr, lsnStr string
+		var resultTxID, resultTableName, resultOperation, dataStr, keysFromDB, lsnStr string
 		var cdcTime, pulledAt interface{}
 
-		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &tableKeysStr, &lsnStr, &cdcTime, &pulledAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &keysFromDB, &lsnStr, &cdcTime, &pulledAt); err != nil {
 			return nil, err
 		}
 
@@ -276,7 +276,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 			"table_name":      resultTableName,
 			"operation":       resultOperation,
 			"data":            data,
-			"table_keys":      tableKeysStr,
+			"table_keys":     keysFromDB,
 			"lsn":            lsnStr,
 			"changed_at":      cdcTime,
 			"pulled_at":       pulledAt,
@@ -326,10 +326,11 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 
 	var changes []core.Change
 	for rows.Next() {
-		var id, txID, tableName, operation, dataStr, tableKeysStr, lsnStr string
+		var id, txID, tableName, operation, dataStr, keysFromDB, lsnStr string
 		var changedAt interface{}
 
-		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &tableKeysStr, &lsnStr, &changedAt); err != nil {
+
+		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &keysFromDB, &lsnStr, &changedAt); err != nil {
 			return nil, err
 		}
 
