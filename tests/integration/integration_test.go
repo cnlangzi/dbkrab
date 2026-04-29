@@ -399,7 +399,7 @@ func (s *memStore) WriteOps(ops []core.Sink) error      { return nil }
 func (s *memStore) GetChanges(limit int) ([]map[string]interface{}, error) {
 	return nil, nil
 }
-func (s *memStore) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+func (s *memStore) GetChangesWithFilter(limit int, tableName, operation, txID, tableKeys string) ([]map[string]interface{}, error) {
 	return nil, nil
 }
 func (s *memStore) UpdatePollerState(lastLSN string, fetchedCount, insertedCount int) error {

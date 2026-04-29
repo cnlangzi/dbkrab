@@ -551,7 +551,7 @@ func (s *Server) handleCDCConfig(c *xun.Context) error {
 }
 
 // handleCDCChanges handles GET /api/cdc/changes
-// Query params: limit (default 100), table, operation, transaction_id
+// Query params: limit (default 100), table, operation, transaction_id, table_keys
 func (s *Server) handleCDCChanges(c *xun.Context) error {
 	limit := 100
 	if l := c.Request.URL.Query().Get("limit"); l != "" {
@@ -563,8 +563,9 @@ func (s *Server) handleCDCChanges(c *xun.Context) error {
 	tableName := c.Request.URL.Query().Get("table")
 	operation := c.Request.URL.Query().Get("operation")
 	txID := c.Request.URL.Query().Get("transaction_id")
+	tableKeys := c.Request.URL.Query().Get("table_keys")
 
-	logs, err := s.store.GetChangesWithFilter(limit, tableName, operation, txID)
+	logs, err := s.store.GetChangesWithFilter(limit, tableName, operation, txID, tableKeys)
 	if err != nil {
 		return c.View(map[string]any{
 			"success": false,

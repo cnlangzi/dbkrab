@@ -123,11 +123,8 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 			lsnStr = "0x" + hex.EncodeToString(change.LSN)
 		}
 
-		// Convert table keys to comma-separated string
-		var tableKeysStr string
-		if len(change.TableKeys) > 0 {
-			tableKeysStr = strings.Join(change.TableKeys, ",")
-		}
+		// Table keys are stored as comma-separated string
+		tableKeysStr := change.TableKeys
 
 		// Use pre-computed ID from poller layer (computed using core.ComputeChangeID)
 		// If not available (e.g., changes from other sources), compute it here
@@ -221,11 +218,11 @@ func (s *Store) Close() error {
 
 // GetChanges retrieves changes from the database
 func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
-	return s.GetChangesWithFilter(limit, "", "", "")
+	return s.GetChangesWithFilter(limit, "", "", "", "")
 }
 
 // GetChangesWithFilter retrieves changes with optional filters
-func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tableKeys string) ([]map[string]interface{}, error) {
 	query := `SELECT id, transaction_id, table_name, operation, data, table_keys, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
 	args := []interface{}{}
 
@@ -240,6 +237,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	if txID != "" {
 		query += " AND transaction_id = ?"
 		args = append(args, txID)
+	}
+	if tableKeys != "" {
+		query += " AND table_keys = ?"
+		args = append(args, tableKeys)
 	}
 
 	query += " ORDER BY changed_at DESC"
@@ -257,10 +258,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id string
-		var resultTxID, resultTableName, resultOperation, dataStr, tableKeysStr, lsnStr string
+		var resultTxID, resultTableName, resultOperation, dataStr, keysFromDB, lsnStr string
 		var cdcTime, pulledAt interface{}
 
-		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &tableKeysStr, &lsnStr, &cdcTime, &pulledAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &keysFromDB, &lsnStr, &cdcTime, &pulledAt); err != nil {
 			return nil, err
 		}
 
@@ -269,23 +270,16 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			data = make(map[string]interface{})
 		}
 
-		// Parse table_keys from comma-separated string to slice
-		var tableKeys []string
-		if tableKeysStr != "" {
-			tableKeys = strings.Split(tableKeysStr, ",")
-		}
-
-
 		results = append(results, map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"transaction_id": resultTxID,
-			"table_name":     resultTableName,
-			"operation":      resultOperation,
-			"data":           data,
-			"table_keys":     tableKeys,
+			"table_name":      resultTableName,
+			"operation":       resultOperation,
+			"data":            data,
+			"table_keys":     keysFromDB,
 			"lsn":            lsnStr,
-			"changed_at":     cdcTime,
-			"pulled_at":      pulledAt,
+			"changed_at":      cdcTime,
+			"pulled_at":       pulledAt,
 		})
 	}
 
@@ -332,10 +326,11 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 
 	var changes []core.Change
 	for rows.Next() {
-		var id, txID, tableName, operation, dataStr, tableKeysStr, lsnStr string
+		var id, txID, tableName, operation, dataStr, keysFromDB, lsnStr string
 		var changedAt interface{}
 
-		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &tableKeysStr, &lsnStr, &changedAt); err != nil {
+
+		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &keysFromDB, &lsnStr, &changedAt); err != nil {
 			return nil, err
 		}
 

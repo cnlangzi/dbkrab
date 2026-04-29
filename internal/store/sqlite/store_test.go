@@ -218,18 +218,18 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Filter by table name
-	changes, err := store.GetChangesWithFilter(10, "users", "", "")
+	changes, err := store.GetChangesWithFilter(10, "users", "", "", "")
 	assert.NoError(t, err)
 	assert.Len(t, changes, 1)
 	assert.Equal(t, "tx-001", changes[0]["transaction_id"])
 
 	// Filter by operation
-	changes, err = store.GetChangesWithFilter(10, "", "INSERT", "")
+	changes, err = store.GetChangesWithFilter(10, "", "INSERT", "", "")
 	assert.NoError(t, err)
 	assert.Len(t, changes, 2)
 
 	// Filter by txID
-	changes, err = store.GetChangesWithFilter(10, "", "", "tx-002")
+	changes, err = store.GetChangesWithFilter(10, "", "", "tx-002", "")
 	assert.NoError(t, err)
 	assert.Len(t, changes, 1)
 	assert.Equal(t, "tx-002", changes[0]["transaction_id"])
