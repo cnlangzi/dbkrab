@@ -373,9 +373,10 @@ func TestDateTimeScanValue(t *testing.T) {
 		{
 			// Driver delivers time.Time tagged as UTC but it's actually Shanghai local time.
 			// NullTime reinterprets the wall clock in Shanghai and converts it to UTC.
+			// Value() now outputs in Shanghai timezone, so wall clock time is preserved.
 			name:    "valid time.Time (driver UTC, reinterpreted as Shanghai)",
 			src:     time.Date(2026, 4, 9, 12, 26, 0, 0, time.UTC),
-			wantVal: "2026-04-09 04:26:00",
+			wantVal: "2026-04-09 12:26:00",
 			wantNil: false,
 		},
 		{
@@ -384,10 +385,11 @@ func TestDateTimeScanValue(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			// A string already carries explicit timezone (Z = UTC); no reinterpretation.
-			name:    "RFC3339 string stays as-is",
+			// RFC3339 string carries explicit timezone (Z = UTC); parsed into UTC.
+			// Value() outputs in configured timezone (Shanghai), so UTC time is converted.
+			name:    "RFC3339 string converted to configured timezone",
 			src:     "2026-04-09T12:26:00Z",
-			wantVal: "2026-04-09 12:26:00",
+			wantVal: "2026-04-09 20:26:00",
 			wantNil: false,
 		},
 	}
