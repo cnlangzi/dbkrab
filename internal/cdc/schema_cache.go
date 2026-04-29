@@ -70,14 +70,13 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		tables[i] = info.table
 	}
 
-	// Use schema-qualified filtering to handle schema.table inputs correctly
-	schemaPlaceholders := make([]string, len(schemas))
+	// Build query with proper schema.table pair filtering
+	// Each entry in tables has corresponding schema in same index position
 	tablePlaceholders := make([]string, len(tables))
-	args := make([]interface{}, 0, len(schemas)+len(tables))
+	args := make([]interface{}, 0, len(tables))
 
-	for i := range schemas {
-		schemaPlaceholders[i] = "?"
-		tablePlaceholders[i] = "?"
+	for i := range tables {
+		tablePlaceholders[i] = "(schema_name(t.schema_id) = ? AND t.name = ?)"
 		args = append(args, schemas[i], tables[i])
 	}
 
@@ -88,10 +87,9 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		INNER JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 		INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
 		WHERE i.is_primary_key = 1
-		AND schema_name(t.schema_id) IN (%s)
-		AND t.name IN (%s)
+		AND (%s)
 		ORDER BY t.name, ic.key_ordinal
-	`, strings.Join(schemaPlaceholders, ","), strings.Join(tablePlaceholders, ","))
+	`, strings.Join(tablePlaceholders, " OR "))
 
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
