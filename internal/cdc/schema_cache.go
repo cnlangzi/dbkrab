@@ -38,7 +38,9 @@ func NewTableSchemaCache(db *sql.DB) *TableSchemaCache {
 
 // Load fetches primary key information for the given tables
 // tableNames should be in "schema.table" or "table" format
-func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error {
+// If replace is true, the cache is cleared before loading (full refresh).
+// If replace is false (default), entries are merged with existing cache (partial load).
+func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string, replace bool) error {
 	if len(tableNames) == 0 {
 		return nil
 	}
@@ -117,12 +119,17 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		return fmt.Errorf("iterate rows: %w", err)
 	}
 
-	// Update cache - merge with existing entries
+	// Update cache - merge with or replace existing entries
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Ensure schema map is initialized
 	if c.schema == nil {
+		c.schema = make(map[string]TableSchema)
+	}
+
+	// If replace mode, clear all entries first
+	if replace {
 		c.schema = make(map[string]TableSchema)
 	}
 

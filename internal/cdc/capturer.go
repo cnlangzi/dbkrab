@@ -63,7 +63,7 @@ func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreI
 
 	// Initialize schema cache and load primary keys
 	c.SchemaCache = NewTableSchemaCache(db)
-	if err := c.SchemaCache.Load(context.Background(), cfg.Tables); err != nil {
+	if err := c.SchemaCache.Load(context.Background(), cfg.Tables, true); err != nil {
 		slog.Warn("ChangeCapturer: failed to load schema cache", "error", err)
 		// Continue without cache - not a fatal error
 	}
@@ -277,9 +277,9 @@ func (c *ChangeCapturer) UpdateTables(tables []string) {
 	c.Tables = newTables
 	c.mu.Unlock()
 
-	// Reload schema cache with new tables
+	// Reload schema cache with new tables (replace to clear stale entries)
 	if c.SchemaCache != nil {
-		if err := c.SchemaCache.Load(context.Background(), newTables); err != nil {
+		if err := c.SchemaCache.Load(context.Background(), newTables, true); err != nil {
 			slog.Warn("ChangeCapturer: failed to reload schema cache", "error", err)
 		}
 	}
