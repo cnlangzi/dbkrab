@@ -101,8 +101,8 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 	}()
 
 	const insertSQL = `
-		INSERT OR IGNORE INTO changes (id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR IGNORE INTO changes (id, transaction_id, table_name, operation, data, table_keys, lsn, changed_at, pulled_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	rowsInserted := 0
@@ -121,6 +121,12 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 		var lsnStr string
 		if len(change.LSN) > 0 {
 			lsnStr = "0x" + hex.EncodeToString(change.LSN)
+		}
+
+		// Convert table keys to comma-separated string
+		var tableKeysStr string
+		if len(change.TableKeys) > 0 {
+			tableKeysStr = strings.Join(change.TableKeys, ",")
 		}
 
 		// Use pre-computed ID from poller layer (computed using core.ComputeChangeID)
@@ -142,6 +148,7 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 			change.Table,
 			change.Operation.String(),
 			string(dataJSON),
+			tableKeysStr,
 			lsnStr,
 			cdcTime,
 			time.Now().UTC(), // pulled_at - store in UTC for consistency
@@ -219,7 +226,7 @@ func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
 
 // GetChangesWithFilter retrieves changes with optional filters
 func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
-	query := `SELECT id, transaction_id, table_name, operation, data, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
+	query := `SELECT id, transaction_id, table_name, operation, data, table_keys, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
 	args := []interface{}{}
 
 	if tableName != "" {
@@ -250,10 +257,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id string
-		var resultTxID, resultTableName, resultOperation, dataStr, lsnStr string
+		var resultTxID, resultTableName, resultOperation, dataStr, tableKeysStr, lsnStr string
 		var cdcTime, pulledAt interface{}
 
-		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &lsnStr, &cdcTime, &pulledAt); err != nil {
+		if err := rows.Scan(&id, &resultTxID, &resultTableName, &resultOperation, &dataStr, &tableKeysStr, &lsnStr, &cdcTime, &pulledAt); err != nil {
 			return nil, err
 		}
 
@@ -262,12 +269,20 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			data = make(map[string]interface{})
 		}
 
+		// Parse table_keys from comma-separated string to slice
+		var tableKeys []string
+		if tableKeysStr != "" {
+			tableKeys = strings.Split(tableKeysStr, ",")
+		}
+
+
 		results = append(results, map[string]interface{}{
 			"id":             id,
 			"transaction_id": resultTxID,
 			"table_name":     resultTableName,
 			"operation":      resultOperation,
 			"data":           data,
+			"table_keys":     tableKeys,
 			"lsn":            lsnStr,
 			"changed_at":     cdcTime,
 			"pulled_at":      pulledAt,
@@ -305,7 +320,7 @@ func (s *Store) GetLSNs() ([]string, error) {
 // GetChangesWithLSN returns all changes for a specific LSN, as core.Change
 func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 	rows, err := s.db.Reader.Query(`
-		SELECT id, transaction_id, table_name, operation, data, lsn, changed_at
+		SELECT id, transaction_id, table_name, operation, data, table_keys, lsn, changed_at
 		FROM changes
 		WHERE lsn = ?
 		ORDER BY id
@@ -317,10 +332,10 @@ func (s *Store) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 
 	var changes []core.Change
 	for rows.Next() {
-		var id, txID, tableName, operation, dataStr, lsnStr string
+		var id, txID, tableName, operation, dataStr, tableKeysStr, lsnStr string
 		var changedAt interface{}
 
-		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &lsnStr, &changedAt); err != nil {
+		if err := rows.Scan(&id, &txID, &tableName, &operation, &dataStr, &tableKeysStr, &lsnStr, &changedAt); err != nil {
 			return nil, err
 		}
 

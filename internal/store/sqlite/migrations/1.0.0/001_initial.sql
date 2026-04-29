@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS changes (
     data TEXT,
     lsn TEXT,
     changed_at TIMESTAMP,
-    pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    pulled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    table_keys TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_transaction_id ON changes(transaction_id);

@@ -19,11 +19,12 @@ import (
 // ChangeCapturer fetches CDC changes via incremental polling.
 // It wraps CDCQuerier to perform timer-triggered poll cycles.
 type ChangeCapturer struct {
-	Querier       CDCQuerier     // Exported for testing
-	Tables        []string       // Exported for testing
-	OffsetMgr     *OffsetManager // Exported for testing
-	Store         store.Store    // Exported for testing
-	Interval      time.Duration  // Exported for testing
+	Querier       CDCQuerier       // Exported for testing
+	Tables        []string         // Exported for testing
+	OffsetMgr     *OffsetManager   // Exported for testing
+	Store         store.Store      // Exported for testing
+	SchemaCache   *TableSchemaCache // Primary key cache for tables
+	Interval      time.Duration   // Exported for testing
 	stopCh        chan struct{}
 	stopped       bool
 	lastPollTime  time.Time    // Last time Fetch() was called
@@ -52,12 +53,19 @@ func NewChangeCapturer(db *sql.DB, cfg *config.Config, offsetStore offset.StoreI
 	offsetMgr := NewOffsetManager(offsetStore, querier)
 
 	c := &ChangeCapturer{
-		Querier:   querier,
+		Querier:    querier,
 		Tables:    cfg.Tables,
 		OffsetMgr: offsetMgr,
-		Store:     appStore,
-		Interval:  interval,
+		Store:    appStore,
+		Interval: interval,
 		stopCh:    make(chan struct{}),
+	}
+
+	// Initialize schema cache and load primary keys
+	c.SchemaCache = NewTableSchemaCache(db)
+	if err := c.SchemaCache.Load(context.Background(), cfg.Tables); err != nil {
+		slog.Warn("ChangeCapturer: failed to load schema cache", "error", err)
+		// Continue without cache - not a fatal error
 	}
 
 	// Restore poller state from DB on startup
@@ -269,6 +277,13 @@ func (c *ChangeCapturer) UpdateTables(tables []string) {
 	c.Tables = newTables
 	c.mu.Unlock()
 
+	// Reload schema cache with new tables
+	if c.SchemaCache != nil {
+		if err := c.SchemaCache.Load(context.Background(), newTables); err != nil {
+			slog.Warn("ChangeCapturer: failed to reload schema cache", "error", err)
+		}
+	}
+
 	// Log count and sample of tables (avoid noisy logs with large table lists)
 	const maxLoggedTables = 5
 	sample := newTables
@@ -337,14 +352,21 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 		commitTime, _ := cc["commit_time"].(time.Time)
 		id, _ := cc["id"].(string)
 
+		// Get primary key columns from schema cache
+		var tableKeys []string
+		if c.SchemaCache != nil && table != "" {
+			tableKeys, _ = c.SchemaCache.Get(table)
+		}
+
 		changes = append(changes, core.Change{
 			Table:         table,
 			TransactionID: txID,
 			LSN:           lsn,
-			Operation:     core.Operation(opVal),
-			Data:          data,
-			CommitTime:    commitTime,
-			ID:            id,
+			Operation:    core.Operation(opVal),
+			Data:         data,
+			CommitTime:   commitTime,
+			ID:           id,
+			TableKeys:    tableKeys,
 		})
 	}
 	return changes

@@ -46,6 +46,7 @@ type Change struct {
 	Data          map[string]interface{} `json:"data"`
 	CommitTime    time.Time              `json:"commit_time"` // Transaction commit time from source database
 	ID            string                 `json:"id"`          // Content-based hash ID for deduplication
+	TableKeys     []string               `json:"table_keys"` // Primary key column names for the table
 }
 
 // Transaction represents a group of changes in the same transaction
