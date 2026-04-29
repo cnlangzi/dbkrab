@@ -18,7 +18,7 @@ type Store interface {
 	GetChanges(limit int) ([]map[string]interface{}, error)
 
 	// GetChangesWithFilter retrieves changes with optional filters
-	GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error)
+	GetChangesWithFilter(limit int, tableName, operation, txID, tableKeys string) ([]map[string]interface{}, error)
 
 	// UpdatePollerState updates the poller state after successful poll.
 	// fetchedCount is the number of CDC rows fetched; insertedCount is actually written rows.

@@ -221,11 +221,11 @@ func (s *Store) Close() error {
 
 // GetChanges retrieves changes from the database
 func (s *Store) GetChanges(limit int) ([]map[string]interface{}, error) {
-	return s.GetChangesWithFilter(limit, "", "", "")
+	return s.GetChangesWithFilter(limit, "", "", "", "")
 }
 
 // GetChangesWithFilter retrieves changes with optional filters
-func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID string) ([]map[string]interface{}, error) {
+func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tableKeys string) ([]map[string]interface{}, error) {
 	query := `SELECT id, transaction_id, table_name, operation, data, table_keys, lsn, changed_at, pulled_at FROM changes WHERE 1=1`
 	args := []interface{}{}
 
@@ -240,6 +240,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 	if txID != "" {
 		query += " AND transaction_id = ?"
 		args = append(args, txID)
+	}
+	if tableKeys != "" {
+		query += " AND table_keys LIKE ?"
+		args = append(args, "%"+tableKeys+"%")
 	}
 
 	query += " ORDER BY changed_at DESC"
@@ -269,20 +273,13 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID strin
 			data = make(map[string]interface{})
 		}
 
-		// Parse table_keys from comma-separated string to slice
-		var tableKeys []string
-		if tableKeysStr != "" {
-			tableKeys = strings.Split(tableKeysStr, ",")
-		}
-
-
 		results = append(results, map[string]interface{}{
 			"id":             id,
 			"transaction_id": resultTxID,
 			"table_name":     resultTableName,
 			"operation":      resultOperation,
 			"data":           data,
-			"table_keys":     tableKeys,
+			"table_keys":     tableKeysStr,
 			"lsn":            lsnStr,
 			"changed_at":     cdcTime,
 			"pulled_at":      pulledAt,
