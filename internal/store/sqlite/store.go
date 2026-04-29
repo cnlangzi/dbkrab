@@ -239,8 +239,8 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 		args = append(args, txID)
 	}
 	if tableKeys != "" {
-		query += " AND table_keys LIKE ?"
-		args = append(args, "%"+tableKeys+"%")
+		query += " AND table_keys = ?"
+		args = append(args, tableKeys)
 	}
 
 	query += " ORDER BY changed_at DESC"
