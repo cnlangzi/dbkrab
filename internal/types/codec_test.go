@@ -131,8 +131,9 @@ func TestSQLiteCodecCreate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Value: %v", err)
 		}
-		// 2026-04-09 12:00:00 Shanghai (UTC+8) → 2026-04-09 04:00:00 UTC → "2026-04-09 04:00:00"
-		want := "2026-04-09 04:00:00"
+		// 2026-04-09 12:00:00 Shanghai (UTC+8) → 2026-04-09 04:00:00 UTC (stored)
+		// Value() now outputs in configured timezone (Shanghai), so wall clock is preserved.
+		want := "2026-04-09 12:00:00"
 		if got != want {
 			t.Errorf("Value() = %q, want %q", got, want)
 		}

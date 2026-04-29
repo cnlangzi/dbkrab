@@ -152,15 +152,19 @@ func (m NullTime) reinterpret(driverTime time.Time) time.Time {
 }
 
 func (m NullTime) formatOutput() interface{} {
+	tz := m.timezone
+	if tz == nil {
+		tz = time.UTC
+	}
 	switch m.effectiveFormat() {
 	case TimeFormatRFC3339:
-		return m.val.Format(time.RFC3339)
+		return m.val.In(tz).Format(time.RFC3339)
 	case TimeFormatRFC3339Nano:
-		return m.val.Format(time.RFC3339Nano)
+		return m.val.In(tz).Format(time.RFC3339Nano)
 	case TimeFormatDatetime:
-		return m.val.UTC().Format("2006-01-02 15:04:05")
+		return m.val.In(tz).Format("2006-01-02 15:04:05")
 	case TimeFormatDate:
-		return m.val.UTC().Format("2006-01-02")
+		return m.val.In(tz).Format("2006-01-02")
 	case TimeFormatUnix:
 		return m.val.Unix()
 	case TimeFormatUnixMilli:
@@ -168,7 +172,7 @@ func (m NullTime) formatOutput() interface{} {
 	case TimeFormatUnixNano:
 		return m.val.UnixNano()
 	default:
-		return m.val.UTC().Format(string(m.effectiveFormat()))
+		return m.val.In(tz).Format(string(m.effectiveFormat()))
 	}
 }
 
@@ -179,13 +183,17 @@ func (m NullTime) Value() (driver.Value, error) {
 	if !m.valid || m.val.IsZero() {
 		return nil, nil
 	}
+	tz := m.timezone
+	if tz == nil {
+		tz = time.UTC
+	}
 	switch v := m.formatOutput().(type) {
 	case string:
 		return v, nil
 	case int64:
 		return v, nil
 	}
-	return m.val.UTC(), nil
+	return m.val.In(tz), nil
 }
 
 func (m NullTime) MarshalJSON() ([]byte, error) {
