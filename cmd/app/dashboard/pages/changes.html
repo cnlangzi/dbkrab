@@ -240,7 +240,7 @@ function renderDesktopRow(log) {
         <tr class="hover:bg-surfaceHover transition-colors">
             <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.id)}</td>
             <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(log.table_name)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.table_keys || '-')}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.table_keys_raw || log.table_keys?.[0] || '-')}</td>
             <td class="px-6 py-4">
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
                     ${log.operation}
@@ -290,7 +290,7 @@ function renderMobileCard(log) {
                     </div>
                     <div class="text-xs text-textMuted">
                         ID: ${escapeHtml(log.id)}<br>
-                        Keys: <span class="font-mono" title="${escapeHtml(log.table_keys || '')}">${escapeHtml(log.table_keys || '-')}</span><br>
+                        Keys: <span class="font-mono" title="${escapeHtml(log.table_keys_raw || '')}">${escapeHtml(log.table_keys_raw || log.table_keys?.[0] || '-')}</span><br>
                         TX: <span class="truncate max-w-[150px] font-mono" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span><br>
                         LSN: <span class="font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</span>
                     </div>

@@ -273,16 +273,23 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 			data = make(map[string]interface{})
 		}
 
+		// Parse table_keys to slice for backward compatibility
+		var tableKeys []string
+		if tableKeysStr != "" {
+			tableKeys = strings.Split(tableKeysStr, ",")
+		}
+
 		results = append(results, map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"transaction_id": resultTxID,
-			"table_name":     resultTableName,
-			"operation":      resultOperation,
-			"data":           data,
-			"table_keys":     tableKeysStr,
+			"table_name":      resultTableName,
+			"operation":       resultOperation,
+			"data":            data,
+			"table_keys":     tableKeys,       // Slice format (backward compatible)
+			"table_keys_raw":  tableKeysStr,   // Raw string format for UI display
 			"lsn":            lsnStr,
-			"changed_at":     cdcTime,
-			"pulled_at":      pulledAt,
+			"changed_at":      cdcTime,
+			"pulled_at":       pulledAt,
 		})
 	}
 
