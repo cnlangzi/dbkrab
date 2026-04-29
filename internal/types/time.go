@@ -87,6 +87,15 @@ func (m NullTime) effectiveFormat() TimeFormat {
 	return DefaultTimeFormat
 }
 
+// outputLocation returns the timezone to use for formatting output.
+// Defaults to UTC when no timezone is configured.
+func (m NullTime) outputLocation() *time.Location {
+	if m.timezone == nil {
+		return time.UTC
+	}
+	return m.timezone
+}
+
 func (m *NullTime) Scan(src interface{}) error {
 	if src == nil {
 		m.val, m.valid = time.Time{}, false
@@ -152,10 +161,7 @@ func (m NullTime) reinterpret(driverTime time.Time) time.Time {
 }
 
 func (m NullTime) formatOutput() interface{} {
-	tz := m.timezone
-	if tz == nil {
-		tz = time.UTC
-	}
+	tz := m.outputLocation()
 	switch m.effectiveFormat() {
 	case TimeFormatRFC3339:
 		return m.val.In(tz).Format(time.RFC3339)
@@ -183,17 +189,13 @@ func (m NullTime) Value() (driver.Value, error) {
 	if !m.valid || m.val.IsZero() {
 		return nil, nil
 	}
-	tz := m.timezone
-	if tz == nil {
-		tz = time.UTC
-	}
 	switch v := m.formatOutput().(type) {
 	case string:
 		return v, nil
 	case int64:
 		return v, nil
 	}
-	return m.val.In(tz), nil
+	return m.val.In(m.outputLocation()), nil
 }
 
 func (m NullTime) MarshalJSON() ([]byte, error) {

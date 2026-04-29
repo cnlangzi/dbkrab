@@ -385,9 +385,9 @@ func TestDateTimeScanValue(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			// A string already carries explicit timezone (Z = UTC); no reinterpretation.
-			// Value() now outputs in configured timezone (Shanghai), so UTC time appears as Shanghai.
-			name:    "RFC3339 string stays as-is",
+			// RFC3339 string carries explicit timezone (Z = UTC); parsed into UTC.
+			// Value() outputs in configured timezone (Shanghai), so UTC time is converted.
+			name:    "RFC3339 string converted to configured timezone",
 			src:     "2026-04-09T12:26:00Z",
 			wantVal: "2026-04-09 20:26:00",
 			wantNil: false,
