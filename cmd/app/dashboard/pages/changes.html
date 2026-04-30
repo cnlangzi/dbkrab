@@ -225,31 +225,32 @@ function copyJson(button) {
     }
 }
 
-function renderDesktopRow(log) {
+function renderDesktopRow(change) {
     const opStyle = {
         'INSERT': 'bg-success/20 text-success border-success/30',
         'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
         'DELETE': 'bg-error/20 text-error border-error/30'
-    }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
+    }[change.operation] || 'bg-surfaceHover text-textMuted border-border';
     
-    const dataPreview = JSON.stringify(log.data).substring(0, 150);
-    const dataFull = JSON.stringify(log.data, null, 2);
+    const tableKeys = change.table_keys || '-';
+    const dataPreview = JSON.stringify(change.data).substring(0, 150);
+    const dataFull = JSON.stringify(change.data, null, 2);
     const isTruncated = dataFull.length > 150;
     
     return `
         <tr class="hover:bg-surfaceHover transition-colors">
-            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.id)}</td>
-            <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(log.table_name)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.table_keys || '-')}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(change.id)}</td>
+            <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(change.table_name)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(tableKeys)}</td>
             <td class="px-6 py-4">
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
-                    ${log.operation}
+                    ${change.operation}
                 </span>
             </td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.changed_at)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(log.pulled_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono truncate max-w-[150px]" title="${escapeHtml(change.transaction_id)}">${escapeHtml(change.transaction_id)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono text-[10px]" title="${escapeHtml(change.lsn || '')}">${escapeHtml(change.lsn || '-')}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(change.changed_at)}</td>
+            <td class="px-6 py-4 text-xs text-textMuted whitespace-nowrap">${formatLocalTime(change.pulled_at)}</td>
             <td class="px-6 py-4 text-xs">
                 <details class="group">
                     <summary class="cursor-pointer text-primary hover:text-primaryHover transition-colors truncate max-w-[200px] list-none">
@@ -269,34 +270,35 @@ function renderDesktopRow(log) {
     `;
 }
 
-function renderMobileCard(log) {
+function renderMobileCard(change) {
     const opStyle = {
         'INSERT': 'bg-success/20 text-success border-success/30',
         'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
         'DELETE': 'bg-error/20 text-error border-error/30'
-    }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
+    }[change.operation] || 'bg-surfaceHover text-textMuted border-border';
     
-    const dataFull = JSON.stringify(log.data, null, 2);
+    const tableKeys = change.table_keys || '-';
+    const dataFull = JSON.stringify(change.data, null, 2);
     
     return `
         <div class="p-4 border-b border-border">
             <div class="flex items-start justify-between gap-2">
                 <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-2">
-                        <span class="font-medium text-text truncate">${escapeHtml(log.table_name)}</span>
+                        <span class="font-medium text-text truncate">${escapeHtml(change.table_name)}</span>
                         <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full border ${opStyle}">
-                            ${log.operation}
+                            ${change.operation}
                         </span>
                     </div>
                     <div class="text-xs text-textMuted">
-                        ID: ${escapeHtml(log.id)}<br>
-                        Keys: <span class="font-mono" title="${escapeHtml(log.table_keys || '')}">${escapeHtml(log.table_keys || '-')}</span><br>
-                        TX: <span class="truncate max-w-[150px] font-mono" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span><br>
-                        LSN: <span class="font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</span>
+                        ID: ${escapeHtml(change.id)}<br>
+                        Keys: <span class="font-mono" title="${escapeHtml(tableKeys || '')}">${escapeHtml(tableKeys)}</span><br>
+                        TX: <span class="truncate max-w-[150px] font-mono" title="${escapeHtml(change.transaction_id)}">${escapeHtml(change.transaction_id)}</span><br>
+                        LSN: <span class="font-mono text-[10px]" title="${escapeHtml(change.lsn || '')}">${escapeHtml(change.lsn || '-')}</span>
                     </div>
                     <div class="text-xs text-textMuted mt-1">
-                        <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(log.changed_at)}</div>
-                        <div><span class="text-textMuted">Pulled:</span> ${formatLocalTime(log.pulled_at)}</div>
+                        <div><span class="text-textMuted">Changed:</span> ${formatLocalTime(change.changed_at)}</div>
+                        <div><span class="text-textMuted">Pulled:</span> ${formatLocalTime(change.pulled_at)}</div>
                     </div>
                     <details class="group mt-2">
                         <summary class="cursor-pointer text-primary hover:text-primaryHover text-xs list-none flex items-center gap-1">
@@ -416,7 +418,7 @@ function loadLogs() {
                 rangeEl.textContent = '';
             }
             
-            const logs = data.logs || [];
+            const logs = data.changes || [];
             
             if (logs.length === 0) {
                 document.getElementById('logs-container-desktop').innerHTML = `

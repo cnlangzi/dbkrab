@@ -73,12 +73,18 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 
 	// Build query with proper schema.table pair filtering
 	// Each entry in tables has corresponding schema in same index position
-	tablePlaceholders := make([]string, len(tables))
-	args := make([]interface{}, 0, len(tables))
-
+	// NOTE: The denisenkom/go-mssqldb driver does not support parameterized queries
+	// (neither ? nor @name style) in WHERE clauses involving schema_name()/SCHEMA_NAME()
+	// functions on SQL Server 2012, producing "? near syntax error". Since table names
+	// and schemas are validated by validTableName regex (alphanumeric + underscore only)
+	// at ParseTableName() time (see Load() call path), inline values are safe here.
+	// We re-validate each value as a defensive measure.
+	tableConditions := make([]string, len(tables))
 	for i := range tables {
-		tablePlaceholders[i] = "(schema_name(t.schema_id) = ? AND t.name = ?)"
-		args = append(args, schemas[i], tables[i])
+		if !validTableName.MatchString(tables[i]) || !validTableName.MatchString(schemas[i]) {
+			return fmt.Errorf("unsafe table/schema name after validation: %s.%s", schemas[i], tables[i])
+		}
+		tableConditions[i] = fmt.Sprintf("(SCHEMA_NAME(t.schema_id) = '%s' AND t.name = '%s')", schemas[i], tables[i])
 	}
 
 	query := fmt.Sprintf(`
@@ -90,9 +96,9 @@ func (c *TableSchemaCache) Load(ctx context.Context, tableNames []string) error 
 		WHERE i.is_primary_key = 1
 		AND (%s)
 		ORDER BY t.name, ic.key_ordinal
-	`, strings.Join(tablePlaceholders, " OR "))
+	`, strings.Join(tableConditions, " OR "))
 
-	rows, err := c.db.QueryContext(ctx, query, args...)
+	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("query primary keys: %w", err)
 	}

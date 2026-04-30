@@ -239,6 +239,7 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 		args = append(args, txID)
 	}
 	if tableKeys != "" {
+		// tableKeys filter searches the table_keys column (primary key value)
 		query += " AND table_keys = ?"
 		args = append(args, tableKeys)
 	}

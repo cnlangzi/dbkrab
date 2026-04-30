@@ -576,7 +576,7 @@ func (s *Server) handleCDCChanges(c *xun.Context) error {
 	return c.View(map[string]any{
 		"success": true,
 		"count":   len(logs),
-		"logs":    logs,
+		"changes":    logs,
 	})
 }
 

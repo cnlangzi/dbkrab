@@ -353,11 +353,23 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 		commitTime, _ := cc["commit_time"].(time.Time)
 		id, _ := cc["id"].(string)
 
-		// Get primary key columns from schema cache and join as string
+		// Get primary key values from schema cache (field names) and extract actual values from data
 		var tableKeysStr string
 		if c.SchemaCache != nil && table != "" {
-			tableKeys, _ := c.SchemaCache.Get(table)
-			tableKeysStr = strings.Join(tableKeys, ",")
+			pkFields, ok := c.SchemaCache.Get(table)
+			if ok {
+				var pkValues []string
+				for _, field := range pkFields {
+					if val, exists := data[strings.ToLower(field)]; exists {
+						pkValues = append(pkValues, fmt.Sprintf("%v", val))
+					}
+				}
+				// Only set tableKeysStr if ALL PK fields are present; otherwise
+				// leave empty to avoid partial composite keys breaking exact-match filters
+				if len(pkValues) == len(pkFields) {
+					tableKeysStr = strings.Join(pkValues, ",")
+				}
+			}
 		}
 
 		changes = append(changes, core.Change{
