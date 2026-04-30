@@ -225,6 +225,17 @@ function copyJson(button) {
     }
 }
 
+// Extract primary key values from log.data using table_keys (comma-separated list)
+function extractKeyValues(data, tableKeys) {
+    if (!tableKeys || !data) return '-';
+    const keys = tableKeys.split(',');
+    const values = keys.map(k => {
+        const val = data[k.toLowerCase()];
+        return val !== undefined && val !== null ? String(val) : null;
+    }).filter(v => v !== null);
+    return values.length > 0 ? values.join(', ') : '-';
+}
+
 function renderDesktopRow(log) {
     const opStyle = {
         'INSERT': 'bg-success/20 text-success border-success/30',
@@ -232,6 +243,7 @@ function renderDesktopRow(log) {
         'DELETE': 'bg-error/20 text-error border-error/30'
     }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
     
+    const keyValues = extractKeyValues(log.data, log.table_keys);
     const dataPreview = JSON.stringify(log.data).substring(0, 150);
     const dataFull = JSON.stringify(log.data, null, 2);
     const isTruncated = dataFull.length > 150;
@@ -240,7 +252,7 @@ function renderDesktopRow(log) {
         <tr class="hover:bg-surfaceHover transition-colors">
             <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.id)}</td>
             <td class="px-6 py-4 text-sm text-text font-medium">${escapeHtml(log.table_name)}</td>
-            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(log.table_keys || '-')}</td>
+            <td class="px-6 py-4 text-xs text-textMuted font-mono">${escapeHtml(keyValues)}</td>
             <td class="px-6 py-4">
                 <span class="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full border ${opStyle}">
                     ${log.operation}
@@ -276,6 +288,7 @@ function renderMobileCard(log) {
         'DELETE': 'bg-error/20 text-error border-error/30'
     }[log.operation] || 'bg-surfaceHover text-textMuted border-border';
     
+    const keyValues = extractKeyValues(log.data, log.table_keys);
     const dataFull = JSON.stringify(log.data, null, 2);
     
     return `
@@ -290,7 +303,7 @@ function renderMobileCard(log) {
                     </div>
                     <div class="text-xs text-textMuted">
                         ID: ${escapeHtml(log.id)}<br>
-                        Keys: <span class="font-mono" title="${escapeHtml(log.table_keys || '')}">${escapeHtml(log.table_keys || '-')}</span><br>
+                        Keys: <span class="font-mono" title="${escapeHtml(log.table_keys || '')}">${escapeHtml(keyValues)}</span><br>
                         TX: <span class="truncate max-w-[150px] font-mono" title="${escapeHtml(log.transaction_id)}">${escapeHtml(log.transaction_id)}</span><br>
                         LSN: <span class="font-mono text-[10px]" title="${escapeHtml(log.lsn || '')}">${escapeHtml(log.lsn || '-')}</span>
                     </div>
