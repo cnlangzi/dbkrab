@@ -418,7 +418,7 @@ function loadLogs() {
                 rangeEl.textContent = '';
             }
             
-            const logs = data.logs || [];
+            const logs = data.changes || [];
             
             if (logs.length === 0) {
                 document.getElementById('logs-container-desktop').innerHTML = `

@@ -364,7 +364,11 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 						pkValues = append(pkValues, fmt.Sprintf("%v", val))
 					}
 				}
-				tableKeysStr = strings.Join(pkValues, ",")
+				// Only set tableKeysStr if ALL PK fields are present; otherwise
+				// leave empty to avoid partial composite keys breaking exact-match filters
+				if len(pkValues) == len(pkFields) {
+					tableKeysStr = strings.Join(pkValues, ",")
+				}
 			}
 		}
 

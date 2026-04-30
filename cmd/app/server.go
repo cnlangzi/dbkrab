@@ -1556,7 +1556,7 @@ func (s *Server) handleMonitorBatches(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	return c.View(map[string]any{"success": true, "changes": logs})
+	return c.View(map[string]any{"success": true, "logs": logs})
 }
 
 // handleMonitorSkills handles GET /api/monitor/skills
@@ -1579,7 +1579,7 @@ func (s *Server) handleMonitorSkills(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	return c.View(map[string]any{"success": true, "changes": logs})
+	return c.View(map[string]any{"success": true, "logs": logs})
 }
 
 // handleMonitorSinks handles GET /api/monitor/sinks
@@ -1603,7 +1603,7 @@ func (s *Server) handleMonitorSinks(c *xun.Context) error {
 		return c.View(map[string]any{"success": false, "error": err.Error()})
 	}
 
-	return c.View(map[string]any{"success": true, "changes": logs})
+	return c.View(map[string]any{"success": true, "logs": logs})
 }
 
 // handleSnapshotStart handles POST /api/snapshot/start - starts a full table snapshot
