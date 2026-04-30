@@ -239,7 +239,10 @@ func (s *Store) GetChangesWithFilter(limit int, tableName, operation, txID, tabl
 		args = append(args, txID)
 	}
 	if tableKeys != "" {
-		query += " AND table_keys = ?"
+		// tableKeys filter searches the primary key value in the data JSON,
+		// not the table_keys column (which contains field name like "Id").
+		// The primary key field in the JSON data is lowercase "id".
+		query += " AND json_extract(data, '$.id') = ?"
 		args = append(args, tableKeys)
 	}
 
