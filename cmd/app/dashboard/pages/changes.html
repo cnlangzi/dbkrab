@@ -225,18 +225,7 @@ function copyJson(button) {
     }
 }
 
-// Extract primary key values from change.data using table_keys (comma-separated list)
-function extractKeyValues(data, tableKeys) {
-    if (!tableKeys || !data) return '-';
-    const keys = tableKeys.split(',');
-    const values = keys.map(k => {
-        const val = data[k.toLowerCase()];
-        return val !== undefined && val !== null ? String(val) : null;
-    }).filter(v => v !== null);
-    return values.length > 0 ? values.join(', ') : '-';
-}
-
-function renderDesktopRow(log) {
+function renderDesktopRow(change) {
     const opStyle = {
         'INSERT': 'bg-success/20 text-success border-success/30',
         'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
@@ -281,7 +270,7 @@ function renderDesktopRow(log) {
     `;
 }
 
-function renderMobileCard(log) {
+function renderMobileCard(change) {
     const opStyle = {
         'INSERT': 'bg-success/20 text-success border-success/30',
         'UPDATE_AFTER': 'bg-warning/20 text-warning border-warning/30',
