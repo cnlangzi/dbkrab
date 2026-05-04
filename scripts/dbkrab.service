@@ -9,16 +9,9 @@ User=dayi
 Group=dayi
 WorkingDirectory=/opt/dbkrab
 ExecStart=/opt/dbkrab/dbkrab
+Environment=HOME=/opt/dbkrab
 Restart=on-failure
 RestartSec=5
-StandardOutput=null
-StandardError=null
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/dbkrab /var/log/dbkrab
 
 [Install]
 WantedBy=multi-user.target

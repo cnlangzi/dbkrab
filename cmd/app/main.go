@@ -325,8 +325,8 @@ func main() {
 	}
 
 	go func() {
-		<-sigCh
-		log.Println("shutting down...")
+		sig := <-sigCh
+		log.Printf("Received %v, shutting down...", sig)
 		cancel()
 		changeCapturer.Stop()
 		if err := apiServer.Stop(); err != nil {
