@@ -7,8 +7,27 @@ set -e
 
 BINARY_PATH="/opt/dbkrab/dbkrab"
 INSTALL_DIR="/opt/dbkrab"
-CONFIG_SRC="${1:-config.yaml}"
-CONFIG_DEST="$INSTALL_DIR/config.yaml"
+CONFIG_SRC="${1:-config.yml}"
+CONFIG_DEST="$INSTALL_DIR/config.yml"
+
+# Check if process is running
+is_running() {
+    pgrep -f "$BINARY_PATH" > /dev/null 2>&1
+}
+
+# Wait for process to stop, returns 0 if stopped
+wait_for_stop() {
+    local max_attempts=$1
+    local msg=$2
+    for ((i=1; i<=max_attempts; i++)); do
+        if ! is_running; then
+            [ -n "$msg" ] && echo "   $msg"
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
 
 echo "🦀 Deploying dbkrab..."
 
@@ -32,33 +51,29 @@ make build
 # ============================================
 echo "🛑 Stopping old process..."
 
-# Stop systemd service first (if installed and running)
-# This prevents systemd from auto-restarting the process during deployment
+# Stop systemd service first (this prevents restart before we can kill the process)
 if command -v systemctl &> /dev/null && systemctl is-active --quiet dbkrab 2>/dev/null; then
     echo "   Stopping systemd service..."
     sudo systemctl stop dbkrab || true
-    sleep 2
-fi
-
-# Kill any running dbkrab processes using full path
-# Use -f to match the full command line with specific path
-pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
-
-# Wait for process to fully exit and release the binary file
-echo "   Waiting for process to exit..."
-for i in {1..10}; do
-    if ! pgrep -f "$BINARY_PATH" > /dev/null 2>&1; then
-        break
-    fi
-    sleep 0.5
-done
-
-# Final check - force kill any remaining
-if pgrep -f "$BINARY_PATH" > /dev/null 2>&1; then
-    echo "   Force killing remaining processes..."
-    pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
     sleep 1
 fi
+
+# Send SIGTERM first for graceful shutdown, then SIGKILL if needed
+if is_running; then
+    echo "   Sending SIGTERM..."
+    pkill -TERM -f "$BINARY_PATH" 2>/dev/null || true
+    wait_for_stop 10 "Process stopped gracefully" || {
+        echo "   Force killing..."
+        pkill -9 -f "$BINARY_PATH" 2>/dev/null || true
+    }
+fi
+
+# Verify process is stopped, fail if still running
+if is_running; then
+    echo "   ERROR: Process still running, cannot deploy"
+    exit 1
+fi
+echo "   Process stopped"
 
 # ============================================
 # Step 4: Install binary (normal user)
@@ -97,7 +112,7 @@ if command -v systemctl &> /dev/null; then
         echo "   Dashboard: http://localhost:9021"
     else
         echo "❌ systemd service failed to start"
-        echo "Check log in config.yaml"
+        echo "Check log: tail -50 /opt/dbkrab/logs/dbkrab.log"
         exit 1
     fi
 else

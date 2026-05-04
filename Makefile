@@ -102,28 +102,20 @@ mod:
 	$(GO) mod tidy
 	$(GO) mod download
 
-## deploy: Deploy to /opt/dbkrab (build, install, restart via systemd)
+## deploy: Deploy to /opt/dbkrab (build, install binary and config)
 deploy:
 	@echo "Deploying to /opt/dbkrab..."
-	@chmod +x scripts/deploy.sh
-	@./scripts/deploy.sh config.yaml
-	@echo "Restarting via systemd..."
-	@sudo systemctl restart dbkrab
-	@sleep 3
-	@if systemctl is-active --quiet dbkrab; then \
-		echo "✅ Deployed and started"; \
-	else \
-		echo "❌ Failed to start"; \
-	fi
+	@./scripts/deploy.sh config.yml
+	@echo "Binary deployed"
 
-## deploy-systemd: Deploy and install systemd service
-deploy-systemd: deploy
-	@echo "Installing systemd service..."
+## install: Deploy and setup systemd service
+install: deploy
+	@echo "Setting up systemd service..."
 	@sudo cp scripts/dbkrab.service /etc/systemd/system/
 	@sudo systemctl daemon-reload
 	@sudo systemctl enable dbkrab
 	@sudo systemctl restart dbkrab
-	@echo "✅ systemd service installed and started"
+	@echo "✅ Installed and started"
 
 ## status: Show service status
 status:
@@ -146,15 +138,15 @@ logs:
 ## stop: Stop dbkrab (via systemd)
 stop:
 	@echo "Stopping dbkrab..."
-	@sudo systemctl stop dbkrab 2>/dev/null || echo "Service not installed, using pkill..."
-	@pkill -f /opt/dbkrab/dbkrab 2>/dev/null || true
+	@sudo systemctl stop dbkrab
+	@sleep 1
 	@echo "✅ Stopped"
 
 ## start: Start dbkrab (via systemd)
 start:
 	@echo "Starting dbkrab..."
 	@sudo systemctl start dbkrab
-	@sleep 2
+	@sleep 3
 	@if systemctl is-active --quiet dbkrab; then \
 		echo "✅ Started"; \
 	else \
@@ -162,34 +154,24 @@ start:
 	fi
 
 ## restart: Restart dbkrab (via systemd)
-restart:
-	@echo "Restarting dbkrab..."
-	@sudo systemctl restart dbkrab
-	@sleep 3
-	@if systemctl is-active --quiet dbkrab; then \
-		echo "✅ Restarted"; \
-	else \
-		echo "❌ Failed to restart"; \
-	fi
+restart: stop start
 
 ## reset: Reset dbkrab state (clear DB and logs under /opt/dbkrab) and restart via systemd
 reset:
 	@echo "Resetting dbkrab state..."
-	@echo "Stopping dbkrab..."
-	@sudo systemctl stop dbkrab 2>/dev/null || true
-	@sleep 2
+	@make stop || true
+	@sleep 1
 	@echo "Deleting app data files..."
 	@rm -rf /opt/dbkrab/data/app/*
 	@echo "Deleting sinks data files..."
 	@rm -rf /opt/dbkrab/data/sinks/*/*.db /opt/dbkrab/data/sinks/*/*.db-shm /opt/dbkrab/data/sinks/*/*.db-wal
 	@echo "Deleting logs..."
-	@rm -rf /opt/dbkrab/logs/*
-	@mkdir -p /opt/dbkrab/logs
-	@echo "Starting dbkrab via systemd..."
-	@sudo systemctl start dbkrab
-	@sleep 3
+	@rm -f /opt/dbkrab/logs/*.log
+	@touch /opt/dbkrab/logs/dbkrab.log
+	@chmod 666 /opt/dbkrab/logs/dbkrab.log
+	@make start
 	@if systemctl is-active --quiet dbkrab; then \
-		echo "✅ dbkrab restarted via systemd"; \
+		echo "✅ dbkrab reset complete"; \
 	else \
 		echo "❌ dbkrab failed to start"; \
 	fi
