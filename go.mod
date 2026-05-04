@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/Knetic/govaluate v3.0.0+incompatible
 	github.com/bytedance/sonic v1.15.0
-	github.com/cnlangzi/sqlite v0.0.4
+	github.com/cnlangzi/sqlite v0.0.5
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
