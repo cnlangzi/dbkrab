@@ -13,8 +13,8 @@ github.com/bytedance/sonic/loader v0.5.0 h1:gXH3KVnatgY7loH5/TkeVyXPfESoqSBSBEiD
 github.com/bytedance/sonic/loader v0.5.0/go.mod h1:AR4NYCk5DdzZizZ5djGqQ92eEhCCcdf5x77udYiSJRo=
 github.com/cloudwego/base64x v0.1.6 h1:t11wG9AECkCDk5fMSoxmufanudBtJ+/HemLstXDLI2M=
 github.com/cloudwego/base64x v0.1.6/go.mod h1:OFcloc187FXDaYHvrNIjxSe8ncn0OOM8gEHfghB2IPU=
-github.com/cnlangzi/sqlite v0.0.4 h1:COPJi/UeFY973LKR5D8n8pG+xt8wOrHJyqHisxDtNY8=
-github.com/cnlangzi/sqlite v0.0.4/go.mod h1:ZFzkDD6M7EOGBfPtrD4lMe/0nYrOr1bVfOK0o3wEVbs=
+github.com/cnlangzi/sqlite v0.0.5 h1:H63klh9H5tlH69oixaC89JzJnoCmpc4ufrGBfihxBwU=
+github.com/cnlangzi/sqlite v0.0.5/go.mod h1:ZFzkDD6M7EOGBfPtrD4lMe/0nYrOr1bVfOK0o3wEVbs=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
