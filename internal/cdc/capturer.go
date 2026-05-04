@@ -170,7 +170,7 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 
 	// Write changes to cdc.db store
 	var insertedCount int
-	var lastLSN string
+	lastLSN := hex.EncodeToString(globalMaxLSN)
 	if c.Store != nil && len(allChanges) > 0 {
 		coreChanges := c.convertToCoreChanges(allChanges)
 		n, err := c.Store.Write(coreChanges)
@@ -180,15 +180,17 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		}
 		insertedCount = n
 
-		// Update poller state on every poll cycle to keep last_poll_time current
-		lastLSN = hex.EncodeToString(globalMaxLSN)
-		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
-			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
-			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
-		}
-
 		if err := c.Store.Flush(); err != nil {
 			slog.Warn("ChangeCapturer: failed to flush store", "error", err)
+			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
+		}
+	}
+
+	// Always update poller state on every poll cycle for liveness monitoring.
+	// This updates last_poll_time even when there are no changes (idle state).
+	if c.Store != nil {
+		if err := c.Store.UpdatePollerState(lastLSN, len(allChanges), insertedCount); err != nil {
+			slog.Warn("ChangeCapturer: failed to update poller state", "error", err)
 			return &core.CaptureResult{NextCapturer: core.CapturerCDC}
 		}
 	}
