@@ -107,9 +107,9 @@ function renderSkillsList(skills) {
         const errorHtml = skill.error ? `<p class="text-xs text-error mt-1 truncate" title="${skill.error}">⚠️ ${skill.error}</p>` : '';
         
         html += `
-            <div class="block p-4 hover:bg-surfaceHover transition-colors group relative">
+            <a href="/skills/edit/${skill.id}" class="block p-4 hover:bg-surfaceHover transition-colors group relative">
                 <div class="flex items-start justify-between">
-                    <a href="/skills/edit/${skill.id}" class="flex-1 min-w-0">
+                    <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-2">
                             <span class="px-2 py-0.5 rounded text-xs font-medium ${statusClass}">${statusText}</span>
                             <h4 class="text-base font-semibold text-text truncate">${skill.name}</h4>
@@ -120,13 +120,12 @@ function renderSkillsList(skills) {
                             <span>📊 ${skill.tables ? skill.tables.length : 0} tables</span>
                             ${skill.load_time ? `<span>🕐 ${skill.load_time}</span>` : ''}
                         </div>
-                    </a>
+                    </div>
                     <div class="flex items-center gap-2 flex-shrink-0 ml-2">
                         <button
-                            onclick="deleteSkill(this)"
                             data-skill-id="${skill.id}"
                             data-skill-name="${skill.name}"
-                            class="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                            class="delete-btn p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                             title="Delete skill"
                         >
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -138,32 +137,52 @@ function renderSkillsList(skills) {
                         </svg>
                     </div>
                 </div>
-            </div>
+            </a>
         `;
     });
     
     container.innerHTML = html;
 }
 
-async function deleteSkill(btn) {
+// Event delegation for delete buttons
+container.addEventListener('click', function(e) {
+    const btn = e.target.closest('.delete-btn');
+    if (!btn) return;
+    
+    e.stopPropagation();
+    e.preventDefault();
+    
     const id = btn.dataset.skillId;
     const name = btn.dataset.skillName;
     if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) {
         return;
     }
     
+    deleteSkill(id);
+});
+
+async function deleteSkill(id) {
     try {
         const response = await fetch(`/api/skills/${id}`, {
             method: 'DELETE'
         });
-        if (!response.ok) {
-            alert('Failed to delete skill: HTTP ' + response.status);
+        
+        // Handle 204 No Content
+        if (response.status === 204 || response.status === 200) {
+            loadSkillsList();
             return;
         }
-        const data = await response.json();
+        
+        // Parse JSON body for other responses
+        let data;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            data = { success: false, error: 'Unexpected response format' };
+        }
         
         if (data.success) {
-            // Reload the list
             loadSkillsList();
         } else {
             alert('Failed to delete skill: ' + (data.error || 'Unknown error'));
