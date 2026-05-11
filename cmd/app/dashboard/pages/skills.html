@@ -82,6 +82,17 @@ async function loadSkillsList() {
     }
 }
 
+// Track deleting state per skill id
+const deletingSkills = new Set();
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function renderSkillsList(skills) {
     const container = document.getElementById('skills-list');
     
@@ -102,19 +113,23 @@ function renderSkillsList(skills) {
     skills.forEach(skill => {
         const statusClass = skill.status === 'error' ? 'bg-error/20 text-error' : 'bg-success/20 text-success';
         const statusText = skill.status === 'error' ? 'Error' : 'Active';
+        const escapedName = escapeHtml(skill.name);
+        const escapedDesc = escapeHtml(skill.description || '');
+        const escapedError = escapeHtml(skill.error || '');
         
         // Build error message if present
-        const errorHtml = skill.error ? `<p class="text-xs text-error mt-1 truncate" title="${skill.error}">⚠️ ${skill.error}</p>` : '';
+        const errorHtml = skill.error ? `<p class="text-xs text-error mt-1 truncate" title="${escapedError}">⚠️ ${escapedError}</p>` : '';
         
         html += `
-            <a href="/skills/edit/${skill.id}" class="block p-4 hover:bg-surfaceHover transition-colors group relative">
-                <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0">
+            <div class="block p-4 hover:bg-surfaceHover transition-colors group relative">
+                <a href="/skills/edit/${skill.id}" class="absolute inset-0" tabindex="-1" aria-hidden="true"></a>
+                <div class="flex items-start justify-between relative z-10">
+                    <div class="flex-1 min-w-0 pr-16">
                         <div class="flex items-center gap-2 mb-2">
                             <span class="px-2 py-0.5 rounded text-xs font-medium ${statusClass}">${statusText}</span>
-                            <h4 class="text-base font-semibold text-text truncate">${skill.name}</h4>
+                            <h4 class="text-base font-semibold text-text truncate">${escapedName}</h4>
                         </div>
-                        ${skill.description ? `<p class="text-sm text-textMuted truncate">${skill.description}</p>` : ''}
+                        ${skill.description ? `<p class="text-sm text-textMuted truncate">${escapedDesc}</p>` : ''}
                         ${errorHtml}
                         <div class="flex items-center gap-3 mt-2 text-xs text-textMuted">
                             <span>📊 ${skill.tables ? skill.tables.length : 0} tables</span>
@@ -124,20 +139,17 @@ function renderSkillsList(skills) {
                     <div class="flex items-center gap-2 flex-shrink-0 ml-2">
                         <button
                             data-skill-id="${skill.id}"
-                            data-skill-name="${skill.name}"
-                            class="delete-btn p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                            data-skill-name="${escapedName}"
+                            class="delete-btn p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors opacity-60 hover:opacity-100 focus:opacity-100"
                             title="Delete skill"
                         >
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                             </svg>
                         </button>
-                        <svg class="w-5 h-5 text-textMuted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                        </svg>
                     </div>
                 </div>
-            </a>
+            </div>
         `;
     });
     
@@ -145,19 +157,25 @@ function renderSkillsList(skills) {
 }
 
 // Event delegation for delete buttons
-container.addEventListener('click', function(e) {
+document.getElementById('skills-list').addEventListener('click', function(e) {
     const btn = e.target.closest('.delete-btn');
     if (!btn) return;
     
     e.stopPropagation();
-    e.preventDefault();
     
     const id = btn.dataset.skillId;
     const name = btn.dataset.skillName;
+    
+    // Prevent double-click
+    if (deletingSkills.has(id)) {
+        return;
+    }
+    
     if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) {
         return;
     }
     
+    deletingSkills.add(id);
     deleteSkill(id);
 });
 
@@ -169,6 +187,7 @@ async function deleteSkill(id) {
         
         // Handle 204 No Content
         if (response.status === 204 || response.status === 200) {
+            deletingSkills.delete(id);
             loadSkillsList();
             return;
         }
@@ -182,12 +201,14 @@ async function deleteSkill(id) {
             data = { success: false, error: 'Unexpected response format' };
         }
         
+        deletingSkills.delete(id);
         if (data.success) {
             loadSkillsList();
         } else {
             alert('Failed to delete skill: ' + (data.error || 'Unknown error'));
         }
     } catch (err) {
+        deletingSkills.delete(id);
         alert('Error deleting skill: ' + err.message);
     }
 }
