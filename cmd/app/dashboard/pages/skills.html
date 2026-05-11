@@ -107,9 +107,9 @@ function renderSkillsList(skills) {
         const errorHtml = skill.error ? `<p class="text-xs text-error mt-1 truncate" title="${skill.error}">⚠️ ${skill.error}</p>` : '';
         
         html += `
-            <a href="/skills/edit/${skill.id}" class="block p-4 hover:bg-surfaceHover transition-colors">
+            <div class="block p-4 hover:bg-surfaceHover transition-colors group relative">
                 <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0">
+                    <a href="/skills/edit/${skill.id}" class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-2">
                             <span class="px-2 py-0.5 rounded text-xs font-medium ${statusClass}">${statusText}</span>
                             <h4 class="text-base font-semibold text-text truncate">${skill.name}</h4>
@@ -120,16 +120,57 @@ function renderSkillsList(skills) {
                             <span>📊 ${skill.tables ? skill.tables.length : 0} tables</span>
                             ${skill.load_time ? `<span>🕐 ${skill.load_time}</span>` : ''}
                         </div>
+                    </a>
+                    <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <button
+                            onclick="deleteSkill(this)"
+                            data-skill-id="${skill.id}"
+                            data-skill-name="${skill.name}"
+                            class="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                            title="Delete skill"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                        <svg class="w-5 h-5 text-textMuted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
                     </div>
-                    <svg class="w-5 h-5 text-textMuted flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                    </svg>
                 </div>
-            </a>
+            </div>
         `;
     });
     
     container.innerHTML = html;
+}
+
+async function deleteSkill(btn) {
+    const id = btn.dataset.skillId;
+    const name = btn.dataset.skillName;
+    if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/skills/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            alert('Failed to delete skill: HTTP ' + response.status);
+            return;
+        }
+        const data = await response.json();
+        
+        if (data.success) {
+            // Reload the list
+            loadSkillsList();
+        } else {
+            alert('Failed to delete skill: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error deleting skill: ' + err.message);
+    }
 }
 
 // Initial load
