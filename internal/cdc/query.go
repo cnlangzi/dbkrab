@@ -215,7 +215,9 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 		var seqval []byte
 		if idx, ok := colIndex["__$seqval"]; ok {
 			if s, ok := dest[idx].(scannerpkg.DBType); ok {
-				if val, err := s.Value(); err == nil && val != nil {
+				if val, err := s.Value(); err != nil {
+					slog.Warn("GetChanges: failed to extract __$seqval", "error", err)
+				} else if val != nil {
 					if b, ok := val.([]byte); ok {
 						seqval = b
 					}

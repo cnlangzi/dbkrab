@@ -322,6 +322,47 @@ func TestComputeNativeID_DifferentInputsDifferentIDs(t *testing.T) {
 	}
 }
 
+// TestComputeNativeID_Format verifies the exact ID format (hex:hex:op)
+func TestComputeNativeID_Format(t *testing.T) {
+	// Leading zeros must be preserved
+	lsn := []byte{0x00, 0x00, 0x00, 0x10}
+	seqval := []byte{0x00, 0x00, 0x0b}
+	op := 2
+
+	got := ComputeNativeID(lsn, seqval, op)
+	want := "00000010:00000b:2"
+
+	if got != want {
+		t.Fatalf("unexpected native ID format: got %q, want %q", got, want)
+	}
+}
+
+// TestComputeNativeID_EmptyLSNOrSeqVal returns empty string on empty/nil inputs
+func TestComputeNativeID_EmptyLSNOrSeqVal(t *testing.T) {
+	tests := []struct {
+		name   string
+		lsn    []byte
+		seqval []byte
+		op     int
+		want   string
+	}{
+		{"nil LSN", nil, []byte{0x01}, 2, ""},
+		{"nil SeqVal", []byte{0x0a}, nil, 3, ""},
+		{"empty LSN", []byte{}, []byte{0x01}, 2, ""},
+		{"empty SeqVal", []byte{0x0a}, []byte{}, 3, ""},
+		{"both nil", nil, nil, 2, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeNativeID(tt.lsn, tt.seqval, tt.op)
+			if got != "" {
+				t.Errorf("ComputeNativeID(%v, %v, %d) = %q, want empty string", tt.lsn, tt.seqval, tt.op, got)
+			}
+		})
+	}
+}
+
 // TestChangeCapturer_Stop verifies Stop sets stopped flag and closes channel
 func TestChangeCapturer_Stop(t *testing.T) {
 	capturer := &ChangeCapturer{

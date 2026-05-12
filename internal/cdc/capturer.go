@@ -414,6 +414,12 @@ func (l LSN) Compare(other []byte) int {
 }
 
 // ComputeNativeID computes a native CDC row ID from LSN tuple.
+// Returns empty string if LSN or SeqVal is empty/nil, since such values
+// cannot produce a reliable unique identifier.
 func ComputeNativeID(lsn, seqval []byte, op int) string {
+	if len(lsn) == 0 || len(seqval) == 0 {
+		slog.Warn("ComputeNativeID called with empty LSN or SeqVal", "lsn_len", len(lsn), "seqval_len", len(seqval), "op", op)
+		return ""
+	}
 	return hex.EncodeToString(lsn) + ":" + hex.EncodeToString(seqval) + ":" + strconv.Itoa(op)
 }
