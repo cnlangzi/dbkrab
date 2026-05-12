@@ -128,8 +128,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 					return transformErr
 				}, retry.DefaultRetryConfig(), "transform")
 				if err != nil {
-					slog.Error("transform error", "error", err, "batch_id", batchCtx.BatchID)
-					r.writeToDLQ(changes, transformErr, "transform")
+					finalErr := transformErr
+					if finalErr == nil {
+						finalErr = err
+					}
+					slog.Error("transform error", "error", finalErr, "batch_id", batchCtx.BatchID)
+					r.writeToDLQ(changes, finalErr, "transform")
 				} else {
 					// SinkWrite phase with independent timing
 					if len(sinks) > 0 {
