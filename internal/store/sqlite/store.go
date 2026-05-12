@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -126,16 +125,11 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 		// Table keys are stored as comma-separated string
 		tableKeysStr := change.TableKeys
 
-		// Use pre-computed ID from poller layer (computed using core.ComputeChangeID)
-		// If not available (e.g., changes from other sources), compute it here
+		// Use pre-computed native CDC ID from poller layer
+		// __$start_lsn + __$seqval + __$operation is SQL Server CDC's true unique key
 		id := change.ID
 		if id == "" {
-			// Fallback: compute hash using the change's own TransactionID
-			// Preserve original transaction identity, don't derive from batch
-			txID := change.TransactionID
-			hashInput := txID + change.Table + string(dataJSON) + lsnStr + change.Operation.String()
-			hash := sha256.Sum256([]byte(hashInput))
-			id = hex.EncodeToString(hash[:16])
+			return 0, fmt.Errorf("change ID is empty: poller layer must compute native CDC ID using LSN+SeqVal+Op tuple")
 		}
 
 		res, err := sqlTx.Exec(

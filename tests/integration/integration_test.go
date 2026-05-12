@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"encoding/hex"
+	"fmt"
 	"context"
 	"database/sql"
 	"os"
@@ -202,6 +204,14 @@ func TestIntegrationWithSQLite(t *testing.T) {
 		// Convert core.Change format for store
 		coreChanges := make([]core.Change, len(changes))
 		for i, c := range changes {
+			// Generate ID from LSN+SeqVal+Op (native CDC unique key)
+			var seqval []byte
+			if len(c.SeqVal) > 0 {
+				seqval = c.SeqVal
+			} else {
+				seqval = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, byte(i + 1)}
+			}
+			changeID := fmt.Sprintf("%s:%s:%d", hex.EncodeToString(c.LSN), hex.EncodeToString(seqval), c.Operation)
 			coreChanges[i] = core.Change{
 				Table:         c.Table,
 				TransactionID: c.TransactionID,
@@ -209,6 +219,7 @@ func TestIntegrationWithSQLite(t *testing.T) {
 				Operation:     core.Operation(c.Operation),
 				Data:          c.Data,
 				CommitTime:    c.CommitTime,
+				ID:            changeID,
 			}
 		}
 
@@ -323,6 +334,7 @@ func TestSQLiteStoreWrites(t *testing.T) {
 				"stock":       100,
 			},
 			CommitTime: time.Now(),
+			ID:        "0000000100000001:0000000000000001:2",
 		},
 	}
 

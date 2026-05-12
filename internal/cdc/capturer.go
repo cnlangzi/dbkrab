@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,15 +146,18 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		// Convert to core.CaptureChange (map) and track max LSN per table
 		var tableMaxLSN []byte
 		for _, cc := range cdcChanges {
-			hashID := ComputeChangeID(cc.TransactionID, cc.Table, cc.Data, cc.LSN, cc.Operation)
+			// Use native CDC unique key: __$start_lsn + __$seqval + __$operation
+			// This is the actual row-level unique identifier guaranteed by SQL Server CDC engine
+			id := ComputeNativeID(cc.LSN, cc.SeqVal, cc.Operation)
 			change := core.CaptureChange{
 				"table":          cc.Table,
 				"transaction_id": cc.TransactionID,
 				"lsn":            cc.LSN,
+				"seqval":         cc.SeqVal,
 				"operation":      cc.Operation,
 				"data":           cc.Data,
 				"commit_time":    cc.CommitTime,
-				"id":             hashID,
+				"id":             id,
 			}
 			allChanges = append(allChanges, change)
 
@@ -410,62 +413,7 @@ func (l LSN) Compare(other []byte) int {
 	return 0
 }
 
-// ComputeChangeID computes a content-based hash ID for a change.
-// Uses FNV-1a hash which has better distribution than simple polynomial hash.
-func ComputeChangeID(txID, table string, data map[string]interface{}, lsn []byte, op int) string {
-	// Initialize FNV-1a hash
-	const (
-		fnvOffset uint64 = 14695981039346656037
-		fnvPrime  uint64 = 1099511628211
-	)
-
-	hash := fnvOffset
-
-	// Mix in txID
-	for _, c := range txID {
-		hash ^= uint64(c)
-		hash *= fnvPrime
-	}
-
-	// Mix in table
-	for _, c := range table {
-		hash ^= uint64(c)
-		hash *= fnvPrime
-	}
-
-	// Mix in LSN bytes
-	for _, b := range lsn {
-		hash ^= uint64(b)
-		hash *= fnvPrime
-	}
-
-	// Mix in operation
-	hash ^= uint64(op)
-	hash *= fnvPrime
-
-	// Mix in data keys and values for differentiation (sorted for deterministic hash)
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := data[k]
-		for _, c := range k {
-			hash ^= uint64(c)
-			hash *= fnvPrime
-		}
-		switch val := v.(type) {
-		case int:
-			hash ^= uint64(val)
-			hash *= fnvPrime
-		case string:
-			for _, c := range val {
-				hash ^= uint64(c)
-				hash *= fnvPrime
-			}
-		}
-	}
-
-	return fmt.Sprintf("%016x", hash)
+// ComputeNativeID computes a native CDC row ID from LSN tuple.
+func ComputeNativeID(lsn, seqval []byte, op int) string {
+	return hex.EncodeToString(lsn) + ":" + hex.EncodeToString(seqval) + ":" + strconv.Itoa(op)
 }

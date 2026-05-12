@@ -291,42 +291,34 @@ func TestLSN_Compare(t *testing.T) {
 	}
 }
 
-// TestComputeChangeID_Deterministic verifies same inputs produce same ID
-func TestComputeChangeID_Deterministic(t *testing.T) {
-	id1 := ComputeChangeID("tx-abc-123", "orders", map[string]interface{}{"id": 42, "name": "test"}, []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}, 2)
-	id2 := ComputeChangeID("tx-abc-123", "orders", map[string]interface{}{"id": 42, "name": "test"}, []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}, 2)
+// TestComputeNativeID_Deterministic verifies same inputs produce same ID
+func TestComputeNativeID_Deterministic(t *testing.T) {
+	lsn := []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}
+	seqval := []byte{0x01, 0x02, 0x03, 0x04}
+	id1 := ComputeNativeID(lsn, seqval, 2)
+	id2 := ComputeNativeID(lsn, seqval, 2)
 
 	if id1 != id2 {
 		t.Errorf("Same inputs must produce same ID: %s != %s", id1, id2)
 	}
 }
 
-// TestComputeChangeID_DifferentInputsDifferentIDs verifies different inputs produce different IDs
-func TestComputeChangeID_DifferentInputsDifferentIDs(t *testing.T) {
-	baseInput := map[string]interface{}{"id": 42, "name": "test"}
+// TestComputeNativeID_DifferentInputsDifferentIDs verifies different inputs produce different IDs
+func TestComputeNativeID_DifferentInputsDifferentIDs(t *testing.T) {
 	lsn := []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}
+	seqval := []byte{0x01, 0x02, 0x03, 0x04}
 
-	baseID := ComputeChangeID("tx-1", "orders", baseInput, lsn, 2)
+	baseID := ComputeNativeID(lsn, seqval, 2)
 
-	// Vary each parameter
-	differentTxID := ComputeChangeID("tx-2", "orders", baseInput, lsn, 2)
-	differentTable := ComputeChangeID("tx-1", "products", baseInput, lsn, 2)
-	differentData := ComputeChangeID("tx-1", "orders", map[string]interface{}{"id": 99}, lsn, 2)
-	differentLSN := ComputeChangeID("tx-1", "orders", baseInput, []byte{0xFF}, 2)
-	differentOp := ComputeChangeID("tx-1", "orders", baseInput, lsn, 4)
+	// Different components should produce different IDs
+	differentLSN := ComputeNativeID([]byte{0xFF}, seqval, 2)
+	differentSeqval := ComputeNativeID(lsn, []byte{0xFF}, 2)
+	differentOp := ComputeNativeID(lsn, seqval, 4)
 
-	for _, id := range []string{differentTxID, differentTable, differentData, differentLSN, differentOp} {
+	for _, id := range []string{differentLSN, differentSeqval, differentOp} {
 		if baseID == id {
 			t.Errorf("Different inputs must produce different IDs: %s == %s", baseID, id)
 		}
-	}
-}
-
-// TestComputeChangeID_Length verifies ID is exactly 16 characters
-func TestComputeChangeID_Length(t *testing.T) {
-	id := ComputeChangeID("tx", "table", map[string]interface{}{}, []byte{1, 2, 3}, 2)
-	if len(id) != 16 {
-		t.Errorf("Expected ID length 16, got %d", len(id))
 	}
 }
 
