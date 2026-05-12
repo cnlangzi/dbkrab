@@ -21,7 +21,6 @@ type Change struct {
 	Table         string
 	TransactionID string
 	LSN           []byte
-	SeqVal        []byte // Sequence value within transaction (native CDC unique key part 2)
 	Operation     int       // 1=DELETE, 2=INSERT, 3=UPDATE(before), 4=UPDATE(after)
 	CommitTime    time.Time // Transaction commit time from LSN
 	Data          map[string]interface{}
@@ -211,17 +210,6 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 			}
 		}
 
-		// Extract seqval (sequence value within transaction - native CDC unique key part 2)
-		var seqval []byte
-		if idx, ok := colIndex["__$seqval"]; ok {
-			if s, ok := dest[idx].(scannerpkg.DBType); ok {
-				if val, err := s.Value(); err == nil && val != nil {
-					if b, ok := val.([]byte); ok {
-						seqval = b
-					}
-				}
-			}
-		}
 
 		// Extract commit time
 		var commitTime time.Time
@@ -256,7 +244,7 @@ func (q *Querier) GetChanges(ctx context.Context, captureInstance string, tableN
 			Table:         tableName,
 			TransactionID: txID,
 			LSN:           lsn,
-			SeqVal:        seqval,
+
 			Operation:     int(op),
 			CommitTime:    commitTime,
 			Data:          data,

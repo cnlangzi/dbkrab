@@ -552,3 +552,51 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 	assert.NotEqual(t, ids[0], ids[1])
 	assert.Greater(t, len(ids[0]), 16, "ID should be longer than 16 chars (native LSN tuple format)")
 }
+
+
+// TestStore_Write_DuplicateID_IsIgnoredAndLogged verifies duplicate IDs are deduped
+func TestStore_Write_DuplicateID_IsIgnoredAndLogged(t *testing.T) {
+	db, tmpDir := newTestDB(t)
+	defer func() {
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	store, err := New(db)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// Two changes with identical ID (same LSN:table:pk:op) but different data
+	duplicateID := "0000000000000010:users:1:2"
+	changes := []core.Change{
+		{
+			Table:         "users",
+			TransactionID: "tx-dup",
+			LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
+			Operation:     core.OpInsert,
+			Data:          map[string]interface{}{"id": 1, "name": "alice"},
+			ID:            duplicateID,
+		},
+		{
+			Table:         "users",
+			TransactionID: "tx-dup",
+			LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
+			Operation:     core.OpInsert,
+			Data:          map[string]interface{}{"id": 2, "name": "bob"},
+			ID:            duplicateID, // same ID - should be ignored
+		},
+	}
+
+	// Write should succeed, but only 1 row inserted (second ignored)
+	count, err := store.Write(changes)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "only 1 change should be inserted (duplicate ignored)")
+
+	// Verify only 1 row exists
+	retrieved, err := store.GetChanges(10)
+	require.NoError(t, err)
+	assert.Len(t, retrieved, 1)
+	dataMap, ok := retrieved[0]["data"].(map[string]interface{})
+	require.True(t, ok, "data should be a map")
+	assert.Equal(t, "alice", dataMap["name"])
+}

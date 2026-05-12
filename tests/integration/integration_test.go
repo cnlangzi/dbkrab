@@ -1,11 +1,11 @@
 package integration
 
 import (
-	"encoding/hex"
-	"fmt"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"os"
+	"strconv"
 	"path/filepath"
 	"testing"
 	"time"
@@ -204,14 +204,8 @@ func TestIntegrationWithSQLite(t *testing.T) {
 		// Convert core.Change format for store
 		coreChanges := make([]core.Change, len(changes))
 		for i, c := range changes {
-			// Generate ID from LSN+SeqVal+Op (native CDC unique key)
-			var seqval []byte
-			if len(c.SeqVal) > 0 {
-				seqval = c.SeqVal
-			} else {
-				seqval = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, byte(i + 1)}
-			}
-			changeID := fmt.Sprintf("%s:%s:%d", hex.EncodeToString(c.LSN), hex.EncodeToString(seqval), c.Operation)
+			// ID format: hex(LSN):table:op (no PK available in mock)
+			changeID := hex.EncodeToString(c.LSN) + ":" + c.Table + ":" + strconv.Itoa(int(c.Operation))
 			coreChanges[i] = core.Change{
 				Table:         c.Table,
 				TransactionID: c.TransactionID,

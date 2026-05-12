@@ -126,10 +126,10 @@ func (s *Store) Write(changes []core.Change) (int, error) {
 		tableKeysStr := change.TableKeys
 
 		// Use pre-computed native CDC ID from poller layer
-		// __$start_lsn + __$seqval + __$operation is SQL Server CDC's true unique key
+		// ID format: hex(LSN):table:pk_values:op
 		id := change.ID
 		if id == "" {
-			return 0, fmt.Errorf("change ID is empty: poller layer must compute native CDC ID using LSN+SeqVal+Op tuple")
+			return 0, fmt.Errorf("change ID is empty: poller layer must compute native CDC ID")
 		}
 
 		res, err := sqlTx.Exec(

@@ -291,37 +291,6 @@ func TestLSN_Compare(t *testing.T) {
 	}
 }
 
-// TestComputeNativeID_Deterministic verifies same inputs produce same ID
-func TestComputeNativeID_Deterministic(t *testing.T) {
-	lsn := []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}
-	seqval := []byte{0x01, 0x02, 0x03, 0x04}
-	id1 := ComputeNativeID(lsn, seqval, 2)
-	id2 := ComputeNativeID(lsn, seqval, 2)
-
-	if id1 != id2 {
-		t.Errorf("Same inputs must produce same ID: %s != %s", id1, id2)
-	}
-}
-
-// TestComputeNativeID_DifferentInputsDifferentIDs verifies different inputs produce different IDs
-func TestComputeNativeID_DifferentInputsDifferentIDs(t *testing.T) {
-	lsn := []byte{0x00, 0x00, 0x2B, 0x00, 0x01, 0xD8}
-	seqval := []byte{0x01, 0x02, 0x03, 0x04}
-
-	baseID := ComputeNativeID(lsn, seqval, 2)
-
-	// Different components should produce different IDs
-	differentLSN := ComputeNativeID([]byte{0xFF}, seqval, 2)
-	differentSeqval := ComputeNativeID(lsn, []byte{0xFF}, 2)
-	differentOp := ComputeNativeID(lsn, seqval, 4)
-
-	for _, id := range []string{differentLSN, differentSeqval, differentOp} {
-		if baseID == id {
-			t.Errorf("Different inputs must produce different IDs: %s == %s", baseID, id)
-		}
-	}
-}
-
 // TestChangeCapturer_Stop verifies Stop sets stopped flag and closes channel
 func TestChangeCapturer_Stop(t *testing.T) {
 	capturer := &ChangeCapturer{

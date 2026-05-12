@@ -45,8 +45,7 @@ type Change struct {
 	Operation     Operation              `json:"operation"`
 	Data          map[string]interface{} `json:"data"`
 	CommitTime    time.Time              `json:"commit_time"` // Transaction commit time from source database
-	ID            string                 `json:"id"`          // Native CDC ID: LSN:SeqVal:Op (zero hash, guaranteed unique)
-	SeqVal        []byte                `json:"seqval"` // Sequence value within transaction (native CDC unique key part 2)
+	ID            string                 `json:"id"`          // Native CDC ID: LSN:table:pkeys:Op
 	TableKeys     string                `json:"table_keys"` // Primary key values (comma-separated)
 }
 
