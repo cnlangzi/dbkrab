@@ -135,9 +135,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 					slog.Error("transform error", "error", finalErr, "batch_id", batchCtx.BatchID)
 					r.writeToDLQ(changes, finalErr, "transform")
 				} else {
-					// SinkWrite phase with independent timing
+					// SinkWrite phase with retry (independent timing)
 					if len(sinks) > 0 {
-						if writeErr := r.pluginManager.SinkWrite(ctx, sinks, batchCtx); writeErr != nil {
+						if writeErr := retry.DoWithName(ctx, func() error {
+							return r.pluginManager.SinkWrite(ctx, sinks, batchCtx)
+						}, retry.DefaultRetryConfig(), "sinkwrite"); writeErr != nil {
 							slog.Error("sink write error", "error", writeErr, "batch_id", batchCtx.BatchID)
 						}
 					}
