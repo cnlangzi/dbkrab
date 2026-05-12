@@ -566,8 +566,8 @@ func TestStore_Write_DuplicateID_IsIgnoredAndLogged(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
-	// Two changes with identical ID (same LSN:SeqVal:Op) but different data
-	duplicateID := "0000000000000010:0000000000000001:2"
+	// Two changes with identical ID (same LSN:table:pk:op) but different data
+	duplicateID := "0000000000000010:users:1:2"
 	changes := []core.Change{
 		{
 			Table:         "users",

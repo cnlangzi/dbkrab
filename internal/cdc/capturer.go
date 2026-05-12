@@ -146,18 +146,13 @@ func (c *ChangeCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		// Convert to core.CaptureChange (map) and track max LSN per table
 		var tableMaxLSN []byte
 		for _, cc := range cdcChanges {
-			// Use native CDC unique key: __$start_lsn + __$seqval + __$operation
-			// This is the actual row-level unique identifier guaranteed by SQL Server CDC engine
-			id := ComputeNativeID(cc.LSN, cc.SeqVal, cc.Operation)
 			change := core.CaptureChange{
 				"table":          cc.Table,
 				"transaction_id": cc.TransactionID,
 				"lsn":            cc.LSN,
-				"seqval":         cc.SeqVal,
 				"operation":      cc.Operation,
 				"data":           cc.Data,
 				"commit_time":    cc.CommitTime,
-				"id":             id,
 			}
 			allChanges = append(allChanges, change)
 
@@ -356,7 +351,6 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 		opVal, _ := cc["operation"].(int)
 		data, _ := cc["data"].(map[string]interface{})
 		commitTime, _ := cc["commit_time"].(time.Time)
-		id, _ := cc["id"].(string)
 
 		// Get primary key values from schema cache (field names) and extract actual values from data
 		var tableKeysStr string
@@ -377,6 +371,8 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 			}
 		}
 
+		changeID := hex.EncodeToString(lsn) + ":" + table + ":" + tableKeysStr + ":" + strconv.Itoa(opVal)
+
 		changes = append(changes, core.Change{
 			Table:         table,
 			TransactionID: txID,
@@ -384,7 +380,7 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 			Operation:    core.Operation(opVal),
 			Data:         data,
 			CommitTime:   commitTime,
-			ID:           id,
+			ID:           changeID,
 			TableKeys:    tableKeysStr,
 		})
 	}
@@ -413,13 +409,4 @@ func (l LSN) Compare(other []byte) int {
 	return 0
 }
 
-// ComputeNativeID computes a native CDC row ID from LSN tuple.
-// Returns empty string if LSN or SeqVal is empty/nil, since such values
-// cannot produce a reliable unique identifier.
-func ComputeNativeID(lsn, seqval []byte, op int) string {
-	if len(lsn) == 0 || len(seqval) == 0 {
-		slog.Warn("ComputeNativeID called with empty LSN or SeqVal", "lsn_len", len(lsn), "seqval_len", len(seqval), "op", op)
-		return ""
-	}
-	return hex.EncodeToString(lsn) + ":" + hex.EncodeToString(seqval) + ":" + strconv.Itoa(op)
-}
+
