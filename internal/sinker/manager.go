@@ -159,6 +159,7 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.B
 		"databases", len(sinksByDB))
 
 	// Write to each database
+	var lastErr error
 	for dbName, dbSinks := range sinksByDB {
 		slog.Debug("SinkerManager.Write: writing to database",
 			"database", dbName,
@@ -216,12 +217,17 @@ func (m *Manager) Write(ctx context.Context, sinks []core.Sink, batchCtx *core.B
 			slog.Error("SinkerManager.Write: write failed for database, skipping",
 				"database", dbName,
 				"error", writeErr)
+			lastErr = writeErr
 			continue
 		}
 
 		slog.Debug("SinkerManager.Write: write completed",
 			"database", dbName,
 			"sinks_written", len(dbSinks))
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("sink write failed for one or more databases: %w", lastErr)
 	}
 
 	slog.Info("SinkerManager.Write: completed successfully",
