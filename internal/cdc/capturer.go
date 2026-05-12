@@ -377,6 +377,16 @@ func (c *ChangeCapturer) convertToCoreChanges(captureChanges []core.CaptureChang
 			}
 		}
 
+		// fn_cdc_get_net_changes_* does not include __$seqval, so ComputeNativeID
+		// degenerates to "{lsn}::{op}" and collides across rows sharing the same
+		// transaction LSN and operation.  Re-compute the ID using table name +
+		// primary key values when they are available; including the table name
+		// prevents cross-table collisions when the same transaction touches
+		// multiple tables whose PK values happen to be equal.
+		if tableKeysStr != "" {
+			id = hex.EncodeToString(lsn) + ":" + table + ":" + tableKeysStr + ":" + strconv.Itoa(opVal)
+		}
+
 		changes = append(changes, core.Change{
 			Table:         table,
 			TransactionID: txID,
