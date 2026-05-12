@@ -115,18 +115,21 @@ func (s *memStore) GetChangesWithLSN(lsn string) ([]core.Change, error) {
 	return nil, nil
 }
 
-// simplePluginManager implements core.PluginManager for testing
-type simplePluginManager struct {
-	pluginMgr *plugin.Manager
-	transformFn func(changes []core.Change) error
+// fakePluginManager implements core.PluginManager for testing with configurable failure injection.
+type fakePluginManager struct {
+	transformErr error // error to return from Transform
+	sinkWriteErr  error // error to return from SinkWrite
 }
 
-func (s *simplePluginManager) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) ([]core.Sink, error) {
-	return s.pluginMgr.Transform(ctx, changes, batchCtx)
+func (f *fakePluginManager) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) ([]core.Sink, error) {
+	if f.transformErr != nil {
+		return nil, f.transformErr
+	}
+	return nil, nil // no sinks if no error
 }
 
-func (s *simplePluginManager) SinkWrite(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext) error {
-	return s.pluginMgr.SinkWrite(ctx, sinks, batchCtx)
+func (f *fakePluginManager) SinkWrite(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext) error {
+	return f.sinkWriteErr
 }
 
 // testHarness holds test components
@@ -509,12 +512,11 @@ func TestFlow_CrossTableTransaction(t *testing.T) {
 	assert.Len(t, h.store.writes[0], 3)
 }
 
-// TestFlow_ExactlyOnce_SinkFailure tests that offsets are NOT advanced on sink failure
+// TestFlow_ExactlyOnce_SinkFailure tests that sink write failures are handled
+// independently from transform and exercise the new Transform/SinkWrite separation.
 func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.cleanup()
-
-	h.setupSkillFixtures()
 
 	txID := "tx-004"
 	changes := []core.Change{
@@ -528,20 +530,30 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 			}).Build(),
 	}
 
-	txs := groupByTransaction(changes)
-
 	// Set initial offset
 	//nolint:errcheck
 	h.offsetStore.Set("dbo.orders", "0000000001000000", "") //nolint:errcheck
 
-	// Simulate sink failure: Transform succeeds but SinkWrite fails
-	// This tests that SinkWrite errors don't affect offset tracking
-	// For this test we skip the actual plugin call and just verify store behavior
-	// Store is only written after successful handler completion
+	// Simulate sink write failure (transform succeeds, sink write fails)
+	// This exercises the new Transform/SinkWrite separation where error handling is independent.
+	fakeMgr := &fakePluginManager{
+		transformErr: nil,        // transform succeeds, returns no sinks
+		sinkWriteErr:  fmt.Errorf("sink write error: disk full"),
+	}
 
-	// Verify offset was NOT advanced (store not called due to failure simulation)
+	// Transform succeeds (returns empty sinks)
+	sinks, err := fakeMgr.Transform(context.Background(), changes, nil)
+	assert.NoError(t, err, "transform should succeed")
+	assert.Empty(t, sinks, "transform returns no sinks")
+
+	// SinkWrite fails independently
+	err = fakeMgr.SinkWrite(context.Background(), nil, nil)
+	assert.Error(t, err, "sink write should fail")
+	assert.Contains(t, err.Error(), "disk full", "sink write error should indicate failure")
+
+	// Verify offset was NOT advanced (store not called due to failure)
 	off, _ := h.offsetStore.Get("dbo.orders")
-	assert.Equal(t, "0000000001000000", off.LastLSN, "offset should NOT be advanced after handler failure")
+	assert.Equal(t, "0000000001000000", off.LastLSN, "offset should NOT be advanced after sink write failure")
 }
 
 // TestFlow_HandlerFailure_NonBlocking tests that store/offsets still advance after handler failure scenario
