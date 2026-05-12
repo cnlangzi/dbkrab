@@ -529,7 +529,6 @@ func TestFlow_ExactlyOnce_SinkFailure(t *testing.T) {
 	}
 
 	txs := groupByTransaction(changes)
-	tx := txs[0]
 
 	// Set initial offset
 	//nolint:errcheck
