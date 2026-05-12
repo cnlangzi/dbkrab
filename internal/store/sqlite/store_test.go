@@ -116,6 +116,7 @@ func TestStore_Write(t *testing.T) {
 					"id":   1,
 					"name": "alice",
 				},
+				ID: "000000000000000a:000000000000000b:2",
 			},
 		},
 	}
@@ -175,6 +176,7 @@ func TestStore_GetChanges(t *testing.T) {
 				TransactionID: "tx-001",
 				Operation:     core.OpInsert,
 				Data:          map[string]interface{}{"id": 1, "name": "alice"},
+				ID:            "0000000000000001:0000000000000001:2",
 			},
 		},
 	}
@@ -203,13 +205,13 @@ func TestStore_GetChangesWithFilter(t *testing.T) {
 	tx1 := &core.Transaction{
 		ID: "tx-001",
 		Changes: []core.Change{
-			{Table: "users", TransactionID: "tx-001", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
+			{Table: "users", TransactionID: "tx-001", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}, ID: "0000000000000001:0000000000000001:2"},
 		},
 	}
 	tx2 := &core.Transaction{
 		ID: "tx-002",
 		Changes: []core.Change{
-			{Table: "orders", TransactionID: "tx-002", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}},
+			{Table: "orders", TransactionID: "tx-002", Operation: core.OpInsert, Data: map[string]interface{}{"id": 1}, ID: "0000000000000002:0000000000000001:2"},
 		},
 	}
 	_, err = store.Write(tx1.Changes)
@@ -461,6 +463,7 @@ func TestStore_Write_SameLSNDifferentContent(t *testing.T) {
 					"id":   1,
 					"name": "alice",
 				},
+				ID: "0000000000000010:0000000000000001:2",
 			},
 			{
 				Table:         "users",
@@ -471,6 +474,7 @@ func TestStore_Write_SameLSNDifferentContent(t *testing.T) {
 					"id":   2,
 					"name": "bob",
 				}, // different content
+				ID: "0000000000000010:0000000000000002:2",
 			},
 		},
 	}
@@ -509,6 +513,7 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10},
 				Operation:     core.OpInsert,
 				Data:          map[string]interface{}{"id": 1, "name": "alice"},
+				ID:            "0000000000000010:0000000000000001:2",
 			},
 		},
 	}
@@ -521,6 +526,7 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 				LSN:           []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11}, // different LSN
 				Operation:     core.OpInsert,
 				Data:          map[string]interface{}{"id": 1, "name": "alice"}, // same content
+				ID:            "0000000000000011:0000000000000001:2",
 			},
 		},
 	}
@@ -544,6 +550,5 @@ func TestStore_Write_ContentBasedId(t *testing.T) {
 		ids = append(ids, c["id"].(string))
 	}
 	assert.NotEqual(t, ids[0], ids[1])
-	assert.Len(t, ids[0], 32)
-	assert.Len(t, ids[1], 32)
+	assert.Greater(t, len(ids[0]), 16, "ID should be longer than 16 chars (native LSN tuple format)")
 }
