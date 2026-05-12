@@ -102,17 +102,17 @@ func (m *Manager) Unload(name string) error {
 	return nil
 }
 
-// Transform processes a batch of changes through all SQL plugins with pull context.
+// Transform processes a batch of changes through all SQL plugins.
 // BatchCtx provides batch_id for observability logging.
 // Skill logs are written by the engine for each skill (per skill × operation).
-// Sink logs are written by the sinker for each sink write (per sink × table × operation).
+// Returns sinks for downstream use (SinkWrite separately).
 // Returns error if no SQL plugin is loaded (no skill pipeline available).
-func (m *Manager) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) error {
+func (m *Manager) Transform(ctx context.Context, changes []core.Change, batchCtx *core.BatchContext) ([]core.Sink, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if m.sqlPlugin == nil {
-		return fmt.Errorf("no SQL plugin loaded, skill pipeline unavailable")
+		return nil, fmt.Errorf("no SQL plugin loaded, skill pipeline unavailable")
 	}
 
 	var allSinks []core.Sink
@@ -130,13 +130,23 @@ func (m *Manager) Transform(ctx context.Context, changes []core.Change, batchCtx
 	// Skill logs are written internally by engine.HandleWithPull
 	sinks, err := m.sqlPlugin.HandleWithPull(tx, batchCtx, m.monitorDB)
 	if err != nil {
-		return fmt.Errorf("SQL plugin %s transform: %w", m.sqlPlugin.Name(), err)
+		return nil, fmt.Errorf("SQL plugin %s transform: %w", m.sqlPlugin.Name(), err)
 	}
 	allSinks = append(allSinks, sinks...)
 
+	return allSinks, nil
+}
+
+// SinkWrite routes sinks to appropriate writers based on Database field.
+// Receives sinks from Transform() output; these are not stored in CaptureResult.
+// Error handling for Transform and SinkWrite is independent.
+func (m *Manager) SinkWrite(ctx context.Context, sinks []core.Sink, batchCtx *core.BatchContext) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	// Route sinks to appropriate writers based on Database field
-	if len(allSinks) > 0 {
-		if err := m.swManager.Write(ctx, allSinks, batchCtx, m.monitorDB); err != nil {
+	if len(sinks) > 0 {
+		if err := m.swManager.Write(ctx, sinks, batchCtx, m.monitorDB); err != nil {
 			return fmt.Errorf("sink write: %w", err)
 		}
 	}

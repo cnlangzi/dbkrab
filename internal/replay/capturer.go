@@ -8,6 +8,12 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/core"
 )
 
+// Store defines the interface for replay operations
+type Store interface {
+	GetLSNs() ([]string, error)
+	GetChangesWithLSN(lsn string) ([]core.Change, error)
+}
+
 // ReplayCapturer fetches CDC changes from the store for replay.
 // It reads stored changes from cdc.db grouped by LSN.
 type ReplayCapturer struct {

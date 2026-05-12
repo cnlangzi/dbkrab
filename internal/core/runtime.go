@@ -13,37 +13,39 @@ import (
 	"github.com/cnlangzi/dbkrab/internal/retry"
 )
 
-// Transformer interface for ETL processing of CDC changes
-type Transformer interface {
-	Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) error
-}
-
 // Runtime orchestrates data capture and ETL processing.
 // It manages all three capturers (CDC, Snapshot, Replay) and handles
-// post-fetch logic (Transformer, DLQ, state management).
+// post-fetch logic (Transform, SinkWrite, DLQ, state management).
 // Note: Store is now internal to ChangeCapturer; Runtime does not manage it.
 type Runtime struct {
-	capturers   map[CapturerName]Capturer
-	current     CapturerName
-	transformer Transformer
-	dlq         *dlq.DLQ
-	monitorDB   *monitor.DB
-	mu          sync.RWMutex
+	capturers map[CapturerName]Capturer
+	current   CapturerName
+	// pluginManager handles Transform and SinkWrite as separate phases
+	pluginManager PluginManager
+	dlq          *dlq.DLQ
+	monitorDB    *monitor.DB
+	mu           sync.RWMutex
+}
+
+// PluginManager interface for transform and sink write phases
+type PluginManager interface {
+	Transform(ctx context.Context, changes []Change, batchCtx *BatchContext) ([]Sink, error)
+	SinkWrite(ctx context.Context, sinks []Sink, batchCtx *BatchContext) error
 }
 
 // NewRuntime creates a new Runtime with all capturers initialized.
 func NewRuntime(
 	capturers map[CapturerName]Capturer,
-	transformer Transformer,
+	pluginManager PluginManager,
 	dlq *dlq.DLQ,
 	monitorDB *monitor.DB,
 ) *Runtime {
 	return &Runtime{
-		capturers:   capturers,
-		current:     CapturerCDC,
-		transformer: transformer,
-		dlq:         dlq,
-		monitorDB:   monitorDB,
+		capturers:     capturers,
+		current:       CapturerCDC,
+		pluginManager: pluginManager,
+		dlq:           dlq,
+		monitorDB:     monitorDB,
 	}
 }
 
@@ -117,16 +119,24 @@ func (r *Runtime) Run(ctx context.Context) error {
 			// Convert capture.Change to core.Change
 			changes := r.convertChanges(result.Changes)
 
-			// Transformer processing with retry
-			if r.transformer != nil {
-				var transformerErr error
+			// Transform phase with retry (independent timing measurement)
+			var sinks []Sink
+			if r.pluginManager != nil {
+				var transformErr error
 				err := retry.DoWithName(ctx, func() error {
-					transformerErr = r.transformer.Transform(ctx, changes, batchCtx)
-					return transformerErr
+					sinks, transformErr = r.pluginManager.Transform(ctx, changes, batchCtx)
+					return transformErr
 				}, retry.DefaultRetryConfig(), "transform")
 				if err != nil {
-					slog.Error("transformer error", "error", err, "batch_id", batchCtx.BatchID)
-					r.writeToDLQ(changes, transformerErr, "transformer")
+					slog.Error("transform error", "error", err, "batch_id", batchCtx.BatchID)
+					r.writeToDLQ(changes, transformErr, "transform")
+				} else {
+					// SinkWrite phase with independent timing
+					if len(sinks) > 0 {
+						if writeErr := r.pluginManager.SinkWrite(ctx, sinks, batchCtx); writeErr != nil {
+							slog.Error("sink write error", "error", writeErr, "batch_id", batchCtx.BatchID)
+						}
+					}
 				}
 			}
 
