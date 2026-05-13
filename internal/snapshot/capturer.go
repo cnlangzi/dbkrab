@@ -46,7 +46,6 @@ type TableProgress struct {
 	Table       string
 	TotalRows   int64
 	ReadRows    int64
-	Done        bool
 	ReadMs      int64 // Phase A: time spent reading rows from DB
 	BuildMs     int64 // Phase B: time spent building/assembling the batch
 	TransformMs int64 // Phase C: time spent in Transform
@@ -56,7 +55,6 @@ type TableProgress struct {
 // Progress represents the current state of a snapshot operation.
 type Progress struct {
 	TotalTables     int
-	ProcessedTables int
 	TotalRows       int64
 	ReadRows        int64
 	CurrentTable    string
@@ -96,7 +94,6 @@ type SnapshotCapturer struct {
 	currentTable string
 	tableTotals  []int64           // approx total rows per table (sys.partitions)
 	tableRead    []int64           // rows read so far per table
-	tableDone    []bool            // whether each table has been fully read
 	tablePKs     []*PrimaryKeyInfo  // PK info per table (pre-discovered in Restart)
 	lastError    string
 	startTime    time.Time
@@ -143,7 +140,6 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	c.currentTable = ""
 	c.tableTotals = nil
 	c.tableRead = nil
-	c.tableDone = nil
 	c.tablePKs = nil
 	c.tableReadMs = nil
 	c.tableBuildMs = nil
@@ -181,7 +177,6 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	n := len(selectedTables)
 	tableTotals := make([]int64, n)
 	tableRead := make([]int64, n)
-	tableDone := make([]bool, n)
 	tablePKs := make([]*PrimaryKeyInfo, n)
 
 	for i, t := range selectedTables {
@@ -212,7 +207,6 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	c.tx = tx
 	c.tableTotals = tableTotals
 	c.tableRead = tableRead
-	c.tableDone = tableDone
 	c.tablePKs = tablePKs
 	// Initialize Phase A+B timing slices
 	c.tableReadMs = make([]int64, n)
@@ -306,7 +300,6 @@ func (c *SnapshotCapturer) Progress() Progress {
 	defer c.mu.Unlock()
 
 	tables := make([]TableProgress, len(c.tables))
-	processedTables := 0
 	var totalRows, readRows int64
 	for i, t := range c.tables {
 		tp := TableProgress{
@@ -319,12 +312,6 @@ func (c *SnapshotCapturer) Progress() Progress {
 		if i < len(c.tableRead) {
 			tp.ReadRows = c.tableRead[i]
 			readRows += c.tableRead[i]
-		}
-		if i < len(c.tableDone) {
-			tp.Done = c.tableDone[i]
-			if tp.Done {
-				processedTables++
-			}
 		}
 		// Phase A: time spent executing paged query
 		if i < len(c.tableReadMs) {
@@ -346,7 +333,6 @@ func (c *SnapshotCapturer) Progress() Progress {
 
 	return Progress{
 		TotalTables:     len(c.tables),
-		ProcessedTables: processedTables,
 		TotalRows:       totalRows,
 		ReadRows:        readRows,
 		CurrentTable:    c.currentTable,
@@ -388,12 +374,6 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		// Restart hasn't finished DB setup yet — wait for next tick.
 		c.mu.Unlock()
 		return &core.CaptureResult{NextCapturer: core.CapturerSnapshot}
-	}
-
-	// Advance past already-completed tables.
-	for c.tableIndex < len(c.tables) && c.tableDone[c.tableIndex] {
-		c.tableIndex++
-		c.rowOffset = 0
 	}
 
 	// All tables done — commit tx and switch to CDC.
@@ -443,8 +423,7 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	if queryErr != nil {
 		slog.Error("SnapshotCapturer: query failed",
 			"table", c.currentTable, "offset", offset, "error", queryErr)
-		c.lastError = fmt.Sprintf("table %s at offset %d: %v", c.currentTable, offset, queryErr)
-		c.tableDone[tableIdx] = true
+		c.markError(fmt.Sprintf("table %s at offset %d: %v", c.currentTable, offset, queryErr))
 		c.tableIndex++
 		c.rowOffset = 0
 		c.mu.Unlock()
@@ -466,7 +445,6 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		slog.Error("SnapshotCapturer: scan failed",
 			"table", c.currentTable, "error", scanErr)
 		c.lastError = fmt.Sprintf("scan %s: %v", c.currentTable, scanErr)
-		c.tableDone[tableIdx] = true
 		c.tableIndex++
 		c.rowOffset = 0
 		c.mu.Unlock()
@@ -479,7 +457,6 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	readSoFar := c.tableRead[tableIdx]
 
 	if len(batchRows) == 0 || isLastBatch {
-		c.tableDone[tableIdx] = true
 		c.tableIndex++
 		c.rowOffset = 0
 	}
