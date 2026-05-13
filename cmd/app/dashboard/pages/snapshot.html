@@ -54,6 +54,33 @@
         <p id="run-error" class="hidden mt-1 text-sm text-error"></p>
     </div>
 
+    <!-- Phase Timing Cards (shown for both running and completed) -->
+    <div id="panel-timing" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-border">
+        <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4">Phase Timing</h3>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Read</p>
+                <p id="run-read-ms" class="text-sm font-bold text-text font-mono">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Build</p>
+                <p id="run-build-ms" class="text-sm font-bold text-text font-mono">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Transform</p>
+                <p id="run-transform-ms" class="text-sm font-bold text-text font-mono">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Write</p>
+                <p id="run-write-ms" class="text-sm font-bold text-text font-mono">—</p>
+            </div>
+            <div class="p-3 sm:p-4 rounded-xl bg-surfaceHover border border-border">
+                <p class="text-textMuted text-xs sm:text-sm mb-1">Read Rows/s</p>
+                <p id="run-rows-per-sec" class="text-sm font-bold text-text font-mono">—</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Completion Summary Panel -->
     <div id="panel-summary" class="hidden bg-surface rounded-xl shadow-lg p-4 sm:p-6 border border-success/30">
         <h3 class="text-base sm:text-lg font-semibold text-text mb-3 sm:mb-4 flex items-center gap-2">
@@ -266,12 +293,27 @@ function updateElapsed() {
     document.getElementById('run-elapsed').textContent = fmtDuration(secs);
 }
 
-function showRunningPanel() { document.getElementById('panel-running').classList.remove('hidden'); }
-function hideRunningPanel() { document.getElementById('panel-running').classList.add('hidden'); }
-function hideSummaryPanel() { document.getElementById('panel-summary').classList.add('hidden'); }
+function showRunningPanel() {
+    document.getElementById('panel-running').classList.remove('hidden');
+    showTimingPanel();
+}
+function hideRunningPanel() {
+    document.getElementById('panel-running').classList.add('hidden');
+    document.getElementById('panel-timing').classList.add('hidden');
+}
+
+function hideSummaryPanel() {
+    document.getElementById('panel-summary').classList.add('hidden');
+    document.getElementById('panel-timing').classList.add('hidden');
+}
+
+function showTimingPanel() {
+    document.getElementById('panel-timing').classList.remove('hidden');
+}
 
 function showSummaryPanel(data) {
     document.getElementById('panel-summary').classList.remove('hidden');
+    showTimingPanel();
     document.getElementById('sum-tables').textContent = (data.processed || 0) + ' / ' + (data.total || 0);
     document.getElementById('sum-rows').textContent = fmtNum(data.read_rows || 0);
     if (data.start_time) {
@@ -302,6 +344,12 @@ function updateRunningUI(data) {
     document.getElementById('run-progress-bar').style.width = pct + '%';
     document.getElementById('run-pct').textContent = pct + '%';
 
+    document.getElementById('run-read-ms').textContent = fmtMs(data.read_ms);
+    document.getElementById('run-build-ms').textContent = fmtMs(data.build_ms);
+    document.getElementById('run-transform-ms').textContent = fmtMs(data.transform_ms);
+    document.getElementById('run-write-ms').textContent = fmtMs(data.write_ms);
+    document.getElementById('run-rows-per-sec').textContent = data.read_rows_per_sec != null ? data.read_rows_per_sec.toFixed(1) + ' r/s' : '—';
+
     var errEl = document.getElementById('run-error');
     if (data.error) { errEl.textContent = 'Error: ' + data.error; errEl.classList.remove('hidden'); }
     else { errEl.classList.add('hidden'); }
@@ -320,28 +368,33 @@ function updateTableProgress(tables, state, currentTable) {
     document.getElementById('tables-list').innerHTML = tables.map(function(t) {
         var hasTotal = t.total_rows > 0;
         var pct = hasTotal ? Math.min(100, Math.round((t.read_rows / t.total_rows) * 100)) : (t.done ? 100 : 0);
+        var isActive = !t.done && t.table === currentTable;
+
+        var icon, rowBg, barColor;
+        if (t.done) {
+            icon = checkIcon; rowBg = 'bg-success/5 border-success/20'; barColor = 'bg-success';
+        } else if (isActive) {
+            icon = spinIcon; rowBg = 'bg-primary/5 border-primary/20'; barColor = 'bg-primary';
+        } else {
+            icon = dbIcon; rowBg = 'bg-surfaceHover border-border'; barColor = 'bg-border';
+        }
+
         var rowsText = hasTotal
             ? fmtNum(t.read_rows) + ' / ' + fmtNum(t.total_rows)
             : (t.done ? 'Done' : (state === 'running' ? 'Waiting...' : '—'));
-        var isActive = !t.done && t.table === currentTable;
 
-        var rowBg, icon, barColor;
-        if (t.done) {
-            rowBg = 'bg-success/5 border-success/20'; barColor = 'bg-success'; icon = checkIcon;
-        } else if (isActive) {
-            rowBg = 'bg-primary/5 border-primary/20'; barColor = 'bg-primary'; icon = spinIcon;
-        } else {
-            rowBg = 'bg-surfaceHover border-border'; barColor = 'bg-border'; icon = dbIcon;
+        var timingLabel = '<span class="flex flex-wrap items-center gap-x-2 text-xs text-textMuted font-mono flex-shrink-0"><span>R:' + fmtMs(t.read_ms) + '</span><span>B:' + fmtMs(t.build_ms) + '</span><span>T:' + fmtMs(t.transform_ms) + '</span><span>W:' + fmtMs(t.write_ms) + '</span></span>';
+
+        var miniBar = '';
+        if (hasTotal) {
+            miniBar = '<div class="w-24 bg-border rounded-full h-1.5 flex-shrink-0"><div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width:' + pct + '%"></div></div>';
         }
-
-        var miniBar = hasTotal
-            ? '<div class="w-24 bg-border rounded-full h-1.5 flex-shrink-0"><div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width:' + pct + '%"></div></div>'
-            : '';
 
         return '<div class="flex items-center gap-3 p-3 rounded-lg ' + rowBg + ' border transition-colors duration-200">'
             + icon
             + '<span class="text-sm font-medium text-text flex-1 truncate">' + t.table + '</span>'
             + '<span class="text-xs text-textMuted whitespace-nowrap flex-shrink-0">' + rowsText + '</span>'
+            + timingLabel
             + miniBar
             + '</div>';
     }).join('');
@@ -351,6 +404,12 @@ function setCheckboxesDisabled(disabled) {
     document.querySelectorAll('.table-checkbox').forEach(function(cb) { cb.disabled = disabled; });
     var sa = document.getElementById('select-all-checkbox');
     if (sa) sa.disabled = disabled;
+}
+
+function fmtMs(ms) {
+    if (!ms) return '—';
+    if (ms < 1000) return ms + 'ms';
+    return (ms / 1000).toFixed(1) + 's';
 }
 
 function fmtNum(n) { return (n || 0).toLocaleString(); }
