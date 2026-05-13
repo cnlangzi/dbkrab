@@ -340,7 +340,7 @@ function updateRunningUI(data) {
     document.getElementById('run-total-rows').textContent = fmtNum(totalRows);
     document.getElementById('run-current-table').textContent = data.current_table || '—';
 
-    var pct = totalRows > 0 ? Math.round((readRows / totalRows) * 100) : 0;
+    var pct = totalRows > 0 ? Math.min(100, Math.round((readRows / totalRows) * 100)) : 0;
     document.getElementById('run-progress-bar').style.width = pct + '%';
     document.getElementById('run-pct').textContent = pct + '%';
 
@@ -348,7 +348,7 @@ function updateRunningUI(data) {
     document.getElementById('run-build-ms').textContent = fmtMs(data.build_ms);
     document.getElementById('run-transform-ms').textContent = fmtMs(data.transform_ms);
     document.getElementById('run-write-ms').textContent = fmtMs(data.write_ms);
-    document.getElementById('run-rows-per-sec').textContent = data.read_rows_per_sec ? data.read_rows_per_sec.toFixed(1) + ' r/s' : '—';
+    document.getElementById('run-rows-per-sec').textContent = data.read_rows_per_sec != null ? data.read_rows_per_sec.toFixed(1) + ' r/s' : '—';
 
     var errEl = document.getElementById('run-error');
     if (data.error) { errEl.textContent = 'Error: ' + data.error; errEl.classList.remove('hidden'); }
@@ -368,25 +368,27 @@ function updateTableProgress(tables, state, currentTable) {
     document.getElementById('tables-list').innerHTML = tables.map(function(t) {
         var hasTotal = t.total_rows > 0;
         var pct = hasTotal ? Math.min(100, Math.round((t.read_rows / t.total_rows) * 100)) : (t.done ? 100 : 0);
+        var isActive = !t.done && t.table === currentTable;
+
+        var icon, rowBg, barColor;
+        if (t.done) {
+            icon = checkIcon; rowBg = 'bg-success/5 border-success/20'; barColor = 'bg-success';
+        } else if (isActive) {
+            icon = spinIcon; rowBg = 'bg-primary/5 border-primary/20'; barColor = 'bg-primary';
+        } else {
+            icon = dbIcon; rowBg = 'bg-surfaceHover border-border'; barColor = 'bg-border';
+        }
+
         var rowsText = hasTotal
             ? fmtNum(t.read_rows) + ' / ' + fmtNum(t.total_rows)
             : (t.done ? 'Done' : (state === 'running' ? 'Waiting...' : '—'));
-        var isActive = !t.done && t.table === currentTable;
 
-        var rowBg, icon, barColor;
-        if (t.done) {
-            rowBg = 'bg-success/5 border-success/20'; barColor = 'bg-success'; icon = checkIcon;
-        } else if (isActive) {
-            rowBg = 'bg-primary/5 border-primary/20'; barColor = 'bg-primary'; icon = spinIcon;
-        } else {
-            rowBg = 'bg-surfaceHover border-border'; barColor = 'bg-border'; icon = dbIcon;
+        var timingLabel = '<span class="flex flex-wrap items-center gap-x-2 text-xs text-textMuted font-mono flex-shrink-0"><span>R:' + fmtMs(t.read_ms) + '</span><span>B:' + fmtMs(t.build_ms) + '</span><span>T:' + fmtMs(t.transform_ms) + '</span><span>W:' + fmtMs(t.write_ms) + '</span></span>';
+
+        var miniBar = '';
+        if (hasTotal) {
+            miniBar = '<div class="w-24 bg-border rounded-full h-1.5 flex-shrink-0"><div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width:' + pct + '%"></div></div>';
         }
-
-        var timingLabel = '<span class="text-xs text-textMuted font-mono flex-shrink-0">R:' + fmtMs(t.read_ms) + ' B:' + fmtMs(t.build_ms) + ' T:' + fmtMs(t.transform_ms) + ' W:' + fmtMs(t.write_ms) + '</span>';
-
-        var miniBar = hasTotal
-            ? '<div class="w-24 bg-border rounded-full h-1.5 flex-shrink-0"><div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width:' + pct + '%"></div></div>'
-            : '';
 
         return '<div class="flex items-center gap-3 p-3 rounded-lg ' + rowBg + ' border transition-colors duration-200">'
             + icon
