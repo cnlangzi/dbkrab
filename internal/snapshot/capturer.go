@@ -517,11 +517,7 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		Changes:      changes,
 		BatchID:      batchCtx.BatchID,
 		NextCapturer: core.CapturerSnapshot,
-	}
-	// Signal table completion to Runtime so it can finalize C+D timing
-	if isLastBatch || len(batchRows) == 0 {
-		result.TableDone = true
-		result.Table = table.FullName()
+		Table:        table.FullName(),
 	}
 	return result
 }

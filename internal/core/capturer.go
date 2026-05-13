@@ -22,8 +22,7 @@ type CaptureResult struct {
 	Changes      []CaptureChange
 	BatchID      string         // Unique identifier for this fetch batch
 	NextCapturer CapturerName   // Which capturer to use for next fetch
-	TableDone    bool           // True if this is the last batch for the current table
-	Table        string         // Table name for the last batch of each table
+	Table        string         // Table name for timing accumulation
 }
 
 // Capturer is the interface for data ingestion sources.
