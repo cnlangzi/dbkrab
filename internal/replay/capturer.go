@@ -164,6 +164,9 @@ func (c *ReplayCapturer) Stop() {
 	close(c.stopCh)
 }
 
+// RecordTiming is a no-op for Replay capturer (not used in snapshot timing).
+func (c *ReplayCapturer) RecordTiming(table string, transformMs, writeMs int64) {}
+
 // Restart resets all state so the capturer can be used for a fresh replay run.
 // It is safe to call even if the previous run completed or was stopped.
 func (c *ReplayCapturer) Restart() {

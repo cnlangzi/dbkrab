@@ -37,10 +37,8 @@ type Capturer interface {
 	// Stop signals the capturer to stop fetching.
 	// Called by Runtime when the overall system is shutting down.
 	Stop()
-}
 
-// SnapshotFinalizer is implemented by snapshot capturers that support
-// per-table timing finalization for phases C (Transform) and D (SinkWrite).
-type SnapshotFinalizer interface {
-	FinalizeTable(table string, transformMs, writeMs int64)
+	// RecordTiming records per-table Phase C (transform) and Phase D (write) timing.
+	// SnapshotCapturer accumulates timing across batches; CDC/Replay are no-op.
+	RecordTiming(table string, transformMs, writeMs int64)
 }
