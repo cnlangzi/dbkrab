@@ -1698,7 +1698,6 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 			"table":      tp.Table,
 			"total_rows": tp.TotalRows,
 			"read_rows":  tp.ReadRows,
-			"done":       tp.Done,
 		}
 	}
 
@@ -1714,7 +1713,6 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 		"success":       true,
 		"state":         state,
 		"total":         progress.TotalTables,
-		"processed":     progress.ProcessedTables,
 		"total_rows":    progress.TotalRows,
 		"read_rows":     progress.ReadRows,
 		"current_table": progress.CurrentTable,

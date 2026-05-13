@@ -306,6 +306,9 @@ func (c *ChangeCapturer) Stop() {
 	close(c.stopCh)
 }
 
+// RecordTiming is a no-op for CDC capturer (not used in snapshot timing).
+func (c *ChangeCapturer) RecordTiming(table string, transformMs, writeMs int64) {}
+
 // Status returns the current poller status from the CDC capturer.
 func (c *ChangeCapturer) Status() map[string]interface{} {
 	state := map[string]interface{}{

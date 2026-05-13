@@ -22,6 +22,7 @@ type CaptureResult struct {
 	Changes      []CaptureChange
 	BatchID      string         // Unique identifier for this fetch batch
 	NextCapturer CapturerName   // Which capturer to use for next fetch
+	Table        string         // Table name for timing accumulation
 }
 
 // Capturer is the interface for data ingestion sources.
@@ -35,4 +36,8 @@ type Capturer interface {
 	// Stop signals the capturer to stop fetching.
 	// Called by Runtime when the overall system is shutting down.
 	Stop()
+
+	// RecordTiming records per-table Phase C (transform) and Phase D (write) timing.
+	// SnapshotCapturer accumulates timing across batches; CDC/Replay are no-op.
+	RecordTiming(table string, transformMs, writeMs int64)
 }
