@@ -151,8 +151,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 				}
 			}
 
-			// Signal table completion to SnapshotCapturer for C+D timing
-			if result.TableDone && result.Table != "" {
+			// Accumulate C+D timing for every batch
+			if result.Table != "" {
 				if finalizer, ok := r.capturers[CapturerSnapshot].(SnapshotFinalizer); ok {
 					finalizer.FinalizeTable(result.Table, batchTransformMs, batchWriteMs)
 				}

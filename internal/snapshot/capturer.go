@@ -282,18 +282,18 @@ func (c *SnapshotCapturer) Stop() {
 	}
 }
 
-// FinalizeTable records the Phase C (transform) and Phase D (write) timing for a table.
-// Called by Runtime when CaptureResult.TableDone is true.
+// FinalizeTable accumulates Phase C (transform) and Phase D (write) timing for a table.
+// Called by Runtime on every batch to accumulate per-table timing across all batches.
 func (c *SnapshotCapturer) FinalizeTable(table string, transformMs, writeMs int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i, t := range c.tables {
 		if t.FullName() == table {
 			if i < len(c.tableTransformMs) {
-				c.tableTransformMs[i] = transformMs
+				c.tableTransformMs[i] += transformMs
 			}
 			if i < len(c.tableWriteMs) {
-				c.tableWriteMs[i] = writeMs
+				c.tableWriteMs[i] += writeMs
 			}
 			return
 		}
