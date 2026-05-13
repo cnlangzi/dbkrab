@@ -139,7 +139,8 @@ var MAX_FAILURES = 5;
 var staticTables = [];
 var snapshotStartTime = null;
 
-// Init
+// Init — render Start Snapshot immediately so the header is never empty while status loads.
+renderButton('idle');
 loadTables();
 checkInitialStatus();
 
