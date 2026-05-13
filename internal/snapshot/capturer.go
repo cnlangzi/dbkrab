@@ -43,10 +43,14 @@ func GetCDCTables(cfg *config.Config) []CDCTable {
 
 // TableProgress holds per-table snapshot progress.
 type TableProgress struct {
-	Table     string
-	TotalRows int64
-	ReadRows  int64
-	Done      bool
+	Table       string
+	TotalRows   int64
+	ReadRows    int64
+	Done        bool
+	ReadMs      int64 // Phase A: time spent reading rows from DB
+	BuildMs     int64 // Phase B: time spent building/assembling the batch
+	TransformMs int64 // Phase C: time spent in Transform
+	WriteMs     int64 // Phase D: time spent in SinkWrite
 }
 
 // Progress represents the current state of a snapshot operation.
@@ -93,10 +97,18 @@ type SnapshotCapturer struct {
 	tableTotals  []int64           // approx total rows per table (sys.partitions)
 	tableRead    []int64           // rows read so far per table
 	tableDone    []bool            // whether each table has been fully read
-	tablePKs     []*PrimaryKeyInfo // PK info per table (pre-discovered in Restart)
+	tablePKs     []*PrimaryKeyInfo  // PK info per table (pre-discovered in Restart)
 	lastError    string
 	startTime    time.Time
 	endTime      time.Time
+
+	// Phase A+B timing per table (milliseconds)
+	tableReadMs  []int64 // Phase A: time spent executing paged query
+	tableBuildMs []int64 // Phase B: time spent scanning rows and building batch
+
+	// Phase C+D timing per table (set by FinalizeTable called from Runtime)
+	tableTransformMs []int64 // Phase C: time spent in Transform per table
+	tableWriteMs     []int64 // Phase D: time spent in SinkWrite per table
 }
 
 // NewSnapshotCapturer creates a new SnapshotCapturer.
@@ -133,6 +145,10 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	c.tableRead = nil
 	c.tableDone = nil
 	c.tablePKs = nil
+	c.tableReadMs = nil
+	c.tableBuildMs = nil
+	c.tableTransformMs = nil
+	c.tableWriteMs = nil
 	c.lastError = ""
 	c.mu.Unlock()
 
@@ -198,6 +214,11 @@ func (c *SnapshotCapturer) Restart(ctx context.Context, selectedTables []CDCTabl
 	c.tableRead = tableRead
 	c.tableDone = tableDone
 	c.tablePKs = tablePKs
+	// Initialize Phase A+B timing slices
+	c.tableReadMs = make([]int64, n)
+	c.tableBuildMs = make([]int64, n)
+	c.tableTransformMs = make([]int64, n)
+	c.tableWriteMs = make([]int64, n)
 	c.tables = selectedTables // use the selected tables for this run
 	c.startTime = time.Now()
 	c.endTime = time.Time{}
@@ -261,6 +282,24 @@ func (c *SnapshotCapturer) Stop() {
 	}
 }
 
+// FinalizeTable records the Phase C (transform) and Phase D (write) timing for a table.
+// Called by Runtime when CaptureResult.TableDone is true.
+func (c *SnapshotCapturer) FinalizeTable(table string, transformMs, writeMs int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, t := range c.tables {
+		if t.FullName() == table {
+			if i < len(c.tableTransformMs) {
+				c.tableTransformMs[i] = transformMs
+			}
+			if i < len(c.tableWriteMs) {
+				c.tableWriteMs[i] = writeMs
+			}
+			return
+		}
+	}
+}
+
 // Progress returns the current snapshot progress for the API/dashboard.
 func (c *SnapshotCapturer) Progress() Progress {
 	c.mu.Lock()
@@ -286,6 +325,21 @@ func (c *SnapshotCapturer) Progress() Progress {
 			if tp.Done {
 				processedTables++
 			}
+		}
+		// Phase A: time spent executing paged query
+		if i < len(c.tableReadMs) {
+			tp.ReadMs = c.tableReadMs[i]
+		}
+		// Phase B: time spent scanning rows and building batch
+		if i < len(c.tableBuildMs) {
+			tp.BuildMs = c.tableBuildMs[i]
+		}
+		// Phase C+D: set by FinalizeTable called from Runtime
+		if i < len(c.tableTransformMs) {
+			tp.TransformMs = c.tableTransformMs[i]
+		}
+		if i < len(c.tableWriteMs) {
+			tp.WriteMs = c.tableWriteMs[i]
 		}
 		tables[i] = tp
 	}
@@ -373,7 +427,10 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	slog.Debug("SnapshotCapturer: fetch batch",
 		"table", c.currentTable, "offset", offset, "batch_size", batchSize)
 
+	// Phase A: time spent executing paged query
+	fetchStart := time.Now()
 	rows, queryErr := tx.QueryContext(ctx, query)
+	fetchMs := time.Since(fetchStart).Milliseconds()
 
 	c.mu.Lock()
 	if c.stopped {
@@ -395,7 +452,10 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	}
 	c.mu.Unlock()
 
+	// Phase B: time spent scanning rows and building batch
+	buildStart := time.Now()
 	batchRows, scanErr := c.querier.ScanBatch(rows)
+	buildMs := time.Since(buildStart).Milliseconds()
 
 	c.mu.Lock()
 	if c.stopped {
@@ -424,6 +484,12 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 		c.rowOffset = 0
 	}
 
+	// Accumulate Phase A+B timing for this table
+	if tableIdx < len(c.tableReadMs) {
+		c.tableReadMs[tableIdx] += fetchMs
+		c.tableBuildMs[tableIdx] += buildMs
+	}
+
 	c.mu.Unlock()
 
 	if isLastBatch || len(batchRows) == 0 {
@@ -447,11 +513,17 @@ func (c *SnapshotCapturer) Fetch(ctx context.Context) *core.CaptureResult {
 	}
 
 	batchCtx := core.NewBatchContext()
-	return &core.CaptureResult{
+	result := &core.CaptureResult{
 		Changes:      changes,
 		BatchID:      batchCtx.BatchID,
 		NextCapturer: core.CapturerSnapshot,
 	}
+	// Signal table completion to Runtime so it can finalize C+D timing
+	if isLastBatch || len(batchRows) == 0 {
+		result.TableDone = true
+		result.Table = table.FullName()
+	}
+	return result
 }
 
 // Ensure SnapshotCapturer satisfies the Capturer interface.

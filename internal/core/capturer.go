@@ -22,6 +22,8 @@ type CaptureResult struct {
 	Changes      []CaptureChange
 	BatchID      string         // Unique identifier for this fetch batch
 	NextCapturer CapturerName   // Which capturer to use for next fetch
+	TableDone    bool           // True if this is the last batch for the current table
+	Table        string         // Table name for the last batch of each table
 }
 
 // Capturer is the interface for data ingestion sources.
@@ -35,4 +37,10 @@ type Capturer interface {
 	// Stop signals the capturer to stop fetching.
 	// Called by Runtime when the overall system is shutting down.
 	Stop()
+}
+
+// SnapshotFinalizer is implemented by snapshot capturers that support
+// per-table timing finalization for phases C (Transform) and D (SinkWrite).
+type SnapshotFinalizer interface {
+	FinalizeTable(table string, transformMs, writeMs int64)
 }

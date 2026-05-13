@@ -119,14 +119,19 @@ func (r *Runtime) Run(ctx context.Context) error {
 			// Convert capture.Change to core.Change
 			changes := r.convertChanges(result.Changes)
 
+			// Track per-batch timing for C (Transform) and D (SinkWrite)
+			var batchTransformMs, batchWriteMs int64
+
 			// Transform phase with retry (independent timing measurement)
 			var sinks []Sink
 			if r.pluginManager != nil {
 				var transformErr error
+				transformStart := time.Now()
 				err := retry.DoWithName(ctx, func() error {
 					sinks, transformErr = r.pluginManager.Transform(ctx, changes, batchCtx)
 					return transformErr
 				}, retry.DefaultRetryConfig(), "transform")
+				batchTransformMs = time.Since(transformStart).Milliseconds()
 				if err != nil {
 					finalErr := transformErr
 					if finalErr == nil {
@@ -137,10 +142,19 @@ func (r *Runtime) Run(ctx context.Context) error {
 				} else {
 					// SinkWrite phase (error logged only, retry handled internally)
 					if len(sinks) > 0 {
+						writeStart := time.Now()
 						if writeErr := r.pluginManager.SinkWrite(ctx, sinks, batchCtx); writeErr != nil {
 							slog.Error("sink write error", "error", writeErr, "batch_id", batchCtx.BatchID)
 						}
+						batchWriteMs = time.Since(writeStart).Milliseconds()
 					}
+				}
+			}
+
+			// Signal table completion to SnapshotCapturer for C+D timing
+			if result.TableDone && result.Table != "" {
+				if finalizer, ok := r.capturers[CapturerSnapshot].(SnapshotFinalizer); ok {
+					finalizer.FinalizeTable(result.Table, batchTransformMs, batchWriteMs)
 				}
 			}
 
