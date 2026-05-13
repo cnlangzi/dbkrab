@@ -79,6 +79,8 @@
                 <p id="run-rows-per-sec" class="text-sm font-bold text-text font-mono">—</p>
             </div>
         </div>
+        <!-- Per-table breakdown (always visible while timing panel is shown) -->
+        <div id="timing-breakdown" class="mt-4 overflow-x-auto"></div>
     </div>
 
     <!-- Completion Summary Panel -->
@@ -137,7 +139,8 @@ var MAX_FAILURES = 5;
 var staticTables = [];
 var snapshotStartTime = null;
 
-// Init
+// Init — render Start Snapshot immediately so the header is never empty while status loads.
+renderButton('idle');
 loadTables();
 checkInitialStatus();
 
@@ -299,7 +302,6 @@ function showRunningPanel() {
 }
 function hideRunningPanel() {
     document.getElementById('panel-running').classList.add('hidden');
-    document.getElementById('panel-timing').classList.add('hidden');
 }
 
 function hideSummaryPanel() {
@@ -314,6 +316,14 @@ function showTimingPanel() {
 function showSummaryPanel(data) {
     document.getElementById('panel-summary').classList.remove('hidden');
     showTimingPanel();
+    if (data.tables && data.tables.length > 0) {
+        document.getElementById('run-read-ms').textContent = fmtMs(data.read_ms);
+        document.getElementById('run-build-ms').textContent = fmtMs(data.build_ms);
+        document.getElementById('run-transform-ms').textContent = fmtMs(data.transform_ms);
+        document.getElementById('run-write-ms').textContent = fmtMs(data.write_ms);
+        document.getElementById('run-rows-per-sec').textContent = data.read_rows_per_sec != null ? data.read_rows_per_sec.toFixed(1) + ' r/s' : '—';
+        renderTimingBreakdown(data.tables, data.state || 'completed');
+    }
     document.getElementById('sum-tables').textContent = (data.processed || 0) + ' / ' + (data.total || 0);
     document.getElementById('sum-rows').textContent = fmtNum(data.read_rows || 0);
     if (data.start_time) {
@@ -356,6 +366,7 @@ function updateRunningUI(data) {
 
     if (data.tables && data.tables.length > 0) {
         updateTableProgress(data.tables, data.state, data.current_table);
+        renderTimingBreakdown(data.tables, data.state);
     }
 }
 
@@ -404,6 +415,43 @@ function setCheckboxesDisabled(disabled) {
     document.querySelectorAll('.table-checkbox').forEach(function(cb) { cb.disabled = disabled; });
     var sa = document.getElementById('select-all-checkbox');
     if (sa) sa.disabled = disabled;
+}
+
+function renderTimingBreakdown(tables, state) {
+    var el = document.getElementById('timing-breakdown');
+    if (!el || !tables || tables.length === 0) return;
+    var checkIcon = '<svg class="w-3.5 h-3.5 text-success inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+    var spinIcon  = '<svg class="w-3.5 h-3.5 text-primary animate-spin inline-block mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+    var waitIcon  = '<svg class="w-3.5 h-3.5 text-textMuted/40 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>';
+    var rows = tables.map(function(t) {
+        var isDone   = !!t.done;
+        var isActive = !isDone && state === 'running' && (t.read_ms > 0 || t.build_ms > 0);
+        var icon = isDone ? checkIcon : (isActive ? spinIcon : waitIcon);
+        var nameColor = isDone ? 'text-text' : (isActive ? 'text-primary' : 'text-textMuted');
+        var rowBg = isDone ? '' : (isActive ? 'bg-primary/5' : '');
+        var total = (t.read_ms || 0) + (t.build_ms || 0) + (t.transform_ms || 0) + (t.write_ms || 0);
+        var totalCell = total > 0
+            ? '<span class="font-semibold ' + (isDone ? 'text-text' : 'text-primary') + '">' + fmtMs(total) + '</span>'
+            : '<span class="text-textMuted/40">—</span>';
+        return '<tr class="border-b border-border/40 last:border-0 ' + rowBg + '">'
+            + '<td class="py-2 pr-4 whitespace-nowrap text-sm ' + nameColor + ' font-medium">' + icon + t.table + '</td>'
+            + '<td class="py-2 px-3 text-center font-mono text-xs">' + fmtMs(t.read_ms) + '</td>'
+            + '<td class="py-2 px-3 text-center font-mono text-xs">' + fmtMs(t.build_ms) + '</td>'
+            + '<td class="py-2 px-3 text-center font-mono text-xs">' + fmtMs(t.transform_ms) + '</td>'
+            + '<td class="py-2 px-3 text-center font-mono text-xs">' + fmtMs(t.write_ms) + '</td>'
+            + '<td class="py-2 pl-3 text-right font-mono text-xs">' + totalCell + '</td>'
+            + '</tr>';
+    });
+    el.innerHTML = '<table class="w-full text-sm border-collapse">'
+        + '<thead><tr class="border-b border-border">'
+        + '<th class="pb-2 pr-4 text-left text-xs font-semibold text-textMuted uppercase tracking-wide">Table</th>'
+        + '<th class="pb-2 px-3 text-center text-xs font-semibold text-textMuted uppercase tracking-wide" title="Phase A: SQL query time">A Read</th>'
+        + '<th class="pb-2 px-3 text-center text-xs font-semibold text-textMuted uppercase tracking-wide" title="Phase B: Row assembly time">B Build</th>'
+        + '<th class="pb-2 px-3 text-center text-xs font-semibold text-textMuted uppercase tracking-wide" title="Phase C: Transform/skills time">C Transform</th>'
+        + '<th class="pb-2 px-3 text-center text-xs font-semibold text-textMuted uppercase tracking-wide" title="Phase D: Sink write time">D Write</th>'
+        + '<th class="pb-2 pl-3 text-right text-xs font-semibold text-textMuted uppercase tracking-wide">Total</th>'
+        + '</tr></thead>'
+        + '<tbody>' + rows.join('') + '</tbody></table>';
 }
 
 function fmtMs(ms) {

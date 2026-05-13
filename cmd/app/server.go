@@ -1698,6 +1698,7 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 			"table":        tp.Table,
 			"total_rows":   tp.TotalRows,
 			"read_rows":    tp.ReadRows,
+			"done":         tp.Done,
 			"read_ms":      tp.ReadMs,
 			"build_ms":     tp.BuildMs,
 			"transform_ms": tp.TransformMs,
