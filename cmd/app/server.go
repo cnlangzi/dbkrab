@@ -1695,10 +1695,27 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 	tables := make([]map[string]interface{}, len(progress.Tables))
 	for i, tp := range progress.Tables {
 		tables[i] = map[string]interface{}{
-			"table":      tp.Table,
-			"total_rows": tp.TotalRows,
-			"read_rows":  tp.ReadRows,
+			"table":        tp.Table,
+			"total_rows":   tp.TotalRows,
+			"read_rows":    tp.ReadRows,
+			"read_ms":      tp.ReadMs,
+			"build_ms":     tp.BuildMs,
+			"transform_ms": tp.TransformMs,
+			"write_ms":     tp.WriteMs,
 		}
+	}
+
+	// Accumulate global timing totals.
+	var acc struct{ read, build, transform, write int64 }
+	for _, tp := range progress.Tables {
+		acc.read += tp.ReadMs
+		acc.build += tp.BuildMs
+		acc.transform += tp.TransformMs
+		acc.write += tp.WriteMs
+	}
+	readRowsPerSec := float64(0)
+	if acc.read > 0 {
+		readRowsPerSec = float64(progress.ReadRows) * 1000 / float64(acc.read)
 	}
 
 	var startTimeStr, endTimeStr string
@@ -1710,18 +1727,23 @@ func (s *Server) handleSnapshotStatus(c *xun.Context) error {
 	}
 
 	return c.View(map[string]any{
-		"success":       true,
-		"state":         state,
-		"total":         progress.TotalTables,
-		"total_rows":    progress.TotalRows,
-		"read_rows":     progress.ReadRows,
-		"current_table": progress.CurrentTable,
-		"tables":        tables,
-		"started":       progress.Started,
-		"completed":     progress.Completed,
-		"error":         progress.Error,
-		"start_time":    startTimeStr,
-		"end_time":      endTimeStr,
+		"success":          true,
+		"state":            state,
+		"total":            progress.TotalTables,
+		"total_rows":       progress.TotalRows,
+		"read_rows":        progress.ReadRows,
+		"current_table":    progress.CurrentTable,
+		"tables":           tables,
+		"started":          progress.Started,
+		"completed":        progress.Completed,
+		"error":            progress.Error,
+		"start_time":       startTimeStr,
+		"end_time":         endTimeStr,
+		"read_ms":          acc.read,
+		"build_ms":         acc.build,
+		"transform_ms":     acc.transform,
+		"write_ms":         acc.write,
+		"read_rows_per_sec": readRowsPerSec,
 	})
 }
 
