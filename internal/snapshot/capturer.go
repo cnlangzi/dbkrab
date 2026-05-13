@@ -46,6 +46,7 @@ type TableProgress struct {
 	Table       string
 	TotalRows   int64
 	ReadRows    int64
+	Done        bool  // true when all rows for this table have been read
 	ReadMs      int64 // Phase A: time spent reading rows from DB
 	BuildMs     int64 // Phase B: time spent building/assembling the batch
 	TransformMs int64 // Phase C: time spent in Transform
@@ -304,6 +305,7 @@ func (c *SnapshotCapturer) Progress() Progress {
 	for i, t := range c.tables {
 		tp := TableProgress{
 			Table: t.FullName(),
+			Done:  c.completed || i < c.tableIndex,
 		}
 		if i < len(c.tableTotals) {
 			tp.TotalRows = c.tableTotals[i]
